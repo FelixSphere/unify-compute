@@ -13,7 +13,14 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  icons: { icon: [{ url: '/unifyai-mark.png', type: 'image/png' }], apple: '/unifyai-mark.png' },
+  icons: {
+    icon: [
+      { url: '/favicon.ico?v=2', sizes: '16x16 32x32 48x48', type: 'image/x-icon' },
+      { url: '/favicon-32-v2.png', sizes: '32x32', type: 'image/png' },
+    ],
+    shortcut: '/favicon.ico?v=2',
+    apple: [{ url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
+  },
   title: 'unifyAI — On-demand inference & GPU compute',
   description: 'Compute beyond chat. On-demand GPU compute for batch processing, embeddings, document pipelines, and fine-tuning, with consumption-based billing.',
 };
