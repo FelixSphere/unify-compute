@@ -8,6 +8,15 @@ data "aws_ssm_parameter" "al2023_arm64" {
 
 locals {
   ami_id = var.ami_id != "" ? var.ami_id : data.aws_ssm_parameter.al2023_arm64.value
+
+  # One prefix for the parameter names and the IAM policy that reads them.
+  # Renaming the stack without moving the parameters (or vice versa) used to
+  # fail only at boot, as AccessDenied inside user-data.
+  ssm_prefix            = "/${var.name}"
+  ssm_postgres_password = coalesce(var.ssm_postgres_password, "${local.ssm_prefix}/postgres_password")
+  ssm_redis_password    = coalesce(var.ssm_redis_password, "${local.ssm_prefix}/redis_password")
+  ssm_session_secret    = coalesce(var.ssm_session_secret, "${local.ssm_prefix}/session_secret")
+  ssm_bridge_secret     = coalesce(var.ssm_bridge_secret, "${local.ssm_prefix}/bridge_secret")
 }
 
 data "aws_iam_policy_document" "assume" {
@@ -35,7 +44,7 @@ data "aws_caller_identity" "current" {}
 data "aws_iam_policy_document" "secrets" {
   statement {
     actions   = ["ssm:GetParameter", "ssm:GetParameters"]
-    resources = ["arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter${var.name == "" ? "" : "/${var.name}"}/*"]
+    resources = ["arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter${local.ssm_prefix}/*"]
   }
 
   statement {
@@ -61,6 +70,9 @@ resource "aws_iam_instance_profile" "instance" {
 }
 
 resource "aws_ebs_volume" "data" {
+  # The AZ comes from the availability_zones data source ordering. If that
+  # ordering ever changes, subnet[0] moves AZ and this volume would have to
+  # move with it; prevent_destroy turns that plan into an error on purpose.
   availability_zone = aws_subnet.public[0].availability_zone
   size              = var.data_volume_gb
   type              = "gp3"
@@ -96,10 +108,10 @@ resource "aws_instance" "this" {
     console_image         = var.console_image
     compute_api_image     = var.compute_api_image
     console_domain        = var.console_domain
-    ssm_postgres_password = var.ssm_postgres_password
-    ssm_redis_password    = var.ssm_redis_password
-    ssm_session_secret    = var.ssm_session_secret
-    ssm_bridge_secret     = var.ssm_bridge_secret
+    ssm_postgres_password = local.ssm_postgres_password
+    ssm_redis_password    = local.ssm_redis_password
+    ssm_session_secret    = local.ssm_session_secret
+    ssm_bridge_secret     = local.ssm_bridge_secret
   })
 
   root_block_device {
@@ -116,6 +128,9 @@ resource "aws_instance" "this" {
 }
 
 resource "aws_volume_attachment" "data" {
+  # Instance replacement (AMI drift, any user_data edit) destroys this first,
+  # which detaches a mounted XFS volume from a live instance and can hang.
+  # Stop unify-compute.service over SSM before applying a replacement.
   device_name = "/dev/sdf"
   volume_id   = aws_ebs_volume.data.id
   instance_id = aws_instance.this.id

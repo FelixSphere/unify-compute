@@ -83,22 +83,27 @@ variable "compute_api_image" {
 # SSM SecureString parameter names. Created out of band with
 # `aws ssm put-parameter --type SecureString`, never as Terraform resources:
 # aws_ssm_parameter would write the values into this local state file.
+#
+# Null means "/<var.name>/<key>" (see locals in instance.tf). The IAM read
+# policy is scoped to that same prefix, so a stack that renames `name` keeps
+# its parameter names and its permissions in step. Override only if the
+# parameters live somewhere else; then widen the policy to match.
 variable "ssm_postgres_password" {
   type    = string
-  default = "/unify-compute-staging/postgres_password"
+  default = null
 }
 
 variable "ssm_redis_password" {
   type    = string
-  default = "/unify-compute-staging/redis_password"
+  default = null
 }
 
 variable "ssm_session_secret" {
   type    = string
-  default = "/unify-compute-staging/session_secret"
+  default = null
 }
 
 variable "ssm_bridge_secret" {
   type    = string
-  default = "/unify-compute-staging/bridge_secret"
+  default = null
 }
