@@ -75,7 +75,10 @@ jobs:
       - name: Container builds
         run: docker build --build-arg BUILD=${{ github.sha }} -t compute-api:ci .
 
-  deploy:
+  # Named for what it does. It was called `deploy`, which invited the
+  # assumption that merging to main ships something; nothing here has
+  # credentials and nothing here deploys.
+  infra-checks:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -96,3 +99,57 @@ jobs:
         run: |
           sudo apt-get update -q && sudo apt-get install -y -q shellcheck
           shellcheck scripts/*.sh
+
+  # Every image this repository pins must exist in the registry AND carry a
+  # linux/arm64 manifest. Both staging and UnifyAPI production are Graviton
+  # (t4g.small); an amd64-only image fails as a container that never starts,
+  # long after `terraform apply` has reported success.
+  #
+  # This job exists because on 11 Sep 2026 the pinned
+  # ghcr.io/felixsphere/unify-compute-api did not exist in the registry at all
+  # (NAME_UNKNOWN) while variables.tf pinned it as the default. A first apply
+  # would have booted a host that could never pull.
+  pinned-images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Every pinned image exists and runs on arm64
+        run: |
+          set -euo pipefail
+          # Defaults declared in the staging stack. Pins live in exactly one
+          # place; if that stops being true this grep is the thing to update.
+          images=$(grep -oE 'ghcr\.io/[a-z0-9._/-]+[:@][A-Za-z0-9._:-]+' \
+            deploy/aws/staging/variables.tf | sort -u)
+          [ -n "$images" ] || { echo "::error::found no pinned images to check"; exit 1; }
+
+          fail=0
+          for ref in $images; do
+            echo "--- $ref"
+            if ! docker buildx imagetools inspect "$ref" --raw > m.json 2>err.txt; then
+              echo "::error::$ref is not pullable: $(head -c 300 err.txt)"
+              fail=1; continue
+            fi
+            if jq -e 'has("manifests")' m.json >/dev/null; then
+              arches=$(jq -r '[.manifests[] | select(.platform.os=="linux") | .platform.architecture] | sort | join(",")' m.json)
+            else
+              # Single-platform image: read the config's architecture.
+              arches=$(docker buildx imagetools inspect "$ref" --format '{{.Image.Architecture}}' 2>/dev/null || echo unknown)
+            fi
+            echo "    linux arches: $arches"
+            case ",$arches," in
+              *,arm64,*) echo "    ok: arm64 present" ;;
+              *) echo "::error::$ref has no linux/arm64 manifest — it cannot run on t4g"; fail=1 ;;
+            esac
+          done
+          exit "$fail"

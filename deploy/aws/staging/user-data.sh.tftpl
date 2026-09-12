@@ -56,8 +56,26 @@ require_param() {
   [ -n "$value" ] || { echo "required SSM parameter $1 is empty" >&2; exit 1; }
   printf '%s' "$value"
 }
-POSTGRES_PASSWORD=$(require_param '${ssm_postgres_password}')
-REDIS_PASSWORD=$(require_param '${ssm_redis_password}')
+# These two are interpolated raw into connection URLs in the compose file
+# (postgresql://unify:PASS@postgres:5432/console, redis://:PASS@redis:6379).
+# A "/" in the value ends the URL authority and the DSN silently becomes
+# nonsense, which surfaces as a console that never passes its health check.
+# scripts/staging-secrets.sh generates hex for exactly this reason; assert it
+# here so a hand-made parameter fails in this log instead of in Postgres.
+require_url_safe_param() {
+  local value
+  value=$(require_param "$1")
+  case "$value" in
+    *[!0-9A-Za-z._~-]*)
+      echo "SSM parameter $1 contains a character that changes the meaning of a connection URL (expected unreserved characters only; use: openssl rand -hex 32)" >&2
+      exit 1
+      ;;
+  esac
+  printf '%s' "$value"
+}
+
+POSTGRES_PASSWORD=$(require_url_safe_param '${ssm_postgres_password}')
+REDIS_PASSWORD=$(require_url_safe_param '${ssm_redis_password}')
 SESSION_SECRET=$(require_param '${ssm_session_secret}')
 # Optional until the console ships the bridge routes.
 COMPUTE_BRIDGE_SECRET=$(get_param '${ssm_bridge_secret}' 2>/dev/null || true)
