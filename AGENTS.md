@@ -120,6 +120,35 @@ Two agents must never edit the same checkout. Use `git worktree add` per task,
 pick a port per agent for `npm run dev` and for `compute-api`, and say which
 one you used when you hand off.
 
+## Releases go to staging first
+
+**Across UnifyAI, every change reaches production through staging** — not just
+significant ones. Adopted 16 Sep 2026, after twelve consecutive console releases
+went straight to production unverified.
+
+For unify-compute the rule is not yet load-bearing: the staging stack under
+`deploy/aws/staging/` is **defined and CI-validated but has never been applied**,
+and nothing is in production either. When that changes, staging comes first —
+do not let the first production deployment also be the first time the stack runs.
+
+When you hand a change over, say:
+
+- the merged commit or tag, and the delta in a sentence per commit;
+- **what to exercise** — the specific behaviour your change alters, not "verify
+  it works". A change that deletes data gets its deletion run, not read about;
+- anything that must happen before the cutover: a migration, a seed, a
+  parameter, an env var, an ordering constraint with another agent's change.
+
+**The hotfix exception** is narrow: a live outage, a security issue, or data
+being lost. Then it ships, marked `HOTFIX`, with what was skipped recorded
+afterwards. "My feature is done and I want it live" is not a hotfix; neither is
+a release someone is waiting on, nor a fix for a bug that is not currently
+hurting anyone. If staging is merely inconvenient, that is not the exception —
+that is the rule working.
+
+The rule across all UnifyAI products, and the table of where staging actually
+exists, is in `~/unifyai/AGENTS.md`.
+
 ## Who may deploy
 
 **Only the unify-compute CI/CD agent releases**, to staging and to production.
