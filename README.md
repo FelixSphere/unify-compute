@@ -17,8 +17,9 @@ through the customer's existing UnifyAPI account.
 | `deploy/compose/` | Local and staging profile: console + compute-api + Postgres + Redis |
 | `deploy/aws/staging/` | Terraform for `staging.compute.unifyai.us` |
 | `docs/architecture.md` | One account plane (UnifyAPI), two execution planes (tokens, compute) |
-| `docs/adr/` | Decisions: reuse UnifyAPI accounts, separate proprietary service, SkyPilot, staging shape |
+| `docs/adr/` | Decisions: reuse UnifyAPI accounts, separate proprietary service, SkyPilot, staging shape, upstreams |
 | `docs/spec/job-api.md` | The customer-facing job API contract |
+| `docs/spec/upstreams.md` | Requirements for buying capacity from other platforms and reselling it under our SKUs |
 | `docs/spec/console-billing-bridge.md` | The console ↔ compute contract and the console change list |
 | `docs/staging.md` | Staging runbook and acceptance criteria |
 | `research/` | The SkyPilot selection research |

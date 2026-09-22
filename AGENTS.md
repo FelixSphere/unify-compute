@@ -41,6 +41,10 @@ This repository holds three things, and they have different rules:
 - **Staging is one AWS stack in the UnifyAI account**, same shape as the
   gateway's hosted profile, at `staging.compute.unifyai.us`.
   [ADR-0004](docs/adr/0004-staging-environment.md)
+- **Upstreams are SkyPilot clouds.** A SKU maps to an ordered provider list,
+  its trust tier is a SKU attribute, and the deployment's `UPSTREAMS` says
+  what it may launch into. No provider abstraction of our own.
+  [ADR-0006](docs/adr/0006-upstreams-are-skypilot-clouds.md)
 
 Current status (say what exists rather than describing targets as shipped):
 

@@ -13,6 +13,7 @@ import (
 	"github.com/FelixSphere/unify-compute/compute-api/internal/api"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/console"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/sku"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/upstream"
 )
 
 // Build is set with -ldflags "-X main.Build=<git sha>" so /healthz can say
@@ -26,6 +27,19 @@ func main() {
 	if err != nil {
 		log.Error("load sku catalogue", "err", err)
 		os.Exit(1)
+	}
+
+	// Which clouds this deployment may launch into (ADR-0006). Empty is
+	// legal and means every submit is refused with 503 until it is set.
+	upstreams, err := upstream.Parse(os.Getenv("UPSTREAMS"))
+	if err != nil {
+		log.Error("upstreams", "err", err)
+		os.Exit(1)
+	}
+	if len(upstreams.Clouds()) == 0 {
+		log.Warn("UPSTREAMS unset; job submission will return upstream_unavailable")
+	} else {
+		log.Info("upstreams enabled", "clouds", upstreams.Clouds())
 	}
 
 	// The bridge client is constructed at boot so a bad secret fails the
@@ -42,7 +56,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              env("LISTEN_ADDR", "127.0.0.1:8080"),
-		Handler:           api.New(Build, cat, log),
+		Handler:           api.New(Build, cat, upstreams, log),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

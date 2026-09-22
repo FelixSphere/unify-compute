@@ -39,11 +39,19 @@ body_has "healthz names the service" '"service":"compute-api"'
 
 check "GET /compute/v1/skus" 200 "$(code "$BASE_URL/compute/v1/skus")"
 body_has "skus carry a price" '"price_usd_per_hour"'
+body_has "skus carry a tier" '"tier":"'
 
+check "GET /compute/v1/upstreams" 200 "$(code "$BASE_URL/compute/v1/upstreams")"
+body_has "staging has aws enabled" '"cloud":"aws","enabled":true'
+
+valid='{"sku":"a10g-24gb-x1","spec":{"max_runtime_seconds":600}}'
 check "POST /compute/v1/jobs without key -> 401" 401 \
-  "$(code -X POST -H 'Content-Type: application/json' -d '{}' "$BASE_URL/compute/v1/jobs")"
-check "POST /compute/v1/jobs with key -> 501 (unbuilt)" 501 \
-  "$(code -X POST -H 'Authorization: Bearer sk-smoke-test-key' -H 'Content-Type: application/json' -d '{}' "$BASE_URL/compute/v1/jobs")"
+  "$(code -X POST -H 'Content-Type: application/json' -d "$valid" "$BASE_URL/compute/v1/jobs")"
+check "POST /compute/v1/jobs unknown sku -> 400" 400 \
+  "$(code -X POST -H 'Authorization: Bearer sk-smoke-test-key' -H 'Content-Type: application/json' -d '{"sku":"nope","spec":{"max_runtime_seconds":600}}' "$BASE_URL/compute/v1/jobs")"
+body_has "unknown sku is named" '"code":"unknown_sku"'
+check "POST /compute/v1/jobs valid -> 501 (unbuilt)" 501 \
+  "$(code -X POST -H 'Authorization: Bearer sk-smoke-test-key' -H 'Content-Type: application/json' -d "$valid" "$BASE_URL/compute/v1/jobs")"
 
 # The compute host must not proxy the console and vice versa.
 check "compute host does not serve console /api/status" 404 "$(code "$BASE_URL/api/status")"

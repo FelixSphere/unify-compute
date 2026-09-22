@@ -5,26 +5,38 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/FelixSphere/unify-compute/compute-api/internal/sku"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/upstream"
 )
+
+// MaxRuntimeSeconds is the platform ceiling on a job's max_runtime_seconds:
+// 24 hours. It bounds the hold a single submit can place.
+const MaxRuntimeSeconds int64 = 24 * 60 * 60
+
+const maxBody = 1 << 20
 
 type Server struct {
 	Build     string
 	Catalogue *sku.Catalogue
+	Upstreams *upstream.Registry
 	Log       *slog.Logger
 	mux       *http.ServeMux
 }
 
-func New(build string, cat *sku.Catalogue, log *slog.Logger) *Server {
-	s := &Server{Build: build, Catalogue: cat, Log: log, mux: http.NewServeMux()}
+func New(build string, cat *sku.Catalogue, reg *upstream.Registry, log *slog.Logger) *Server {
+	s := &Server{Build: build, Catalogue: cat, Upstreams: reg, Log: log, mux: http.NewServeMux()}
 	s.mux.HandleFunc("GET /healthz", s.health)
 	s.mux.HandleFunc("GET /compute/v1/skus", s.listSKUs)
-	s.mux.Handle("POST /compute/v1/jobs", s.auth(s.notImplemented("job submission")))
+	s.mux.HandleFunc("GET /compute/v1/upstreams", s.listUpstreams)
+	s.mux.Handle("POST /compute/v1/jobs", s.auth(http.HandlerFunc(s.submitJob)))
 	s.mux.Handle("GET /compute/v1/jobs", s.auth(s.notImplemented("job listing")))
 	s.mux.Handle("GET /compute/v1/jobs/{id}", s.auth(s.notImplemented("job lookup")))
 	s.mux.Handle("POST /compute/v1/jobs/{id}/cancel", s.auth(s.notImplemented("job cancel")))
@@ -67,12 +79,91 @@ func writeError(w http.ResponseWriter, status int, e apiError) {
 	writeJSON(w, status, map[string]apiError{"error": e})
 }
 
+func invalid(w http.ResponseWriter, code, param, msg string) {
+	writeError(w, http.StatusBadRequest, apiError{Type: "invalid_request", Code: code, Message: msg, Param: param})
+}
+
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "service": "compute-api", "build": s.Build})
 }
 
 func (s *Server) listSKUs(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": s.Catalogue.SKUs, "note": s.Catalogue.Note})
+}
+
+type upstreamView struct {
+	Object  string   `json:"object"`
+	Cloud   string   `json:"cloud"`
+	Enabled bool     `json:"enabled"`
+	SKUs    []string `json:"skus"`
+}
+
+// listUpstreams is public for the same reason /skus is: the pricing page
+// says where each SKU runs. `enabled` is this deployment's view.
+func (s *Server) listUpstreams(w http.ResponseWriter, _ *http.Request) {
+	clouds := s.Catalogue.Clouds()
+	out := make([]upstreamView, 0, len(clouds))
+	for c, ids := range clouds {
+		out = append(out, upstreamView{Object: "compute.upstream", Cloud: c, Enabled: s.Upstreams.Enabled(c), SKUs: ids})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Cloud < out[j].Cloud })
+	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": out})
+}
+
+type submitRequest struct {
+	SKU       string   `json:"sku"`
+	Providers []string `json:"providers"`
+	Spec      struct {
+		MaxRuntimeSeconds int64 `json:"max_runtime_seconds"`
+	} `json:"spec"`
+}
+
+// submitJob validates everything the catalogue and registry can decide
+// without persistence: the SKU, the customer's provider restriction, the
+// runtime ceiling, and whether this deployment can launch it at all. What
+// survives is what the backend will receive; until it exists the answer is
+// still 501.
+func (s *Server) submitJob(w http.ResponseWriter, r *http.Request) {
+	var req submitRequest
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody))
+	if err := dec.Decode(&req); err != nil {
+		invalid(w, "malformed_body", "", "Body must be a JSON object; see docs/spec/job-api.md.")
+		return
+	}
+	if req.SKU == "" {
+		invalid(w, "missing_sku", "sku", "Choose a sku from GET /compute/v1/skus.")
+		return
+	}
+	item, err := s.Catalogue.Get(req.SKU)
+	if err != nil {
+		invalid(w, "unknown_sku", "sku", fmt.Sprintf("sku %q is not offered", req.SKU))
+		return
+	}
+	if !item.Available {
+		invalid(w, "sku_unavailable", "sku", fmt.Sprintf("sku %q is listed but not currently sold", req.SKU))
+		return
+	}
+	switch rt := req.Spec.MaxRuntimeSeconds; {
+	case rt <= 0:
+		invalid(w, "missing_max_runtime", "spec.max_runtime_seconds", "spec.max_runtime_seconds must be a positive integer")
+		return
+	case rt > MaxRuntimeSeconds:
+		invalid(w, "runtime_over_ceiling", "spec.max_runtime_seconds", fmt.Sprintf("max_runtime_seconds %d exceeds the platform ceiling of %d", rt, MaxRuntimeSeconds))
+		return
+	}
+	if _, _, err := s.Upstreams.Place(item, req.Providers); err != nil {
+		switch {
+		case errors.Is(err, sku.ErrProviderNotOffered):
+			invalid(w, "provider_not_offered", "providers", fmt.Sprintf("sku %q: %v", req.SKU, err))
+		case errors.Is(err, upstream.ErrNoEnabledProvider):
+			writeError(w, http.StatusServiceUnavailable, apiError{Type: "upstream_unavailable", Code: "upstream_unavailable",
+				Message: fmt.Sprintf("sku %q has no upstream enabled in this deployment", req.SKU)})
+		default:
+			writeError(w, http.StatusInternalServerError, apiError{Type: "internal_error", Code: "placement_failed", Message: err.Error()})
+		}
+		return
+	}
+	s.notImplemented("job submission").ServeHTTP(w, r)
 }
 
 // auth only checks the credential's shape for now. Verification against the

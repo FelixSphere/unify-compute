@@ -36,6 +36,7 @@ OpenAI-style envelope so existing client error handling carries over:
 | 429 | `rate_limited` | Per-key submit rate exceeded |
 | 501 | `not_implemented` | Route exists, backend not built (current state) |
 | 503 | `console_unavailable` | Key could not be verified or hold could not be placed |
+| 503 | `upstream_unavailable` | The SKU is sound but no provider it offers is enabled in this deployment |
 
 ## Objects
 
@@ -65,9 +66,13 @@ OpenAI-style envelope so existing client error handling carries over:
     "hold_usd": "2.5400"
   },
   "error": null,
+  "placement": { "cloud": "aws", "region": "us-east-1", "instance_type": "g5.xlarge" },
   "metadata": { "pipeline": "nightly-embed" }
 }
 ```
+
+`placement` is null until the job is `running` and says where it landed
+(*planned*; the backend fills it from SkyPilot's cluster record).
 
 Money is a decimal string in USD, never a float. Timestamps are Unix seconds.
 
@@ -86,7 +91,14 @@ queued ──▶ provisioning ──▶ running ──▶ succeeded
 ### SKU
 
 ```json
-{ "id": "a10g-24gb-x1", "object": "compute.sku", "gpu": "NVIDIA A10G", "gpu_count": 1, "gpu_memory_gb": 24, "vcpus": 4, "memory_gb": 16, "price_usd_per_hour": "1.2000", "regions": ["us-east-1"], "available": true }
+{
+  "id": "a10g-24gb-x1", "object": "compute.sku",
+  "gpu": "NVIDIA A10G", "accelerator": "A10G", "gpu_count": 1, "gpu_memory_gb": 24, "vcpus": 4, "memory_gb": 16,
+  "price_usd_per_hour": "1.2000",
+  "tier": "hyperscaler", "interruptible": false,
+  "providers": [ { "cloud": "aws", "instance_type": "g5.xlarge", "regions": ["us-east-1"] } ],
+  "regions": ["us-east-1"], "available": true
+}
 ```
 
 Prices are per hour for display and per second for metering
@@ -94,11 +106,27 @@ Prices are per hour for display and per second for metering
 The catalogue lives in `compute-api/config/skus.json` and ships with the
 binary; a price change is a code change.
 
+`tier` is the trust level of every provider behind the SKU (`hyperscaler`,
+`neocloud`, `marketplace`); a job is never placed outside its SKU's tier.
+`providers` is the ordered list of places the SKU can run; order is our
+preference, and SkyPilot fails over along it. `interruptible` SKUs run on spot
+capacity and may end `interrupted`. `regions` is the union of the providers'
+regions. See [`upstreams.md`](upstreams.md) and ADR-0006.
+
 ## Endpoints
 
 ### `GET /compute/v1/skus`
 
 Lists offered SKUs. Public (no auth) so the pricing page can render from it.
+
+### `GET /compute/v1/upstreams`
+
+Every cloud the catalogue references, whether this deployment has it enabled,
+and which SKUs it serves. Public, like `/skus`.
+
+```json
+{ "object": "list", "data": [ { "object": "compute.upstream", "cloud": "aws", "enabled": true, "skus": ["a10g-24gb-x1"] } ] }
+```
 
 ### `POST /compute/v1/jobs`
 
@@ -106,8 +134,16 @@ Submits a job. Headers: `Authorization`, optional `Idempotency-Key` (≤ 255
 chars, retained 24h; same key + same body returns the original job with `200`,
 same key + different body is `409`).
 
-Body: the `spec` object above plus optional `sku` (required), `metadata`
-(≤ 16 string pairs). Server fills everything else.
+Body: the `spec` object above plus `sku` (required), optional `providers`
+(a subset of the SKU's provider clouds, to pin placement; default all), and
+optional `metadata` (≤ 16 string pairs). Server fills everything else.
+
+Validated before anything is held or persisted, in this order: body parses
+(`malformed_body`), `sku` present (`missing_sku`) and offered (`unknown_sku`)
+and sold (`sku_unavailable`), `spec.max_runtime_seconds` positive
+(`missing_max_runtime`) and at most 86400 (`runtime_over_ceiling`), every
+entry of `providers` offered by the SKU (`provider_not_offered`), and at
+least one candidate enabled in this deployment (`503 upstream_unavailable`).
 
 Flow (*planned*): verify key → price estimate = `max_runtime_seconds × sku rate`
 → `hold` on the console → persist job `queued` → hand to SkyPilot. If the hold

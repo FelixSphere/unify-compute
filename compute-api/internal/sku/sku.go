@@ -16,17 +16,59 @@ import (
 // USD 1. It is the only place this constant lives in compute-api.
 const QuotaPerUSD = 500_000
 
+// Tier is the trust level of every provider behind a SKU (ADR-0006). The
+// customer chooses it by choosing the SKU; placement never crosses it.
+type Tier string
+
+const (
+	TierHyperscaler Tier = "hyperscaler"
+	TierNeocloud    Tier = "neocloud"
+	TierMarketplace Tier = "marketplace"
+)
+
+var tiers = map[Tier]bool{TierHyperscaler: true, TierNeocloud: true, TierMarketplace: true}
+
+// KnownClouds are the names SkyPilot accepts in a task's `resources.cloud`.
+// A catalogue entry naming anything else would fail at launch, so it fails
+// at boot instead.
+var KnownClouds = map[string]bool{
+	"aws": true, "gcp": true, "azure": true, "oci": true, "ibm": true, "scp": true, "nebius": true,
+	"lambda": true, "runpod": true, "fluidstack": true, "paperspace": true, "cudo": true, "vast": true,
+	"shadeform": true, "seeweb": true, "do": true, "hyperbolic": true, "primeintellect": true,
+	"kubernetes": true, "ssh": true, "vsphere": true,
+}
+
+// clusterClouds address capacity by context (a kubeconfig context or an SSH
+// node pool), not by instance type.
+var clusterClouds = map[string]bool{"kubernetes": true, "ssh": true}
+
+// Provider is one place a SKU can run. Order within a SKU is preference order.
+type Provider struct {
+	Cloud        string   `json:"cloud"`
+	InstanceType string   `json:"instance_type,omitempty"`
+	Context      string   `json:"context,omitempty"`
+	Regions      []string `json:"regions,omitempty"`
+}
+
+// IsCluster reports whether the provider is addressed by context rather than
+// instance type.
+func (p Provider) IsCluster() bool { return clusterClouds[p.Cloud] }
+
 type SKU struct {
-	ID              string   `json:"id"`
-	Object          string   `json:"object"`
-	GPU             string   `json:"gpu"`
-	GPUCount        int      `json:"gpu_count"`
-	GPUMemoryGB     int      `json:"gpu_memory_gb"`
-	VCPUs           int      `json:"vcpus"`
-	MemoryGB        int      `json:"memory_gb"`
-	PriceUSDPerHour string   `json:"price_usd_per_hour"`
-	Regions         []string `json:"regions"`
-	Available       bool     `json:"available"`
+	ID              string     `json:"id"`
+	Object          string     `json:"object"`
+	GPU             string     `json:"gpu"`
+	Accelerator     string     `json:"accelerator"`
+	GPUCount        int        `json:"gpu_count"`
+	GPUMemoryGB     int        `json:"gpu_memory_gb"`
+	VCPUs           int        `json:"vcpus"`
+	MemoryGB        int        `json:"memory_gb"`
+	PriceUSDPerHour string     `json:"price_usd_per_hour"`
+	Tier            Tier       `json:"tier"`
+	Interruptible   bool       `json:"interruptible"`
+	Regions         []string   `json:"regions"`
+	Providers       []Provider `json:"providers"`
+	Available       bool       `json:"available"`
 }
 
 type Catalogue struct {
@@ -34,7 +76,10 @@ type Catalogue struct {
 	SKUs []SKU  `json:"skus"`
 }
 
-var ErrUnknown = errors.New("unknown sku")
+var (
+	ErrUnknown            = errors.New("unknown sku")
+	ErrProviderNotOffered = errors.New("provider not offered for sku")
+)
 
 func Load(path string) (*Catalogue, error) {
 	raw, err := os.ReadFile(path)
@@ -62,10 +107,56 @@ func Parse(raw []byte) (*Catalogue, error) {
 		if _, err := parseUSD(s.PriceUSDPerHour); err != nil {
 			return nil, fmt.Errorf("sku %q: %w", s.ID, err)
 		}
+		if err := s.validatePlacement(); err != nil {
+			return nil, fmt.Errorf("sku %q: %w", s.ID, err)
+		}
 		s.Object = "compute.sku"
 	}
 	sort.Slice(c.SKUs, func(i, j int) bool { return c.SKUs[i].ID < c.SKUs[j].ID })
 	return &c, nil
+}
+
+func (s *SKU) validatePlacement() error {
+	if s.Tier != "" && !tiers[s.Tier] {
+		return fmt.Errorf("unknown tier %q", s.Tier)
+	}
+	if s.Available {
+		switch {
+		case s.Tier == "":
+			return errors.New("available sku has no tier")
+		case s.Accelerator == "":
+			return errors.New("available sku has no accelerator")
+		case len(s.Providers) == 0:
+			return errors.New("available sku has no providers")
+		}
+	}
+	clouds := map[string]bool{}
+	regions := map[string]bool{}
+	for _, p := range s.Providers {
+		if !KnownClouds[p.Cloud] {
+			return fmt.Errorf("provider cloud %q is not a SkyPilot cloud", p.Cloud)
+		}
+		if clouds[p.Cloud] {
+			return fmt.Errorf("provider cloud %q listed twice", p.Cloud)
+		}
+		clouds[p.Cloud] = true
+		if p.IsCluster() && p.Context == "" {
+			return fmt.Errorf("provider %q needs a context", p.Cloud)
+		}
+		if !p.IsCluster() && p.InstanceType == "" {
+			return fmt.Errorf("provider %q needs an instance_type", p.Cloud)
+		}
+		for _, r := range p.Regions {
+			regions[r] = true
+		}
+	}
+	if len(s.Regions) == 0 {
+		for r := range regions {
+			s.Regions = append(s.Regions, r)
+		}
+		sort.Strings(s.Regions)
+	}
+	return nil
 }
 
 func (c *Catalogue) Get(id string) (SKU, error) {
@@ -75,6 +166,47 @@ func (c *Catalogue) Get(id string) (SKU, error) {
 		}
 	}
 	return SKU{}, ErrUnknown
+}
+
+// Clouds lists every cloud any SKU in the catalogue can run on, with the SKUs
+// that name it, sorted by cloud.
+func (c *Catalogue) Clouds() map[string][]string {
+	out := map[string][]string{}
+	for _, s := range c.SKUs {
+		for _, p := range s.Providers {
+			out[p.Cloud] = append(out[p.Cloud], s.ID)
+		}
+	}
+	return out
+}
+
+// Candidates returns the SKU's providers restricted to `only`, in catalogue
+// order. A nil or empty `only` means all of them. Naming a cloud the SKU does
+// not offer is ErrProviderNotOffered wrapped with the offending name.
+func (s SKU) Candidates(only []string) ([]Provider, error) {
+	if len(only) == 0 {
+		return s.Providers, nil
+	}
+	want := map[string]bool{}
+	for _, c := range only {
+		want[c] = true
+	}
+	var out []Provider
+	for _, p := range s.Providers {
+		if want[p.Cloud] {
+			out = append(out, p)
+			delete(want, p.Cloud)
+		}
+	}
+	if len(want) > 0 {
+		var missing []string
+		for c := range want {
+			missing = append(missing, c)
+		}
+		sort.Strings(missing)
+		return nil, fmt.Errorf("%w: %v", ErrProviderNotOffered, missing)
+	}
+	return out, nil
 }
 
 // EstimateQuota prices a run of the given length in the console's quota unit,

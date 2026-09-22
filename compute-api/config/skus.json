@@ -1,26 +1,70 @@
 {
-  "note": "Illustrative staging catalogue. Prices here are placeholders for developing the billing flow and are not customer-facing until reviewed and this note is removed. A change to this file is a release with money in it.",
+  "note": "Illustrative staging catalogue. Prices here are placeholders for developing the billing flow and are not customer-facing until reviewed and this note is removed. A change to this file is a release with money in it. Provider order is preference order and tier is a trust promise (ADR-0006): changing either is reviewed like a price change.",
   "skus": [
     {
       "id": "a10g-24gb-x1",
       "gpu": "NVIDIA A10G",
+      "accelerator": "A10G",
       "gpu_count": 1,
       "gpu_memory_gb": 24,
       "vcpus": 4,
       "memory_gb": 16,
       "price_usd_per_hour": "1.2000",
-      "regions": ["us-east-1"],
+      "tier": "hyperscaler",
+      "interruptible": false,
+      "providers": [
+        { "cloud": "aws", "instance_type": "g5.xlarge", "regions": ["us-east-1"] }
+      ],
       "available": true
+    },
+    {
+      "id": "a10g-24gb-x1-spot",
+      "gpu": "NVIDIA A10G",
+      "accelerator": "A10G",
+      "gpu_count": 1,
+      "gpu_memory_gb": 24,
+      "vcpus": 4,
+      "memory_gb": 16,
+      "price_usd_per_hour": "0.5000",
+      "tier": "hyperscaler",
+      "interruptible": true,
+      "providers": [
+        { "cloud": "aws", "instance_type": "g5.xlarge", "regions": ["us-east-1"] }
+      ],
+      "available": false
     },
     {
       "id": "l4-24gb-x1",
       "gpu": "NVIDIA L4",
+      "accelerator": "L4",
       "gpu_count": 1,
       "gpu_memory_gb": 24,
       "vcpus": 4,
       "memory_gb": 16,
       "price_usd_per_hour": "0.9000",
-      "regions": ["us-east-1"],
+      "tier": "hyperscaler",
+      "interruptible": false,
+      "providers": [
+        { "cloud": "aws", "instance_type": "g6.xlarge", "regions": ["us-east-1"] },
+        { "cloud": "gcp", "instance_type": "g2-standard-4", "regions": ["us-central1"] }
+      ],
+      "available": false
+    },
+    {
+      "id": "a100-80gb-x1-neo",
+      "gpu": "NVIDIA A100 80GB",
+      "accelerator": "A100-80GB",
+      "gpu_count": 1,
+      "gpu_memory_gb": 80,
+      "vcpus": 30,
+      "memory_gb": 200,
+      "price_usd_per_hour": "2.0000",
+      "tier": "neocloud",
+      "interruptible": false,
+      "providers": [
+        { "cloud": "lambda", "instance_type": "gpu_1x_a100_sxm4", "regions": ["us-east-1"] },
+        { "cloud": "runpod", "instance_type": "1x_A100-80GB_SECURE", "regions": ["US"] }
+      ],
       "available": false
     }
   ]

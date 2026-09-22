@@ -55,6 +55,8 @@ services:
       LISTEN_ADDR: 0.0.0.0:8080
       # Inside the compose network the console is reachable by service name.
       CONSOLE_URL: http://console:3000
+      # Clouds this deployment may launch into (ADR-0006). Staging is AWS only.
+      UPSTREAMS: ${UPSTREAMS:-aws}
       COMPUTE_BRIDGE_SECRET: ${COMPUTE_BRIDGE_SECRET:-}
       DATABASE_URL: postgresql://unify:${POSTGRES_PASSWORD}@postgres:5432/compute
     depends_on:
