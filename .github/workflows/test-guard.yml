@@ -1,0 +1,115 @@
+# Enforces the operator rule: an existing test may not be changed without the
+# operator's personal approval. See AGENTS.md, "Existing tests are not yours to
+# change".
+#
+# Why this is a CI job and not CODEOWNERS: requiring code-owner review needs a
+# paid plan on private repositories, and several UnifyAI repos are private. This
+# works on every plan and enforces the same thing, because it checks for an
+# APPROVED review from the operator's own account -- which an agent cannot
+# produce with its own token.
+#
+# ADDING tests is always allowed and this job stays green for it. Only files
+# that are modified, deleted or renamed are gated.
+name: Test guard
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  existing-tests-unchanged:
+    if: github.repository == 'FelixSphere/unify-compute'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need the base commit to diff against, not just the merge head.
+          fetch-depth: 0
+
+      - name: Find changed test files
+        id: changed
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # M = modified, D = deleted, R = renamed. A (added) is deliberately
+          # absent: new tests need no approval.
+          git diff --name-status --diff-filter=MDR "$BASE_SHA" "$HEAD_SHA" \
+            | cut -f2- | tr '\t' '\n' \
+            | grep -E '(_test\.(go|py|rb)$|\.test\.(ts|tsx|js|jsx|mjs)$|\.spec\.(ts|tsx|js|jsx|mjs)$|(^|/)__tests__/|(^|/)tests?/|(^|/)testdata/)' \
+            | sort -u > /tmp/changed_tests.txt || true
+
+          if [ -s /tmp/changed_tests.txt ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "### Existing tests changed by this PR" >> "$GITHUB_STEP_SUMMARY"
+            echo >> "$GITHUB_STEP_SUMMARY"
+            sed 's/^/- `/; s/$/`/' /tmp/changed_tests.txt >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "No existing test was modified, deleted or renamed." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Require the operator's approval
+        if: steps.changed.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPERATOR: Yuchengw
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          # The approval must be on THIS head commit. Otherwise "approve, then
+          # push the test edit" would slip straight through.
+          approved=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}/reviews" --paginate \
+            --jq "[.[] | select(.user.login==\"${OPERATOR}\" and .state==\"APPROVED\" and .commit_id==\"${HEAD_SHA}\")] | length")
+
+          if [ "$approved" -gt 0 ]; then
+            echo "Approved by ${OPERATOR} on ${HEAD_SHA}."
+            {
+              echo
+              echo "Approved by \`${OPERATOR}\` on this commit."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          {
+            echo
+            echo "**Blocked.** Changing an existing test needs the operator's approval."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          cat >&2 <<'MSG'
+
+          This PR modifies, deletes or renames a test that already exists.
+
+          Adding tests needs no approval. Changing one does, because a failing
+          test is evidence: the cheapest way to turn a red build green is to
+          weaken the check, and that converts a defect the suite caught into one
+          it never catches again.
+
+          To proceed, say in the PR:
+
+            1. Why the test must change -- what is actually wrong with it, as
+               distinct from what is inconvenient about it right now.
+            2. What the change accomplishes -- what it will assert afterwards
+               that it does not assert today.
+            3. What regression it could let through -- name the defect class the
+               current assertion catches, and whether the new one still catches it.
+
+          Then wait for an approving review from the operator on this commit.
+          Pushing after approval clears it, by design.
+
+          Renames, reformatting and moving a test between files all count.
+          "The behaviour changed on purpose" is not an exemption -- it means the
+          test encodes the old contract, which is exactly the case needing
+          approval.
+
+MSG
+          echo "Files:" >&2
+          sed 's/^/  /' /tmp/changed_tests.txt >&2
+          exit 1
