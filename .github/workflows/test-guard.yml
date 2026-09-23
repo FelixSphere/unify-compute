@@ -83,33 +83,32 @@ jobs:
             echo "**Blocked.** Changing an existing test needs the operator's approval."
           } >> "$GITHUB_STEP_SUMMARY"
 
-          cat >&2 <<'MSG'
+          {
+            echo ""
+            echo "This PR modifies, deletes or renames a test that already exists."
+            echo ""
+            echo "Adding tests needs no approval. Changing one does, because a failing"
+            echo "test is evidence: the cheapest way to turn a red build green is to"
+            echo "weaken the check, and that converts a defect the suite caught into"
+            echo "one it never catches again."
+            echo ""
+            echo "To proceed, say in the PR:"
+            echo "  1. Why the test must change -- what is actually wrong with it, as"
+            echo "     distinct from what is inconvenient about it right now."
+            echo "  2. What the change accomplishes -- what it will assert afterwards"
+            echo "     that it does not assert today."
+            echo "  3. What regression it could let through -- name the defect class the"
+            echo "     current assertion catches, and whether the new one still catches it."
+            echo ""
+            echo "Then wait for an approving review from the operator on this commit."
+            echo "Pushing after approval clears it, by design."
+            echo ""
+            echo "Renames, reformatting and moving a test between files all count."
+            echo "\"The behaviour changed on purpose\" is not an exemption -- it means the"
+            echo "test encodes the old contract, which is exactly the case needing approval."
+            echo ""
+          } >&2
 
-          This PR modifies, deletes or renames a test that already exists.
-
-          Adding tests needs no approval. Changing one does, because a failing
-          test is evidence: the cheapest way to turn a red build green is to
-          weaken the check, and that converts a defect the suite caught into one
-          it never catches again.
-
-          To proceed, say in the PR:
-
-            1. Why the test must change -- what is actually wrong with it, as
-               distinct from what is inconvenient about it right now.
-            2. What the change accomplishes -- what it will assert afterwards
-               that it does not assert today.
-            3. What regression it could let through -- name the defect class the
-               current assertion catches, and whether the new one still catches it.
-
-          Then wait for an approving review from the operator on this commit.
-          Pushing after approval clears it, by design.
-
-          Renames, reformatting and moving a test between files all count.
-          "The behaviour changed on purpose" is not an exemption -- it means the
-          test encodes the old contract, which is exactly the case needing
-          approval.
-
-MSG
           echo "Files:" >&2
           sed 's/^/  /' /tmp/changed_tests.txt >&2
           exit 1
