@@ -68,24 +68,66 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           OPERATOR: Yuchengw
+          TOKEN: APPROVED-TEST-CHANGE
           PR: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
 
-          # The approval must be on THIS head commit. Otherwise "approve, then
-          # push the test edit" would slip straight through.
-          approved=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}/reviews" --paginate \
-            --jq "[.[] | select(.user.login==\"${OPERATOR}\" and .state==\"APPROVED\" and .commit_id==\"${HEAD_SHA}\")] | length")
-
-          if [ "$approved" -gt 0 ]; then
-            echo "Approved by ${OPERATOR} on ${HEAD_SHA}."
+          approve() {
+            echo "Approved by ${OPERATOR}: $1"
             {
               echo
-              echo "Approved by \`${OPERATOR}\` on this commit."
+              echo "Approved by \`${OPERATOR}\` on this commit -- $1."
             } >> "$GITHUB_STEP_SUMMARY"
             exit 0
-          fi
+          }
+
+          # 1. An approving review naming THIS head commit. Otherwise "approve,
+          # then push the test edit" would slip straight through.
+          approved=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}/reviews" --paginate \
+            --jq "[.[] | select(.user.login==\"${OPERATOR}\" and .state==\"APPROVED\" and .commit_id==\"${HEAD_SHA}\")] | length")
+          [ "$approved" -gt 0 ] && approve "approving review"
+
+          # 2. A comment from the operator carrying the token and this head SHA.
+          #
+          # Needed because a review is not always available. Agents open PRs
+          # through `gh` authenticated as the operator, so the operator is the
+          # AUTHOR, and GitHub refuses a self-review: "Can not approve your own
+          # pull request". Between this rule shipping on 2026-09-23 and
+          # 2026-09-25 that made the gate unsatisfiable for every agent PR --
+          # not strict, impossible. A control nobody can satisfy gets removed,
+          # which is the outcome this rule least wants.
+          approved_comment=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" --paginate \
+            --jq "[.[] | select(.user.login==\"${OPERATOR}\") | select(.body | test(\"${TOKEN}[[:space:]]+${HEAD_SHA}\"))] | length")
+          [ "$approved_comment" -gt 0 ] && approve "comment naming this SHA"
+
+          # 3. A bare `LGTM` comment from the operator, posted AFTER the head
+          # commit was authored. Added 2026-09-25 at the operator's request:
+          # pasting a 40-character SHA correctly is the whole friction, and a
+          # gate that is tedious to satisfy gets worked around rather than used.
+          #
+          # The timestamp does the job the SHA did. Push a new commit and every
+          # earlier LGTM is older than it, so it stops counting -- "approve,
+          # then push the test edit" still cannot slip through.
+          #
+          # It is weaker than the SHA in one specific way, and the difference is
+          # worth stating rather than glossing: a committer date is settable
+          # (GIT_COMMITTER_DATE), so a backdated commit could keep an old LGTM
+          # alive. That is not the case this gate defends against. An agent that
+          # would forge a date is an agent that would edit this file -- the
+          # workflow runs from the PR's own copy, so it could simply delete the
+          # job. This gate makes the rule visible and hard to pass through
+          # inattention; it was never a defence against a determined bypass.
+          #
+          # The match is exact, ignoring case and whitespace only. "not LGTM
+          # yet" and "LGTM once CI is green" both correctly fail to match.
+          HEAD_TIME=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}" --jq '.commit.committer.date')
+          echo "head commit ${HEAD_SHA} committed at ${HEAD_TIME}"
+
+          approved_lgtm=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" --paginate \
+            --jq "[.[] | select(.user.login==\"${OPERATOR}\") | select(.created_at > \"${HEAD_TIME}\") | select((.body | ascii_upcase | gsub(\"[[:space:]]\";\"\")) == \"LGTM\")] | length")
+          [ "$approved_lgtm" -gt 0 ] && approve "LGTM posted after this commit"
 
           {
             echo
@@ -109,8 +151,29 @@ jobs:
             echo "  3. What regression it could let through -- name the defect class the"
             echo "     current assertion catches, and whether the new one still catches it."
             echo ""
-            echo "Then wait for an approving review from the operator on this commit."
-            echo "Pushing after approval clears it, by design."
+            echo "Then get the operator's approval on THIS commit. Any one of:"
+            echo ""
+            echo "  - a comment on the PR whose entire body is:  LGTM"
+            echo "  - an approving review, or"
+            echo "  - a comment containing:  ${TOKEN} ${HEAD_SHA}"
+            echo ""
+            echo "LGTM is the short form and needs nothing copied. It must be the whole"
+            echo "comment -- \"LGTM once CI passes\" does not count -- and it must be"
+            echo "posted after the commit it approves."
+            echo ""
+            echo "Head commit was authored at: ${HEAD_TIME}"
+            echo ""
+            echo "A comment does not re-trigger this check -- the pull_request event"
+            echo "does not fire on one. After approving, re-run this job (\"Re-run failed"
+            echo "jobs\" on the run page, or: gh run rerun --failed <run id>). It re-reads"
+            echo "the comments, so the approval is picked up."
+            echo ""
+            echo "The review and SHA routes stay because they still work; the comment"
+            echo "route exists at all because the operator is usually the PR author, and"
+            echo "GitHub refuses a self-review."
+            echo ""
+            echo "Pushing after approval clears it, by design: a new commit is newer"
+            echo "than every LGTM before it, and the SHA stops matching."
             echo ""
             echo "Renames, reformatting and moving a test between files all count."
             echo "\"The behaviour changed on purpose\" is not an exemption -- it means the"
