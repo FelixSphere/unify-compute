@@ -37,9 +37,18 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
+          # Diff from the MERGE BASE, not from the base branch tip. base.sha is
+          # wherever the base branch happens to be right now, so a two-dot diff
+          # also reports test files that OTHER merged PRs changed after this
+          # branch was cut -- attributing someone else's work to this author.
+          # That false positive is worse than no guard, because a check that
+          # cries wolf gets ignored.
+          MERGE_BASE="$(git merge-base "$BASE_SHA" "$HEAD_SHA")"
+          echo "comparing $MERGE_BASE..$HEAD_SHA"
+
           # M = modified, D = deleted, R = renamed. A (added) is deliberately
           # absent: new tests need no approval.
-          git diff --name-status --diff-filter=MDR "$BASE_SHA" "$HEAD_SHA" \
+          git diff --name-status --diff-filter=MDR "$MERGE_BASE" "$HEAD_SHA" \
             | cut -f2- | tr '\t' '\n' \
             | grep -E '(_test\.(go|py|rb)$|\.test\.(ts|tsx|js|jsx|mjs)$|\.spec\.(ts|tsx|js|jsx|mjs)$|(^|/)__tests__/|(^|/)tests?/|(^|/)testdata/)' \
             | sort -u > /tmp/changed_tests.txt || true
