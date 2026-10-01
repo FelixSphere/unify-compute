@@ -2,6 +2,8 @@ import type { Metadata } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
 
+const HUBSPOT_PORTAL_ID = '46127314';
+
 const geistSans = Geist({
   variable: '--font-geist-sans',
   subsets: ['latin'],
@@ -36,6 +38,12 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         {children}
+        <script
+          id="hs-script-loader"
+          async
+          defer
+          src={`https://js.hs-scripts.com/${HUBSPOT_PORTAL_ID}.js`}
+        />
       </body>
     </html>
   );
