@@ -2,8 +2,9 @@
 
 - **Status:** Proposal, 2026-10-01. Nothing here is built. It reorganises the
   product into surfaces, phases them, and breaks the work into tasks sized for
-  one agent and one worktree each. Accepting it means writing ADR-0007 (task
-  D1); until then the v1 scope in `spec/job-api.md` stands.
+  one agent and one worktree each. The decision it argues for is
+  [ADR-0007](adr/0007-product-surfaces-and-phasing.md) (Proposed); until that
+  is accepted the v1 scope in `spec/job-api.md` stands.
 - **Binding constraints, not reopened here:** UnifyAPI owns accounts, keys and
   balance (ADR-0001); compute-api is separate and proprietary, HTTP only to the
   console (ADR-0002); SkyPilot is the orchestration layer (ADR-0003); upstreams
