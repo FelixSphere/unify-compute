@@ -536,17 +536,19 @@ var pathTo = map[Status][]Status{
 	StatusCancelled:    {StatusCancelled},
 }
 
-// The diagram in docs/spec/job-api.md, written out independently of the
-// transitions table so a change to one without the other fails here.
+// The diagram in docs/spec/job-api.md (revised 2026-10-01), written out
+// independently of the transitions table so a change to one without the other fails here.
 var wantAllowed = map[[2]Status]bool{
-	{StatusQueued, StatusProvisioning}:    true,
-	{StatusQueued, StatusCancelled}:       true,
-	{StatusProvisioning, StatusRunning}:   true,
-	{StatusProvisioning, StatusCancelled}: true,
-	{StatusRunning, StatusSucceeded}:      true,
-	{StatusRunning, StatusFailed}:         true,
-	{StatusRunning, StatusInterrupted}:    true,
-	{StatusRunning, StatusCancelled}:      true,
+	{StatusQueued, StatusProvisioning}:      true,
+	{StatusQueued, StatusCancelled}:         true,
+	{StatusProvisioning, StatusRunning}:     true,
+	{StatusProvisioning, StatusFailed}:      true,
+	{StatusProvisioning, StatusInterrupted}: true,
+	{StatusProvisioning, StatusCancelled}:   true,
+	{StatusRunning, StatusSucceeded}:        true,
+	{StatusRunning, StatusFailed}:           true,
+	{StatusRunning, StatusInterrupted}:      true,
+	{StatusRunning, StatusCancelled}:        true,
 }
 
 func TestUpdateStatusEnforcesStateDiagram(t *testing.T) {
@@ -658,5 +660,26 @@ func TestUpdateStatusRaceHasOneWinner(t *testing.T) {
 	wg.Wait()
 	if wins != 1 {
 		t.Fatalf("%d racers won, want 1", wins)
+	}
+}
+
+// A job that never reached running ends with finished_at but no started_at,
+// which the schema's terminal/finished_at CHECK must accept.
+func TestUpdateStatusTerminalFromProvisioning(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+	ctx := context.Background()
+	for _, to := range []Status{StatusFailed, StatusInterrupted} {
+		j := mustCreate(t, s, newJob("user:1"))
+		if _, err := s.UpdateStatus(ctx, j.ID, StatusProvisioning, nil); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.UpdateStatus(ctx, j.ID, to, &JobError{Code: "capacity_exhausted", Message: "no candidate provider had capacity"})
+		if err != nil || got.Status != to || got.StartedAt != nil || got.FinishedAt == nil || got.Error == nil {
+			t.Fatalf("provisioning -> %s: %+v err %v", to, got, err)
+		}
+		if _, err := s.UpdateStatus(ctx, j.ID, StatusRunning, nil); !errors.Is(err, ErrInvalidTransition) {
+			t.Fatalf("%s is terminal but -> running gave %v", to, err)
+		}
 	}
 }

@@ -22,12 +22,15 @@ const (
 	StatusCancelled    Status = "cancelled"
 )
 
-// transitions is the state diagram in docs/spec/job-api.md. Anything not
-// listed is refused, including a status to itself, so a caller that re-reports
-// the current state learns it raced rather than silently rewriting timestamps.
+// transitions is the state diagram in docs/spec/job-api.md, as revised on
+// 2026-10-01 to let a job fail or be interrupted before it starts (image pull
+// failure, capacity exhausted everywhere, preemption during provisioning).
+// Anything not listed is refused, including a status to itself, so a caller
+// that re-reports the current state learns it raced rather than silently
+// rewriting timestamps.
 var transitions = map[Status][]Status{
 	StatusQueued:       {StatusProvisioning, StatusCancelled},
-	StatusProvisioning: {StatusRunning, StatusCancelled},
+	StatusProvisioning: {StatusRunning, StatusFailed, StatusInterrupted, StatusCancelled},
 	StatusRunning:      {StatusSucceeded, StatusFailed, StatusInterrupted, StatusCancelled},
 }
 
