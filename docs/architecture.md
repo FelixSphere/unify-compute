@@ -2,7 +2,10 @@
 
 **Status: target architecture, mostly unbuilt.** The marketing site is live.
 `compute-api/` is a skeleton with the job API contract wired to `501` stubs.
-The console bridge is a spec. Sections marked **Open** are undecided.
+The console bridge is a spec. Sections marked **Open** are undecided. What the
+product will and will not include, and in which phase, is proposed in
+[ADR-0007](adr/0007-product-surfaces-and-phasing.md) (Proposed, not yet
+accepted).
 
 ## One account plane, two execution planes
 
@@ -66,6 +69,10 @@ and called by compute-api.
 
 ## What compute-api owns
 
+These are the responsibilities compute-api is designed to carry in v1. Of them,
+only the job API routes (as `501` stubs) and the SKU catalogue exist today;
+job state, idempotency, metering and the SkyPilot integration do not.
+
 - The job API ([`spec/job-api.md`](spec/job-api.md)): submit, get, list,
   cancel, logs, artifacts. Authenticated with the customer's existing `sk-` key.
 - Job state and idempotency. Postgres, its own database, never the console's.
@@ -83,6 +90,25 @@ and called by compute-api.
   not supply hardware.
 - Model runtimes. vLLM, embedding servers, OCR pipelines are workload containers
   the job runs, not part of the platform.
+
+## Scope and phasing
+
+[ADR-0007](adr/0007-product-surfaces-and-phasing.md) (Proposed) groups the
+product into five surfaces — catalogue, workloads, data, money, access — and
+phases them v1, P1, P2, P3. v1 is the job contract in
+[`spec/job-api.md`](spec/job-api.md); nothing in any phase is built yet.
+
+Not in v1, and not built:
+
+- **P1** — templates, job events and webhooks, quotas, an availability check,
+  scoped keys, an OpenAPI document and CLI, storage and egress meters, a
+  zero-balance policy, usage export. Planned after v1; the billing items are
+  task D2's to specify.
+- **P2** — interactive instances, persistent volumes, serverless endpoints.
+  **Deferred by the operator on 2026-10-01**, design included; not planned
+  until the first staging run (R1) is green. Each would need its own ADR.
+- **P3** — reserved capacity, multi-node jobs, a Terraform provider. Only
+  considered once there is revenue.
 
 ## Failure modes that have to be designed, not discovered
 
@@ -126,3 +152,5 @@ incident, it is a production one.
    research note's suggestion. Which one decides the first SkyPilot config.
 4. **Where job results live.** Object storage in our account with signed URLs,
    or the customer's bucket. Affects egress cost and data-residency story.
+   ADR-0005 (Proposed, in the finetune worktree, not on `main`) proposes our
+   S3; until it is accepted this stays open.
