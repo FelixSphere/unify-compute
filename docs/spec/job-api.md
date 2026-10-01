@@ -110,9 +110,10 @@ Body: the `spec` object above plus optional `sku` (required), `metadata`
 (≤ 16 string pairs). Server fills everything else.
 
 Flow (*planned*): verify key → price estimate = `max_runtime_seconds × sku rate`
-→ `hold` on the console → persist job `queued` → hand to SkyPilot. If the hold
-is refused the job is never persisted and `402` is returned with the estimate
-in `error.message`.
+→ `hold` on the console for `sku rate × min(max_runtime_seconds, 7200)`
+([`metering.md`](metering.md) H1) → persist job `queued` → hand to SkyPilot.
+If the hold is refused the job is never persisted and `402` is returned with
+the hold amount and the estimate in `error.message`.
 
 Returns `201` with the Job.
 
@@ -131,9 +132,9 @@ Cursor list, newest first. `status` filter optional, repeatable.
 ### `POST /compute/v1/jobs/{id}/cancel`
 
 Requests termination. Returns `202` with the Job (`status` may still read
-`running` until SkyPilot confirms). `409` on a terminal job. Metering stops at
-the moment the instance is confirmed down; the customer is charged for seconds
-run, not for the cancel latency.
+`running` until SkyPilot confirms). `409` on a terminal job. GPU metering
+stops when the cancel is accepted, not when the instance is confirmed down; the
+customer is charged for seconds run, not for the cancel latency.
 
 ### `GET /compute/v1/jobs/{id}/logs?since=…&follow=false`
 
@@ -148,17 +149,28 @@ valid for 1 hour (*planned; storage location is an open question in
 
 ## Metering and settlement (*planned*)
 
-- GPU seconds accrue from SkyPilot reporting the cluster `UP` until it reports
-  down or the job's process exits, whichever is first.
+The full rules — three meters, the billable-state table, hold sizing,
+settlement cadence, interruption and retry — are in
+[`metering.md`](metering.md). What happens at zero balance is
+[ADR-0008](../adr/0008-zero-balance-policy.md) (Proposed). In summary:
+
+- GPU seconds accrue from SkyPilot reporting the cluster `UP` until the job's
+  process exits, a cancel is accepted, `max_runtime_seconds` is reached, or the
+  cluster goes down, whichever is first. Provisioning, including a retry's, is
+  never billed.
 - Every 5 minutes while running, and once at termination, compute-api writes a
   `usage_event` (job id, from, to, seconds, sku, rate, amount) to its own
   append-only ledger, then calls `settle` on the console with the cumulative
   amount. The ledger is the source of truth; the console call is idempotent on
   the event id and retried until it succeeds.
-- When cumulative settled amount reaches the hold, compute-api tries to extend
-  the hold by one more interval; if refused (`402`), the job is cancelled with
-  `error.code = balance_exhausted`.
-- At terminal state, the remainder of the hold is released.
+- The hold is kept at least one hour of SKU rate ahead of usage by `extend`.
+  If an extension is refused (`402`) and the hold falls below 10 minutes of
+  rate, the job is cancelled with `error.code = balance_exhausted`; if the
+  console is unreachable for that long, with `error.code = billing_unavailable`.
+- At terminal state, a final `settle` releases the remainder of the hold.
+- Artifact storage (GB-hours, from terminal state until deletion) and egress
+  (GB downloaded) are charged once a day per account, not against the job's
+  hold.
 
 ## Rate limits
 
