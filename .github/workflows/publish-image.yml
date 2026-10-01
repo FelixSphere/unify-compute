@@ -1,0 +1,129 @@
+# Publishes compute-api to GHCR.
+#
+# This exists because `ci.yml` builds the container and throws it away, while
+# `deploy/aws/staging` pins `ghcr.io/felixsphere/unify-compute-api`. On
+# 11 Sep 2026 that repository did not exist in the registry at all
+# (`NAME_UNKNOWN`), so a first `terraform apply` would have booted an instance
+# whose `docker compose up` could never pull — and terraform would have
+# reported success. Nothing may pin an image this workflow has not published.
+#
+# Multi-arch is not optional: staging and UnifyAPI production are both
+# Graviton (`t4g.small`). An amd64-only image will not run there, and that
+# failure appears as a container that never starts rather than as a pull
+# error. The arm64 assertion below is the gate.
+name: Publish compute-api image
+
+on:
+  push:
+    tags: ["compute-api-v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to publish (e.g. dev, or compute-api-v0.1.0)"
+        required: true
+        default: dev
+      reason:
+        description: "Why this is being published — recorded in the run"
+        required: true
+
+concurrency:
+  group: publish-image-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/felixsphere/unify-compute-api
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve the tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "value=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The same checks ci.yml runs. A tag push does not wait for another
+      # workflow, so an image is never published from code that has not passed.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: compute-api/go.mod
+          cache-dependency-path: compute-api/go.mod
+      - name: Test before publishing
+        working-directory: compute-api
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then echo "$unformatted"; gofmt -d .; exit 1; fi
+          go vet ./...
+          go test ./...
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push (amd64 + arm64)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: compute-api
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: false
+          build-args: BUILD=${{ github.sha }}
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.tag.outputs.value }}
+            ${{ env.IMAGE }}:sha-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The published manifest must carry arm64, and the digest is what the
+      # deploy pins — a tag can be repointed by whoever can push, a digest
+      # cannot. Read this from the registry, not from the build: the build
+      # saying "ok" is the control plane talking about itself.
+      - name: Assert the published manifest carries arm64
+        run: |
+          REF="${{ env.IMAGE }}@${{ steps.build.outputs.digest }}"
+          docker buildx imagetools inspect "$REF" --raw > manifest.json
+          cat manifest.json
+          if ! jq -e '.manifests[]? | select(.platform.architecture == "arm64" and .platform.os == "linux")' manifest.json >/dev/null; then
+            echo "::error::published manifest has no linux/arm64 — staging and production are t4g (Graviton) and cannot run this image"
+            exit 1
+          fi
+          jq -e '.manifests[]? | select(.platform.architecture == "amd64" and .platform.os == "linux")' manifest.json >/dev/null \
+            || { echo "::error::published manifest has no linux/amd64"; exit 1; }
+
+      - name: Record what to pin
+        run: |
+          {
+            echo "### compute-api published"
+            echo
+            echo "| field | value |"
+            echo "|---|---|"
+            echo "| tag | \`${{ env.IMAGE }}:${{ steps.tag.outputs.value }}\` |"
+            echo "| digest | \`${{ steps.build.outputs.digest }}\` |"
+            echo "| commit | \`${{ github.sha }}\` |"
+            echo "| reason | ${{ inputs.reason || 'tag push' }} |"
+            echo
+            echo "Pin the **digest** in \`deploy/aws/staging/variables.tf\`:"
+            echo
+            echo "\`\`\`hcl"
+            echo "compute_api_image = \"${{ env.IMAGE }}@${{ steps.build.outputs.digest }}\""
+            echo "\`\`\`"
+          } >> "$GITHUB_STEP_SUMMARY"

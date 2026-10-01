@@ -11,6 +11,8 @@ systemctl enable --now docker
 
 COMPOSE_DIR=/usr/local/lib/docker/cli-plugins
 mkdir -p "$COMPOSE_DIR"
+# "latest" is unpinned: every boot may get a different compose. Pin a
+# release here once the first apply has proven the stack.
 curl -fsSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-aarch64" \
   -o "$COMPOSE_DIR/docker-compose"
 chmod +x "$COMPOSE_DIR/docker-compose"
@@ -42,15 +44,51 @@ get_param() {
     --name "$1" --query 'Parameter.Value' --output text
 }
 
+# Read every parameter into a variable first. A $(...) inside the heredoc
+# below would swallow a failure under set -e and leave an empty value that
+# only surfaces later in `journalctl -u unify-compute`. Missing or unreadable
+# (AccessDenied) parameters must stop the bootstrap here, in this log.
+require_param() {
+  local value
+  if ! value=$(get_param "$1"); then
+    echo "required SSM parameter $1 is missing or unreadable" >&2; exit 1
+  fi
+  [ -n "$value" ] || { echo "required SSM parameter $1 is empty" >&2; exit 1; }
+  printf '%s' "$value"
+}
+# These two are interpolated raw into connection URLs in the compose file
+# (postgresql://unify:PASS@postgres:5432/console, redis://:PASS@redis:6379).
+# A "/" in the value ends the URL authority and the DSN silently becomes
+# nonsense, which surfaces as a console that never passes its health check.
+# scripts/staging-secrets.sh generates hex for exactly this reason; assert it
+# here so a hand-made parameter fails in this log instead of in Postgres.
+require_url_safe_param() {
+  local value
+  value=$(require_param "$1")
+  case "$value" in
+    *[!0-9A-Za-z._~-]*)
+      echo "SSM parameter $1 contains a character that changes the meaning of a connection URL (expected unreserved characters only; use: openssl rand -hex 32)" >&2
+      exit 1
+      ;;
+  esac
+  printf '%s' "$value"
+}
+
+POSTGRES_PASSWORD=$(require_url_safe_param '${ssm_postgres_password}')
+REDIS_PASSWORD=$(require_url_safe_param '${ssm_redis_password}')
+SESSION_SECRET=$(require_param '${ssm_session_secret}')
+# Optional until the console ships the bridge routes.
+COMPUTE_BRIDGE_SECRET=$(get_param '${ssm_bridge_secret}' 2>/dev/null || true)
+
 install -d -m 0700 /opt/unify-compute
 cat >/opt/unify-compute/.env <<ENV
 ENVIRONMENT=${environment}
 CONSOLE_IMAGE=${console_image}
 COMPUTE_API_IMAGE=${compute_api_image}
-POSTGRES_PASSWORD=$(get_param '${ssm_postgres_password}')
-REDIS_PASSWORD=$(get_param '${ssm_redis_password}')
-SESSION_SECRET=$(get_param '${ssm_session_secret}')
-COMPUTE_BRIDGE_SECRET=$(get_param '${ssm_bridge_secret}' 2>/dev/null || true)
+POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+REDIS_PASSWORD=$REDIS_PASSWORD
+SESSION_SECRET=$SESSION_SECRET
+COMPUTE_BRIDGE_SECRET=$COMPUTE_BRIDGE_SECRET
 CONSOLE_BIND=0.0.0.0
 COMPUTE_API_BIND=0.0.0.0
 SESSION_COOKIE_SECURE=true

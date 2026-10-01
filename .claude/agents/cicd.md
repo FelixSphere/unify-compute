@@ -44,19 +44,27 @@ account. Two consequences:
   Staging runs its own console container from the same pinned image
   (`CONSOLE_IMAGE` in `deploy/compose/.env.example`), with a separate database.
   Never point staging compute at the production console.
-- **State:** Terraform state for staging is local to whoever applies it and
-  contains generated secrets. It must not be committed. `ci.yml` rejects
-  `*.tfstate` files. Moving it to S3 with locking is an open task.
+- **State:** Terraform state for staging lives in S3 with native locking
+  (`deploy/aws/staging/backend.tf`), key `unify-compute/staging/terraform.tfstate`.
+  The bucket is **not bootstrapped yet** — run `scripts/tf-backend-bootstrap.sh`
+  before the first `terraform init`, or `init` fails. `use_lockfile` needs
+  Terraform >= 1.10. State must still never be committed; `ci.yml` rejects
+  `*.tfstate` files.
 
 ## Applying staging for the first time
 
 1. Confirm the Route53 zone `unifyai.us` is in the target account and that
    `compute.unifyai.us` still CNAMEs to OpenAI Sites. The staging records are
    children of that name; do not touch the apex record.
-2. Put the secrets in SSM under `/unify-compute-staging/*` (names are in
-   `deploy/aws/staging/variables.tf`). Generate them with
-   `openssl rand -base64 32`. The console bridge secret must be the same value
-   on the console side and the compute-api side.
+2. Put the secrets in SSM with `scripts/staging-secrets.sh`, not by hand.
+   **Not `openssl rand -base64 32`** — that was this runbook's instruction and
+   it is wrong: base64 contains `/`, and these values are interpolated raw into
+   `postgresql://unify:PASS@postgres:5432/console`, where a `/` ends the URL
+   authority. About one password in two would have produced a console that
+   never passes its health check, with nothing in the bootstrap log to explain
+   it. The script generates hex and verifies what it wrote; user-data now
+   rejects a non-URL-safe value at boot. The console bridge secret must be the
+   same value on the console side and the compute-api side.
 3. `terraform init && terraform plan` in `deploy/aws/staging/`. Read the plan.
    Expect: one VPC, two subnets, one ALB with two listener rules, one ACM
    certificate, three Route53 records, one t4g.small, one EBS data volume.
