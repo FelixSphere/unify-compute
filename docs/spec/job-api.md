@@ -76,12 +76,31 @@ Money is a decimal string in USD, never a float. Timestamps are Unix seconds.
 ```
 queued ──▶ provisioning ──▶ running ──▶ succeeded
    │             │             │
-   │             │             ├──▶ failed        (non-zero exit, image pull error)
-   │             │             ├──▶ interrupted   (spot preemption, provider fault) *planned: auto-retry*
+   │             ├─────────────┼──▶ failed        (non-zero exit; before running: image pull
+   │             │             │                   failure, capacity exhausted on every candidate provider)
+   │             ├─────────────┼──▶ interrupted   (spot preemption, provider fault; before running:
+   │             │             │                   preempted before the job started) *planned: auto-retry*
    └─────────────┴─────────────┴──▶ cancelled     (customer cancel, or balance exhausted)
 ```
 
+Allowed transitions:
+
+| From | To |
+|---|---|
+| `queued` | `provisioning`, `cancelled` |
+| `provisioning` | `running`, `failed`, `interrupted`, `cancelled` |
+| `running` | `succeeded`, `failed`, `interrupted`, `cancelled` |
+
 `succeeded`, `failed`, `interrupted`, `cancelled` are terminal.
+
+`provisioning → failed` covers a job that never started: the image could not
+be pulled, or no candidate provider had capacity. `provisioning → interrupted`
+covers a node preempted after it was acquired but before the job started.
+Provisioning time is never GPU-billed, whichever way it ends: GPU seconds are
+metered only while the job is `running`, from cluster `UP` (rows B2, B4 and B8
+of the billable-state table in `docs/spec/metering.md`, proposed in PR #8). A
+job that ends from `provisioning` is charged no GPU time and its hold is
+released in full.
 
 ### SKU
 

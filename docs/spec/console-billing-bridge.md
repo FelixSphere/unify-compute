@@ -25,14 +25,43 @@ Server-to-server, modelled on the console's existing Builder bridge:
   `METHOD + "\n" + PATH + "\n" + TIMESTAMP + "\n" + EXACT_BODY`
   with the shared secret `COMPUTE_BRIDGE_SECRET` (≥ 32 chars).
 - The secret is per environment. Staging and production never share one.
-- Missing `COMPUTE_BRIDGE_SECRET` on the console disables the routes entirely
-  (`404`), same as the Builder bridge.
+- Missing `COMPUTE_BRIDGE_SECRET` on the console disables the routes entirely:
+  every bridge path answers `404` with **no body**. This deliberately differs
+  from the Builder bridge, which answers `401` when its secret is unset: a dark
+  bridge should not advertise that it exists, and compute-api must be able to
+  tell "bridge off" from "credential wrong" (`401`) without guessing.
 - Routes sit under `/api/compute/v1/` and are excluded from the browser
-  session auth; the HMAC is the only credential. They are rate-limited by the
-  console's global API limiter.
+  session auth; the HMAC is the only credential.
 
-The client implementation is `compute-api/internal/console/sign.go`; its test
-pins the canonical string so both sides can be checked against the same vector.
+The client implementation is `compute-api/internal/console/client.go`; its test
+(`client_test.go`) pins the canonical string so both sides can be checked
+against the same vector.
+
+## Rate limiting
+
+The bridge routes are **excluded from the console's global API limiter**. That
+limiter is per IP (360 requests per 180 s by default, about 2 requests/s), and
+every bridge call comes from compute-api's one egress IP, so under it the whole
+compute product would share 2 requests/s and a burst of settles would starve
+`verify`.
+
+Instead the bridge has its own limiter: default **50 requests/s with a burst of
+100**, configurable on the console with `COMPUTE_BRIDGE_RATE_LIMIT`. Over the
+limit the console answers `429` with a `Retry-After` header (seconds), and
+compute-api waits at least that long before retrying. The HMAC check still runs
+on every request; the limiter only bounds volume.
+
+## Errors and `404`
+
+Errors use the envelope with `success: false`, and `message` carries a stable
+machine-readable code (`hold_not_found`, `hold_expired`, `hold_exceeded`,
+`idempotency_conflict`, …) where one is listed below. Two `404`s exist and are
+distinguished by the body:
+
+| Response | Meaning |
+|---|---|
+| `404`, empty body | Bridge disabled (`COMPUTE_BRIDGE_SECRET` unset). compute-api reports `bridge_disabled`. |
+| `404`, JSON envelope, `message: "hold_not_found"` | The bridge is on and the `hold_id` in the path is unknown. |
 
 ## Quota unit
 
@@ -73,11 +102,17 @@ Response `data`:
 Semantics: same checks as `TokenAuth` on the relay path (key exists, enabled,
 not expired, user enabled), without the model-specific header handling.
 `remain_quota` is the billing entity's balance (tenant if `tenant_id > 0`,
-else user). Suspended tenants return `status: "suspended"` and compute treats
-that as a refusal.
+else user). A `200` always carries `status: "active"`; a suspended or disabled
+account is never a `200`.
 
-Errors: `401` unknown/disabled key (`success: false`, message from the
-console's existing i18n), `403` suspended.
+Errors:
+
+- `401` unknown, disabled or expired key (`success: false`, message from the
+  console's existing i18n).
+- `403` the key is valid but the account may not spend: `success: false`, the
+  console's i18n message, and `data: { "status": "suspended" }` for a
+  suspended tenant or `data: { "status": "disabled" }` for a disabled user.
+  compute-api reads `data.status` to tell the customer which one applies.
 
 ### `POST /api/compute/v1/holds`
 
@@ -125,8 +160,25 @@ call.
 
 ### `POST /api/compute/v1/holds/{hold_id}/extend`
 
-Request: `{ "additional_quota": 300000 }`. Same refusal rules as creating a
-hold (`402`). Response `data` echoes the new `quota` and `remain_quota`.
+Request:
+```json
+{ "extend_id": "ext_01J8…", "additional_quota": 300000 }
+```
+
+`extend_id` is required: client-generated, `ext_` followed by a ULID, at most
+64 characters. Same refusal rules as creating a hold (`402`). Response `data`
+echoes the new `quota` and `remain_quota`.
+
+Idempotent per hold on `extend_id`. An extend that commits but whose response
+is lost would otherwise be retried and reserve `additional_quota` a second
+time: the surplus comes back only at final settle, release or expiry, so for
+the life of the job the customer's balance reads low and a later hold or
+extend can fail with a false `402`.
+
+- Same `extend_id` and same `additional_quota`: `200` with the hold's current
+  state (`quota`, `remain_quota`); nothing is reserved again.
+- Same `extend_id` with a different `additional_quota`: `409`,
+  `message: "idempotency_conflict"`; nothing moves.
 
 ### `POST /api/compute/v1/holds/{hold_id}/release`
 
@@ -149,7 +201,7 @@ model/main.go                    one UNIFYAPI-BRAND line: AutoMigrate the two ta
 docs/compute-bridge.md           copy of this contract from the console's point of view
 ```
 
-Environment: `COMPUTE_BRIDGE_SECRET`. No new dependency (`crypto/hmac` is
+Environment: `COMPUTE_BRIDGE_SECRET`, `COMPUTE_BRIDGE_RATE_LIMIT` (optional). No new dependency (`crypto/hmac` is
 stdlib; the Builder bridge already does the same).
 
 Pricing: the console does **not** get a compute price table. It moves quota
@@ -171,3 +223,22 @@ is correct: compute does not consume supplier credit lots.
 
 Owned by the UnifyAPI CI/CD agent for step 1 and the unify-compute CI/CD agent
 for steps 2–3.
+
+## Revision 2026-10-01
+
+Approved by the operator after the first implementations (compute-api PR #9,
+the fake console; PR #10, the job store; unifyapi-console PR #225, the bridge
+server) found gaps:
+
+- `extend` takes a required `extend_id` and is idempotent per hold; a
+  different amount under the same id is `409 idempotency_conflict`.
+- `verify` refuses a suspended tenant or disabled user with `403` and
+  `data.status` = `"suspended"` / `"disabled"`; it never returns those as `200`.
+- The two `404`s are distinguished: empty body = bridge disabled, JSON
+  `hold_not_found` = unknown hold.
+- Bridge routes leave the console's global API limiter for a dedicated one
+  (50 rps, burst 100, `COMPUTE_BRIDGE_RATE_LIMIT`), answering `429` with
+  `Retry-After`.
+- File references corrected to `client.go` / `client_test.go`.
+- The Builder bridge answers `401`, not `404`, when its secret is unset; the
+  compute bridge's `404` is kept on purpose.
