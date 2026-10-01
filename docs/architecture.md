@@ -114,8 +114,9 @@ Not in v1, and not built:
 
 - **Console unreachable mid-job.** The job keeps running; usage keeps accruing
   in the local ledger; settlement retries. The hold placed at submit is the
-  bound on exposure. **Open:** whether a job is killed when settlement has
-  failed for longer than the hold covers.
+  bound on exposure. Decided in [ADR-0008](adr/0008-zero-balance-policy.md)
+  (Proposed): the hold is kept an hour ahead, and the job is cancelled with
+  `billing_unavailable` only when that runs out.
 - **Job runs longer than estimated.** Periodic settlement (every N minutes)
   draws down the hold; when the hold is consumed the service either tops up the
   hold from remaining balance or terminates the job. `max_runtime_seconds` on
@@ -143,11 +144,12 @@ incident, it is a production one.
 
 ## Open questions, in the order they need answering
 
-1. **Hold sizing.** Estimated seconds × SKU price × safety factor, or a flat
-   per-SKU minimum? Decides how much balance a small job locks up.
-2. **Settlement cadence.** Per minute is precise and chatty; per five minutes
-   bounds exposure at 5 min × SKU rate per running job. Probably five, with a
-   final settle on termination.
+1. **Hold sizing.** Proposed in [`spec/metering.md`](spec/metering.md#hold-sizing):
+   no safety factor and no flat minimum; the hold is `rate × min(max_runtime, 2 h)`
+   at submit, extended to stay at least 1 h of rate ahead.
+2. **Settlement cadence.** Proposed in [`spec/metering.md`](spec/metering.md#settlement-cadence):
+   every 5 minutes plus a final settle on termination; storage and egress
+   daily per account.
 3. **First SKU and first provider.** One GPU type on one cloud, per the
    research note's suggestion. Which one decides the first SkyPilot config.
 4. **Where job results live.** Object storage in our account with signed URLs,
