@@ -1,7 +1,10 @@
 // Package consoletest is an in-process fake of the console's side of the
 // billing bridge, written from docs/spec/console-billing-bridge.md alone. It
 // exists so compute-api tests can exercise holds, settlement and console
-// outages without a running console.
+// outages without a running console. It follows the operator-approved spec
+// revision of 2026-10-01: extend_id on extend, a `code` on every error
+// envelope, a bodiless 404 when the bridge is disabled, 403 with data.status
+// for suspended tenants and disabled users, and a dedicated rate limiter.
 //
 // Nothing here is derived from FelixSphere/unifyapi-console (AGPL-3.0). Where
 // the spec is silent, the behaviour chosen is documented on the method or
@@ -18,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -43,23 +47,37 @@ const (
 	RouteRelease = "release"
 )
 
-// Messages for refusals. The spec names hold_expired and hold_exceeded; the
-// rest are the fake's own and the real console may word them differently, so
-// tests should assert on status codes first.
+// Error codes, sent as both `code` and `message` in the error envelope.
+// hold_expired, hold_exceeded, hold_not_found and idempotency_conflict are
+// named by the spec; the rest are the fake's own and the real console may
+// word them differently, so tests should assert on status codes first.
 const (
-	MsgInvalidKey          = "invalid token"
-	MsgSuspended           = "tenant suspended"
-	MsgInsufficientBalance = "insufficient_balance"
-	MsgHoldExpired         = "hold_expired"
-	MsgHoldExceeded        = "hold_exceeded"
-	MsgHoldClosed          = "hold_closed"
-	MsgHoldNotFound        = "hold_not_found"
-	MsgEventConflict       = "event_id_conflict"
-	MsgBadSignature        = "invalid signature"
-	MsgBadTimestamp        = "invalid timestamp"
-	MsgBadRequest          = "bad request"
-	MsgInjected            = "injected failure"
+	CodeInvalidKey          = "invalid_key"
+	CodeSuspended           = "suspended"
+	CodeDisabled            = "disabled"
+	CodeInsufficientBalance = "insufficient_balance"
+	CodeHoldExpired         = "hold_expired"
+	CodeHoldExceeded        = "hold_exceeded"
+	CodeHoldClosed          = "hold_closed"
+	CodeHoldNotFound        = "hold_not_found"
+	CodeIdempotencyConflict = "idempotency_conflict"
+	CodeRateLimited         = "rate_limited"
+	CodeBadSignature        = "invalid_signature"
+	CodeBadTimestamp        = "invalid_timestamp"
+	CodeBadRequest          = "bad_request"
+	CodeInjected            = "injected_failure"
 )
+
+// DefaultRate and DefaultBurst are the console's dedicated bridge limiter.
+// SetRateLimit(DefaultRate, DefaultBurst) turns it on; it is off by default so
+// unrelated tests never see a 429.
+const (
+	DefaultRate  = 50
+	DefaultBurst = 100
+)
+
+// MaxExtendIDLen bounds extend_id, which the client generates as ext_+ULID.
+const MaxExtendIDLen = 64
 
 type HoldStatus string
 
@@ -170,7 +188,19 @@ type Server struct {
 	holds    map[string]*Hold
 	holdResp map[string]holdData
 	events   map[string]settledEvent
-	logs     []ConsumeLog
+	extends  map[string]extendRecord
+
+	rate      float64
+	burst     float64
+	tokensNow float64
+	lastFill  time.Time
+	logs      []ConsumeLog
+}
+
+type extendRecord struct {
+	holdID string
+	amount int64
+	resp   holdData
 }
 
 type settledEvent struct {
@@ -196,6 +226,7 @@ func New(secret []byte) *Server {
 		holds:    map[string]*Hold{},
 		holdResp: map[string]holdData{},
 		events:   map[string]settledEvent{},
+		extends:  map[string]extendRecord{},
 	}
 	s.Server = httptest.NewServer(s.handler())
 	return s
@@ -276,6 +307,35 @@ func (s *Server) InjectFault(f Fault) {
 // RefuseNext fails the next n calls to any route with status.
 func (s *Server) RefuseNext(n, status int) {
 	s.InjectFault(Fault{Times: n, Status: status})
+}
+
+// SetRateLimit enables the bridge limiter at rate requests per second with
+// the given burst, measured on the fake's clock (so a frozen clock never
+// refills). rate <= 0 turns it off. The bucket starts full.
+func (s *Server) SetRateLimit(rate float64, burst int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rate, s.burst = rate, float64(burst)
+	s.tokensNow, s.lastFill = float64(burst), s.now()
+}
+
+// allow takes one token, or reports how long until one is available.
+func (s *Server) allow() (bool, time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.rate <= 0 {
+		return true, 0
+	}
+	now := s.now()
+	if el := now.Sub(s.lastFill).Seconds(); el > 0 {
+		s.tokensNow = min(s.burst, s.tokensNow+el*s.rate)
+	}
+	s.lastFill = now
+	if s.tokensNow >= 1 {
+		s.tokensNow--
+		return true, 0
+	}
+	return false, time.Duration((1 - s.tokensNow) / s.rate * float64(time.Second))
 }
 
 func (s *Server) ClearFaults() {
@@ -408,7 +468,7 @@ func (s *Server) handler() http.Handler {
 		if len(s.secret) == 0 {
 			body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 			s.record(Call{Method: r.Method, Path: r.URL.Path, Body: body, Status: http.StatusNotFound})
-			http.NotFound(w, r)
+			w.WriteHeader(http.StatusNotFound)
 			return
 		}
 		mux.ServeHTTP(w, r)
@@ -449,7 +509,7 @@ func (s *Server) route(name string, apply func(r *http.Request, body []byte) res
 		if err != nil {
 			call.Status = http.StatusBadRequest
 			s.record(call)
-			writeEnvelope(w, fail(http.StatusBadRequest, MsgBadRequest))
+			writeEnvelope(w, fail(http.StatusBadRequest, CodeBadRequest))
 			return
 		}
 
@@ -479,10 +539,22 @@ func (s *Server) route(name string, apply func(r *http.Request, body []byte) res
 			return
 		}
 
+		if allowed, wait := s.allow(); !allowed {
+			call.Status = http.StatusTooManyRequests
+			s.record(call)
+			secs := int64(math.Ceil(wait.Seconds()))
+			if secs < 1 {
+				secs = 1
+			}
+			w.Header().Set("Retry-After", strconv.FormatInt(secs, 10))
+			writeEnvelope(w, fail(http.StatusTooManyRequests, CodeRateLimited))
+			return
+		}
+
 		if err := VerifySignature(s.secret, r.Method, r.URL.Path, r.Header.Get(console.HeaderTimestamp), r.Header.Get(console.HeaderSignature), body, s.Now()); err != nil {
-			msg := MsgBadSignature
+			msg := CodeBadSignature
 			if errors.Is(err, ErrBadTimestamp) {
-				msg = MsgBadTimestamp
+				msg = CodeBadTimestamp
 			}
 			call.Status = http.StatusUnauthorized
 			s.record(call)
@@ -510,7 +582,7 @@ func injected(w http.ResponseWriter, f Fault) {
 		drop(w)
 		return
 	}
-	writeEnvelope(w, fail(f.Status, MsgInjected))
+	writeEnvelope(w, fail(f.Status, CodeInjected))
 }
 
 func drop(w http.ResponseWriter) {
@@ -525,11 +597,17 @@ func drop(w http.ResponseWriter) {
 
 func writeEnvelope(w http.ResponseWriter, r response) {
 	var buf bytes.Buffer
+	success := r.status/100 == 2
+	code := ""
+	if !success {
+		code = r.msg
+	}
 	_ = json.NewEncoder(&buf).Encode(struct {
 		Success bool   `json:"success"`
 		Message string `json:"message"`
+		Code    string `json:"code,omitempty"`
 		Data    any    `json:"data"`
-	}{r.status/100 == 2, r.msg, r.data})
+	}{success, r.msg, code, r.data})
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(r.status)
 	_, _ = w.Write(buf.Bytes())

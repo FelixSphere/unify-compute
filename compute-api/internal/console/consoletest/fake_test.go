@@ -3,9 +3,12 @@ package consoletest
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,6 +52,65 @@ func status(t *testing.T, err error) int {
 		t.Fatalf("want *console.Error, got %v", err)
 	}
 	return e.Status
+}
+
+type rawEnvelope struct {
+	Success bool            `json:"success"`
+	Message string          `json:"message"`
+	Code    string          `json:"code"`
+	Data    json.RawMessage `json:"data"`
+}
+
+type rawResponse struct {
+	status int
+	header http.Header
+	body   []byte
+	env    rawEnvelope
+}
+
+// post sends a correctly signed bridge request without console.Client, for
+// contract details the client on main does not expose yet (extend_id, error
+// codes, response bodies on refusals).
+func post(t *testing.T, s *Server, path string, in any) rawResponse {
+	t.Helper()
+	body, err := json.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	full := "/api/compute/v1" + path
+	ts := s.Now().Unix()
+	req, _ := http.NewRequest("POST", s.URL+full, bytes.NewReader(body))
+	req.Header.Set(console.HeaderTimestamp, strconv.FormatInt(ts, 10))
+	req.Header.Set(console.HeaderSignature, console.Sign(vectorSecret, "POST", full, ts, body))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	out := rawResponse{status: resp.StatusCode, header: resp.Header}
+	out.body, _ = io.ReadAll(resp.Body)
+	if len(out.body) > 0 {
+		_ = json.Unmarshal(out.body, &out.env)
+	}
+	return out
+}
+
+type extendOut struct {
+	HoldID      string `json:"hold_id"`
+	Quota       int64  `json:"quota"`
+	RemainQuota int64  `json:"remain_quota"`
+}
+
+func extend(t *testing.T, s *Server, holdID, extendID string, q int64) (rawResponse, extendOut) {
+	t.Helper()
+	r := post(t, s, "/holds/"+holdID+"/extend", map[string]any{"extend_id": extendID, "additional_quota": q})
+	var out extendOut
+	if r.status == 200 {
+		if err := json.Unmarshal(r.env.Data, &out); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return r, out
 }
 
 func holdReq(id string, q int64) console.HoldRequest {
@@ -125,6 +187,11 @@ func TestEveryRouteIs404WithoutASecret(t *testing.T) {
 	if n := len(s.Calls()); n != 5 {
 		t.Errorf("recorded %d calls, want 5", n)
 	}
+	for _, p := range []string{"/verify", "/holds", "/holds/h/settle", "/holds/h/extend", "/holds/h/release"} {
+		if r := post(t, s, p, map[string]any{}); r.status != 404 || len(r.body) != 0 {
+			t.Errorf("%s disabled: %d with body %q, want 404 and no body", p, r.status, r.body)
+		}
+	}
 }
 
 func TestVerify(t *testing.T) {
@@ -152,15 +219,25 @@ func TestVerify(t *testing.T) {
 	s.SeedKey(Key{Key: "sk-old", TokenID: 2, UserID: 1042, ExpiresAt: vectorTS - 1})
 	s.SeedUser(User{ID: 3, Disabled: true})
 	s.SeedKey(Key{Key: "sk-banned", TokenID: 3, UserID: 3})
-	for _, k := range []string{"sk-nope", "sk-off", "sk-old", "sk-banned"} {
+	for _, k := range []string{"sk-nope", "sk-off", "sk-old"} {
 		if _, err := c.Verify(ctx, k); status(t, err) != 401 {
 			t.Errorf("%s: want 401, got %v", k, err)
 		}
 	}
 
 	s.SeedTenant(Tenant{ID: 7, Quota: 100 * QuotaPerUnit, Suspended: true})
-	if _, err := c.Verify(ctx, "sk-tenant"); status(t, err) != 403 {
-		t.Errorf("suspended tenant: want 403, got %v", err)
+	for key, want := range map[string]string{"sk-banned": "disabled", "sk-tenant": "suspended"} {
+		if _, err := c.Verify(ctx, key); status(t, err) != 403 {
+			t.Errorf("%s: want 403, got %v", key, err)
+		}
+		r := post(t, s, "/verify", map[string]string{"key": key})
+		var data struct {
+			Status string `json:"status"`
+		}
+		_ = json.Unmarshal(r.env.Data, &data)
+		if r.status != 403 || r.env.Success || r.env.Code != want || data.Status != want {
+			t.Errorf("%s: %d %s, want 403 error envelope with data.status %q", key, r.status, r.body, want)
+		}
 	}
 }
 
@@ -273,8 +350,8 @@ func TestSettleIsIdempotentBoundedAndFinal(t *testing.T) {
 	if _, err := c.Settle(ctx, "hold_1", console.SettleRequest{EventID: "ue_2", CumulativeQuota: 1_000_001}); status(t, err) != 409 {
 		t.Fatalf("over the hold: want 409 hold_exceeded, got %v", err)
 	}
-	if _, err := c.Extend(ctx, "hold_1", 100_000); err != nil {
-		t.Fatal(err)
+	if r, _ := extend(t, s, "hold_1", "ext_1", 100_000); r.status != 200 {
+		t.Fatalf("extend: %d %s", r.status, r.body)
 	}
 	f, err := c.Settle(ctx, "hold_1", console.SettleRequest{EventID: "ue_3", CumulativeQuota: 1_000_001, Final: true})
 	if err != nil {
@@ -295,6 +372,9 @@ func TestSettleIsIdempotentBoundedAndFinal(t *testing.T) {
 	if _, err := c.Settle(ctx, "nope", console.SettleRequest{EventID: "ue_4"}); status(t, err) != 404 {
 		t.Fatalf("unknown hold: %v", err)
 	}
+	if r := post(t, s, "/holds/nope/settle", map[string]any{"event_id": "ue_5"}); r.status != 404 || r.env.Code != CodeHoldNotFound {
+		t.Fatalf("unknown hold must be a JSON 404 with code hold_not_found: %d %s", r.status, r.body)
+	}
 	if _, err := c.Settle(ctx, "nope", ev); status(t, err) != 409 {
 		t.Fatalf("event id reused on another hold: %v", err)
 	}
@@ -302,22 +382,142 @@ func TestSettleIsIdempotentBoundedAndFinal(t *testing.T) {
 
 func TestExtend(t *testing.T) {
 	s, c := seeded(t)
+	if _, err := c.Hold(context.Background(), holdReq("hold_1", QuotaPerUnit)); err != nil {
+		t.Fatal(err)
+	}
+	r, out := extend(t, s, "hold_1", "ext_01J8A", 300_000)
+	if r.status != 200 || out.HoldID != "hold_1" || out.Quota != 800_000 || out.RemainQuota != 25*QuotaPerUnit-800_000 {
+		t.Fatalf("extend %d %s", r.status, r.body)
+	}
+	if r, _ := extend(t, s, "hold_1", "ext_01J8B", 7*QuotaPerUnit); r.status != 402 || r.env.Code != CodeInsufficientBalance {
+		t.Fatalf("extend past the token limit: want 402, got %d %s", r.status, r.body)
+	}
+	if h, _ := s.Hold("hold_1"); h.Quota != 800_000 {
+		t.Fatalf("refused extend changed the hold: %+v", h)
+	}
+	for name, body := range map[string]map[string]any{
+		"no extend_id":    {"additional_quota": 1},
+		"extend_id > 64":  {"extend_id": "ext_" + strings.Repeat("A", 61), "additional_quota": 1},
+		"no amount":       {"extend_id": "ext_01J8C"},
+		"negative amount": {"extend_id": "ext_01J8D", "additional_quota": -1},
+	} {
+		if r := post(t, s, "/holds/hold_1/extend", body); r.status != 400 {
+			t.Errorf("%s: %d, want 400", name, r.status)
+		}
+	}
+	if r, _ := extend(t, s, "hold_1", "ext_"+strings.Repeat("A", 60), 1); r.status != 200 {
+		t.Errorf("64-char extend_id: %d %s", r.status, r.body)
+	}
+	if r, _ := extend(t, s, "nope", "ext_01J8E", 1); r.status != 404 || r.env.Code != CodeHoldNotFound {
+		t.Errorf("unknown hold: %d %s", r.status, r.body)
+	}
+}
+
+func TestExtendIsIdempotentOnExtendID(t *testing.T) {
+	s, c := seeded(t)
 	ctx := context.Background()
 	if _, err := c.Hold(ctx, holdReq("hold_1", QuotaPerUnit)); err != nil {
 		t.Fatal(err)
 	}
-	r, err := c.Extend(ctx, "hold_1", 300_000)
-	if err != nil {
+	if _, err := c.Hold(ctx, holdReq("hold_2", QuotaPerUnit)); err != nil {
 		t.Fatal(err)
 	}
-	if r.HoldID != "hold_1" || r.Quota != 800_000 || r.RemainQuota != 25*QuotaPerUnit-800_000 {
-		t.Fatalf("extend %+v", r)
+	before := s.Balance(1042)
+
+	// The console commits the extend and the response is lost; compute retries
+	// with the same extend_id and must reserve exactly once.
+	s.InjectFault(Fault{Route: RouteExtend, AfterApply: true})
+	body := map[string]any{"extend_id": "ext_01J8RETRY", "additional_quota": 300_000}
+	req, _ := json.Marshal(body)
+	full := "/api/compute/v1/holds/hold_1/extend"
+	ts := s.Now().Unix()
+	hr, _ := http.NewRequest("POST", s.URL+full, bytes.NewReader(req))
+	hr.Header.Set(console.HeaderTimestamp, strconv.FormatInt(ts, 10))
+	hr.Header.Set(console.HeaderSignature, console.Sign(vectorSecret, "POST", full, ts, req))
+	if resp, err := http.DefaultClient.Do(hr); err == nil {
+		resp.Body.Close()
+		t.Fatal("dropped response should surface as a transport error")
 	}
-	if _, err := c.Extend(ctx, "hold_1", 7*QuotaPerUnit); status(t, err) != 402 {
-		t.Fatalf("extend past the token limit: want 402, got %v", err)
+
+	first, out := extend(t, s, "hold_1", "ext_01J8RETRY", 300_000)
+	if first.status != 200 || out.Quota != 800_000 || out.RemainQuota != before-300_000 {
+		t.Fatalf("retry: %d %s", first.status, first.body)
+	}
+	again, out2 := extend(t, s, "hold_1", "ext_01J8RETRY", 300_000)
+	if again.status != 200 || out2 != out {
+		t.Fatalf("second retry should return the original result: %d %s", again.status, again.body)
+	}
+	if s.Balance(1042) != before-300_000 || s.TokenRemainQuota(771) != 8*QuotaPerUnit-2*QuotaPerUnit-300_000 {
+		t.Fatalf("reserved more than once: balance %d token %d", s.Balance(1042), s.TokenRemainQuota(771))
 	}
 	if h, _ := s.Hold("hold_1"); h.Quota != 800_000 {
-		t.Fatalf("refused extend changed the hold: %+v", h)
+		t.Fatalf("hold %+v", h)
+	}
+	if calls := s.CallsTo(RouteExtend); len(calls) != 3 || !calls[0].Applied || !calls[0].Injected {
+		t.Fatalf("extend calls %+v", calls)
+	}
+
+	for name, try := range map[string]func() (rawResponse, extendOut){
+		"different amount": func() (rawResponse, extendOut) { return extend(t, s, "hold_1", "ext_01J8RETRY", 300_001) },
+		"different hold":   func() (rawResponse, extendOut) { return extend(t, s, "hold_2", "ext_01J8RETRY", 300_000) },
+	} {
+		if r, _ := try(); r.status != 409 || r.env.Code != CodeIdempotencyConflict {
+			t.Errorf("%s: %d %s, want 409 idempotency_conflict", name, r.status, r.body)
+		}
+	}
+	if s.Balance(1042) != before-300_000 {
+		t.Fatalf("a conflicting extend moved quota: %d", s.Balance(1042))
+	}
+
+	// A committed extend still replays after the hold has closed.
+	if _, err := c.Release(ctx, "hold_1"); err != nil {
+		t.Fatal(err)
+	}
+	if r, o := extend(t, s, "hold_1", "ext_01J8RETRY", 300_000); r.status != 200 || o != out {
+		t.Fatalf("replay after release: %d %s", r.status, r.body)
+	}
+	if r, _ := extend(t, s, "hold_1", "ext_01J8NEW", 1); r.status != 409 || r.env.Code != CodeHoldClosed {
+		t.Fatalf("new extend on a released hold: %d %s", r.status, r.body)
+	}
+}
+
+func TestRateLimitIsOffByDefaultAndAnswers429WithRetryAfter(t *testing.T) {
+	s, c := seeded(t)
+	ctx := context.Background()
+	for i := 0; i < DefaultBurst+20; i++ {
+		if _, err := c.Verify(ctx, "sk-test"); err != nil {
+			t.Fatalf("call %d with the limiter off: %v", i, err)
+		}
+	}
+
+	s.SetRateLimit(DefaultRate, DefaultBurst)
+	for i := 0; i < DefaultBurst; i++ {
+		if _, err := c.Verify(ctx, "sk-test"); err != nil {
+			t.Fatalf("call %d inside the burst: %v", i, err)
+		}
+	}
+	r := post(t, s, "/verify", map[string]string{"key": "sk-test"})
+	if r.status != 429 || r.env.Code != CodeRateLimited || r.header.Get("Retry-After") != "1" {
+		t.Fatalf("over the burst: %d Retry-After=%q %s", r.status, r.header.Get("Retry-After"), r.body)
+	}
+	if _, err := c.Verify(ctx, "sk-test"); status(t, err) != 429 {
+		t.Fatalf("client sees 429: %v", err)
+	}
+
+	// One second on the fake clock refills DefaultRate tokens.
+	s.SetNow(at(vectorTS + 1))
+	for i := 0; i < DefaultRate; i++ {
+		if _, err := c.Verify(ctx, "sk-test"); err != nil {
+			t.Fatalf("call %d after refill: %v", i, err)
+		}
+	}
+	if _, err := c.Verify(ctx, "sk-test"); status(t, err) != 429 {
+		t.Fatalf("refill is bounded by the rate: %v", err)
+	}
+
+	s.SetRateLimit(0, 0)
+	if _, err := c.Verify(ctx, "sk-test"); err != nil {
+		t.Fatalf("limiter off again: %v", err)
 	}
 }
 
@@ -342,12 +542,14 @@ func TestExpiredHoldsAreSweptAndReported(t *testing.T) {
 			return e
 		}(),
 		func() error { _, e := c.Release(ctx, "hold_1"); return e }(),
-		func() error { _, e := c.Extend(ctx, "hold_1", 1); return e }(),
 	} {
 		var e *console.Error
-		if !errors.As(err, &e) || e.Status != 409 || e.Message != MsgHoldExpired {
+		if !errors.As(err, &e) || e.Status != 409 || e.Message != CodeHoldExpired {
 			t.Errorf("want 409 hold_expired, got %v", err)
 		}
+	}
+	if r, _ := extend(t, s, "hold_1", "ext_1", 1); r.status != 409 || r.env.Code != CodeHoldExpired {
+		t.Errorf("extend on an expired hold: %d %s", r.status, r.body)
 	}
 	if r, err := c.Settle(ctx, "hold_1", console.SettleRequest{EventID: "ue_1", CumulativeQuota: 100_000}); err != nil || r.SettledQuota != 100_000 {
 		t.Errorf("an event settled before expiry still replays: %+v %v", r, err)

@@ -112,22 +112,22 @@ func (s *Server) verify(_ *http.Request, body []byte) response {
 		Key string `json:"key"`
 	}
 	if !decode(body, &in) {
-		return fail(http.StatusBadRequest, MsgBadRequest)
+		return fail(http.StatusBadRequest, CodeBadRequest)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sweep()
 	k := s.keys[in.Key]
 	if k == nil || k.Disabled || (k.ExpiresAt > 0 && s.now().Unix() > k.ExpiresAt) {
-		return fail(http.StatusUnauthorized, MsgInvalidKey)
+		return fail(http.StatusUnauthorized, CodeInvalidKey)
 	}
 	u := s.users[k.UserID]
-	if u == nil || u.Disabled {
-		return fail(http.StatusUnauthorized, MsgInvalidKey)
+	if u == nil {
+		return fail(http.StatusUnauthorized, CodeInvalidKey)
 	}
 	b, t := s.entityBalance(u.ID)
 	if b == nil {
-		return fail(http.StatusUnauthorized, MsgInvalidKey)
+		return fail(http.StatusUnauthorized, CodeInvalidKey)
 	}
 	id := identityData{
 		UserID:           u.ID,
@@ -139,11 +139,13 @@ func (s *Server) verify(_ *http.Request, body []byte) response {
 		TokenUnlimited:   k.Unlimited,
 		TokenRemainQuota: k.RemainQuota,
 	}
-	// The spec gives both "403 suspended" and "status: suspended"; answering
-	// 403 with the identity in data satisfies both readings.
+	if u.Disabled {
+		id.Status = "disabled"
+		return response{status: http.StatusForbidden, msg: CodeDisabled, data: id}
+	}
 	if t != nil && t.Suspended {
 		id.Status = "suspended"
-		return response{status: http.StatusForbidden, msg: MsgSuspended, data: id}
+		return response{status: http.StatusForbidden, msg: CodeSuspended, data: id}
 	}
 	return ok(id)
 }
@@ -159,7 +161,7 @@ func (s *Server) hold(_ *http.Request, body []byte) response {
 		ExpiresAt int64  `json:"expires_at"`
 	}
 	if !decode(body, &in) || in.HoldID == "" || in.Quota <= 0 {
-		return fail(http.StatusBadRequest, MsgBadRequest)
+		return fail(http.StatusBadRequest, CodeBadRequest)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -171,10 +173,10 @@ func (s *Server) hold(_ *http.Request, body []byte) response {
 	u := s.users[in.UserID]
 	k := s.tokens[in.TokenID]
 	if u == nil || k == nil || k.UserID != u.ID {
-		return fail(http.StatusBadRequest, MsgBadRequest)
+		return fail(http.StatusBadRequest, CodeBadRequest)
 	}
 	if !s.canDebit(u.ID, k.TokenID, in.Quota) {
-		return fail(http.StatusPaymentRequired, MsgInsufficientBalance)
+		return fail(http.StatusPaymentRequired, CodeInsufficientBalance)
 	}
 	s.debit(u.ID, k.TokenID, in.Quota)
 	s.holds[in.HoldID] = &Hold{
@@ -198,17 +200,17 @@ func (s *Server) hold(_ *http.Request, body []byte) response {
 func (s *Server) lookupActive(id string) (*Hold, *response) {
 	h := s.holds[id]
 	if h == nil {
-		r := fail(http.StatusNotFound, MsgHoldNotFound)
+		r := fail(http.StatusNotFound, CodeHoldNotFound)
 		return nil, &r
 	}
 	switch h.Status {
 	case HoldExpired:
-		r := fail(http.StatusConflict, MsgHoldExpired)
+		r := fail(http.StatusConflict, CodeHoldExpired)
 		return h, &r
 	case HoldActive:
 		return h, nil
 	default:
-		r := fail(http.StatusConflict, MsgHoldClosed)
+		r := fail(http.StatusConflict, CodeHoldClosed)
 		return h, &r
 	}
 }
@@ -223,14 +225,14 @@ func (s *Server) settle(r *http.Request, body []byte) response {
 		Final           bool   `json:"final"`
 	}
 	if !decode(body, &in) || in.EventID == "" || in.CumulativeQuota < 0 {
-		return fail(http.StatusBadRequest, MsgBadRequest)
+		return fail(http.StatusBadRequest, CodeBadRequest)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sweep()
 	if ev, seen := s.events[in.EventID]; seen {
 		if ev.holdID != holdID {
-			return fail(http.StatusConflict, MsgEventConflict)
+			return fail(http.StatusConflict, CodeIdempotencyConflict)
 		}
 		return ok(ev.resp)
 	}
@@ -239,7 +241,7 @@ func (s *Server) settle(r *http.Request, body []byte) response {
 		return *refusal
 	}
 	if in.CumulativeQuota > h.Quota {
-		return fail(http.StatusConflict, MsgHoldExceeded)
+		return fail(http.StatusConflict, CodeHoldExceeded)
 	}
 	// A cumulative below what is already settled moves nothing: the bridge
 	// has no refund verb, and an out-of-order event must not un-charge.
@@ -272,25 +274,38 @@ func (s *Server) settle(r *http.Request, body []byte) response {
 }
 
 func (s *Server) extend(r *http.Request, body []byte) response {
+	holdID := r.PathValue("hold_id")
 	var in struct {
-		AdditionalQuota int64 `json:"additional_quota"`
+		ExtendID        string `json:"extend_id"`
+		AdditionalQuota int64  `json:"additional_quota"`
 	}
-	if !decode(body, &in) || in.AdditionalQuota <= 0 {
-		return fail(http.StatusBadRequest, MsgBadRequest)
+	if !decode(body, &in) || in.AdditionalQuota <= 0 || in.ExtendID == "" || len(in.ExtendID) > MaxExtendIDLen {
+		return fail(http.StatusBadRequest, CodeBadRequest)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sweep()
-	h, refusal := s.lookupActive(r.PathValue("hold_id"))
+	// Checked before the hold's state so a retry of an extend that committed
+	// still gets its original answer after the hold has closed. extend_ids are
+	// unique across holds, like event_ids.
+	if prev, seen := s.extends[in.ExtendID]; seen {
+		if prev.holdID != holdID || prev.amount != in.AdditionalQuota {
+			return fail(http.StatusConflict, CodeIdempotencyConflict)
+		}
+		return ok(prev.resp)
+	}
+	h, refusal := s.lookupActive(holdID)
 	if refusal != nil {
 		return *refusal
 	}
 	if !s.canDebit(h.UserID, h.TokenID, in.AdditionalQuota) {
-		return fail(http.StatusPaymentRequired, MsgInsufficientBalance)
+		return fail(http.StatusPaymentRequired, CodeInsufficientBalance)
 	}
 	s.debit(h.UserID, h.TokenID, in.AdditionalQuota)
 	h.Quota += in.AdditionalQuota
-	return ok(holdData{HoldID: h.HoldID, Quota: h.Quota, RemainQuota: s.currentBalance(h.UserID)})
+	out := holdData{HoldID: h.HoldID, Quota: h.Quota, RemainQuota: s.currentBalance(h.UserID)}
+	s.extends[in.ExtendID] = extendRecord{holdID: holdID, amount: in.AdditionalQuota, resp: out}
+	return ok(out)
 }
 
 func (s *Server) release(r *http.Request, _ []byte) response {
