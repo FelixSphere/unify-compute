@@ -1,9 +1,9 @@
 // Package consoletest is an in-process fake of the console's side of the
 // billing bridge, written from docs/spec/console-billing-bridge.md alone. It
 // exists so compute-api tests can exercise holds, settlement and console
-// outages without a running console. It follows the operator-approved spec
-// revision of 2026-10-01: extend_id on extend, a `code` on every error
-// envelope, a bodiless 404 when the bridge is disabled, 403 with data.status
+// outages without a running console. It follows the spec as revised on
+// 2026-10-01 (PR #11): extend_id on extend, the error-code table carried in
+// `message`, a bodiless 404 when the bridge is disabled, 403 with data.status
 // for suspended tenants and disabled users, and a dedicated rate limiter.
 //
 // Nothing here is derived from FelixSphere/unifyapi-console (AGPL-3.0). Where
@@ -47,25 +47,27 @@ const (
 	RouteRelease = "release"
 )
 
-// Error codes, sent as both `code` and `message` in the error envelope.
-// hold_expired, hold_exceeded, hold_not_found and idempotency_conflict are
-// named by the spec; the rest are the fake's own and the real console may
-// word them differently, so tests should assert on status codes first.
+// Error codes, from the spec's table under "Errors and 404". Each is sent in
+// `message`, which clients read, and repeated in the optional `code` field.
 const (
-	CodeInvalidKey          = "invalid_key"
-	CodeSuspended           = "suspended"
-	CodeDisabled            = "disabled"
-	CodeInsufficientBalance = "insufficient_balance"
-	CodeHoldExpired         = "hold_expired"
-	CodeHoldExceeded        = "hold_exceeded"
-	CodeHoldClosed          = "hold_closed"
-	CodeHoldNotFound        = "hold_not_found"
-	CodeIdempotencyConflict = "idempotency_conflict"
-	CodeRateLimited         = "rate_limited"
-	CodeBadSignature        = "invalid_signature"
-	CodeBadTimestamp        = "invalid_timestamp"
-	CodeBadRequest          = "bad_request"
-	CodeInjected            = "injected_failure"
+	CodeInvalidRequest           = "invalid_request"
+	CodeInvalidSignature         = "invalid_signature"
+	CodeInvalidTimestamp         = "invalid_timestamp"
+	CodeInvalidKey               = "invalid_key"
+	CodeDisabled                 = "disabled"
+	CodeSuspended                = "suspended"
+	CodeInsufficientBalance      = "insufficient_balance"
+	CodeHoldNotFound             = "hold_not_found"
+	CodeHoldExceeded             = "hold_exceeded"
+	CodeHoldExpired              = "hold_expired"
+	CodeHoldClosed               = "hold_closed"
+	CodeIdempotencyConflict      = "idempotency_conflict"
+	CodeRateLimited              = "rate_limited"
+	CodeSKUMismatch              = "sku_mismatch"
+	CodeCumulativeQuotaRegressed = "cumulative_quota_regressed"
+
+	// codeInjected is the fake's own, for responses a Fault forces.
+	codeInjected = "injected_failure"
 )
 
 // DefaultRate and DefaultBurst are the console's dedicated bridge limiter.
@@ -186,7 +188,7 @@ type Server struct {
 	keys     map[string]*Key
 	tokens   map[int]*Key
 	holds    map[string]*Hold
-	holdResp map[string]holdData
+	holdResp map[string]holdRecord
 	events   map[string]settledEvent
 	extends  map[string]extendRecord
 
@@ -197,10 +199,14 @@ type Server struct {
 	logs      []ConsumeLog
 }
 
+type holdRecord struct {
+	req  holdRequest
+	resp holdData
+}
+
 type extendRecord struct {
 	holdID string
 	amount int64
-	resp   holdData
 }
 
 type settledEvent struct {
@@ -224,7 +230,7 @@ func New(secret []byte) *Server {
 		keys:     map[string]*Key{},
 		tokens:   map[int]*Key{},
 		holds:    map[string]*Hold{},
-		holdResp: map[string]holdData{},
+		holdResp: map[string]holdRecord{},
 		events:   map[string]settledEvent{},
 		extends:  map[string]extendRecord{},
 	}
@@ -413,7 +419,6 @@ func (s *Server) Sweep() {
 // --- signature -----------------------------------------------------------
 
 var (
-	ErrMissingAuth  = errors.New("missing timestamp or signature")
 	ErrBadTimestamp = errors.New("timestamp outside the replay window")
 	ErrBadSignature = errors.New("signature mismatch")
 )
@@ -422,8 +427,11 @@ var (
 // canonical string, METHOD\nPATH\nTIMESTAMP\nEXACT_BODY, independently of
 // console.Sign so the client is checked against the contract and not itself.
 func VerifySignature(secret []byte, method, path, timestamp, signature string, body []byte, now time.Time) error {
-	if timestamp == "" || signature == "" {
-		return ErrMissingAuth
+	if timestamp == "" {
+		return ErrBadTimestamp
+	}
+	if signature == "" {
+		return ErrBadSignature
 	}
 	ts, err := strconv.ParseInt(timestamp, 10, 64)
 	if err != nil {
@@ -509,7 +517,7 @@ func (s *Server) route(name string, apply func(r *http.Request, body []byte) res
 		if err != nil {
 			call.Status = http.StatusBadRequest
 			s.record(call)
-			writeEnvelope(w, fail(http.StatusBadRequest, CodeBadRequest))
+			writeEnvelope(w, fail(http.StatusBadRequest, CodeInvalidRequest))
 			return
 		}
 
@@ -552,9 +560,9 @@ func (s *Server) route(name string, apply func(r *http.Request, body []byte) res
 		}
 
 		if err := VerifySignature(s.secret, r.Method, r.URL.Path, r.Header.Get(console.HeaderTimestamp), r.Header.Get(console.HeaderSignature), body, s.Now()); err != nil {
-			msg := CodeBadSignature
+			msg := CodeInvalidSignature
 			if errors.Is(err, ErrBadTimestamp) {
-				msg = CodeBadTimestamp
+				msg = CodeInvalidTimestamp
 			}
 			call.Status = http.StatusUnauthorized
 			s.record(call)
@@ -582,7 +590,7 @@ func injected(w http.ResponseWriter, f Fault) {
 		drop(w)
 		return
 	}
-	writeEnvelope(w, fail(f.Status, CodeInjected))
+	writeEnvelope(w, fail(f.Status, codeInjected))
 }
 
 func drop(w http.ResponseWriter) {

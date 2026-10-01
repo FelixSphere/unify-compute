@@ -54,23 +54,28 @@ func status(t *testing.T, err error) int {
 	return e.Status
 }
 
-type rawEnvelope struct {
-	Success bool            `json:"success"`
-	Message string          `json:"message"`
-	Code    string          `json:"code"`
-	Data    json.RawMessage `json:"data"`
+// refusal asserts a bridge refusal by status and the spec's code in message.
+func refusal(t *testing.T, err error, wantStatus int, wantCode string) {
+	t.Helper()
+	var e *console.Error
+	if !errors.As(err, &e) || e.Status != wantStatus || e.Message != wantCode {
+		t.Errorf("want %d %s, got %v", wantStatus, wantCode, err)
+	}
 }
 
 type rawResponse struct {
 	status int
 	header http.Header
 	body   []byte
-	env    rawEnvelope
+	env    struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Code    string `json:"code"`
+	}
 }
 
-// post sends a correctly signed bridge request without console.Client, for
-// contract details the client on main does not expose yet (extend_id, error
-// codes, response bodies on refusals).
+// post sends a correctly signed request without console.Client, for what the
+// client deliberately hides: response bodies, headers, malformed requests.
 func post(t *testing.T, s *Server, path string, in any) rawResponse {
 	t.Helper()
 	body, err := json.Marshal(in)
@@ -95,22 +100,8 @@ func post(t *testing.T, s *Server, path string, in any) rawResponse {
 	return out
 }
 
-type extendOut struct {
-	HoldID      string `json:"hold_id"`
-	Quota       int64  `json:"quota"`
-	RemainQuota int64  `json:"remain_quota"`
-}
-
-func extend(t *testing.T, s *Server, holdID, extendID string, q int64) (rawResponse, extendOut) {
-	t.Helper()
-	r := post(t, s, "/holds/"+holdID+"/extend", map[string]any{"extend_id": extendID, "additional_quota": q})
-	var out extendOut
-	if r.status == 200 {
-		if err := json.Unmarshal(r.env.Data, &out); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return r, out
+func ext(id string, q int64) console.ExtendRequest {
+	return console.ExtendRequest{ExtendID: id, AdditionalQuota: q}
 }
 
 func holdReq(id string, q int64) console.HoldRequest {
@@ -169,19 +160,45 @@ func TestPinnedVectorOverHTTP(t *testing.T) {
 	}
 }
 
-func TestEveryRouteIs404WithoutASecret(t *testing.T) {
+func TestMissingAuthHeadersGetTheirOwnCodes(t *testing.T) {
+	s, _ := seeded(t)
+	for name, tc := range map[string]struct{ ts, sig, want string }{
+		"no timestamp": {"", vectorSig, CodeInvalidTimestamp},
+		"no signature": {strconv.FormatInt(vectorTS, 10), "", CodeInvalidSignature},
+	} {
+		req, _ := http.NewRequest("POST", s.URL+vectorPath, bytes.NewReader(vectorBody))
+		if tc.ts != "" {
+			req.Header.Set(console.HeaderTimestamp, tc.ts)
+		}
+		if tc.sig != "" {
+			req.Header.Set(console.HeaderSignature, tc.sig)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var env struct{ Message string }
+		_ = json.NewDecoder(resp.Body).Decode(&env)
+		resp.Body.Close()
+		if resp.StatusCode != 401 || env.Message != tc.want {
+			t.Errorf("%s: %d %q, want 401 %s", name, resp.StatusCode, env.Message, tc.want)
+		}
+	}
+}
+
+func TestEveryRouteIs404WithNoBodyWithoutASecret(t *testing.T) {
 	s := New(nil)
 	defer s.Close()
 	c, _ := console.New(s.URL, vectorSecret)
 	ctx := context.Background()
 	_, e1 := c.Verify(ctx, "sk-test")
 	_, e2 := c.Hold(ctx, holdReq("h", 1))
-	_, e3 := c.Settle(ctx, "h", console.SettleRequest{EventID: "e"})
-	_, e4 := c.Extend(ctx, "h", 1)
+	_, e3 := c.Settle(ctx, "h", console.SettleRequest{EventID: "e", SKU: "a10g-24gb-x1"})
+	_, e4 := c.Extend(ctx, "h", ext("ext_1", 1))
 	_, e5 := c.Release(ctx, "h")
 	for i, err := range []error{e1, e2, e3, e4, e5} {
-		if got := status(t, err); got != 404 {
-			t.Errorf("verb %d: %d, want 404", i, got)
+		if !errors.Is(err, console.ErrBridgeDisabled) || errors.Is(err, console.ErrHoldNotFound) {
+			t.Errorf("verb %d: want ErrBridgeDisabled, got %v", i, err)
 		}
 	}
 	if n := len(s.Calls()); n != 5 {
@@ -220,23 +237,17 @@ func TestVerify(t *testing.T) {
 	s.SeedUser(User{ID: 3, Disabled: true})
 	s.SeedKey(Key{Key: "sk-banned", TokenID: 3, UserID: 3})
 	for _, k := range []string{"sk-nope", "sk-off", "sk-old"} {
-		if _, err := c.Verify(ctx, k); status(t, err) != 401 {
-			t.Errorf("%s: want 401, got %v", k, err)
-		}
+		_, err := c.Verify(ctx, k)
+		refusal(t, err, 401, CodeInvalidKey)
 	}
 
 	s.SeedTenant(Tenant{ID: 7, Quota: 100 * QuotaPerUnit, Suspended: true})
-	for key, want := range map[string]string{"sk-banned": "disabled", "sk-tenant": "suspended"} {
-		if _, err := c.Verify(ctx, key); status(t, err) != 403 {
-			t.Errorf("%s: want 403, got %v", key, err)
-		}
-		r := post(t, s, "/verify", map[string]string{"key": key})
-		var data struct {
-			Status string `json:"status"`
-		}
-		_ = json.Unmarshal(r.env.Data, &data)
-		if r.status != 403 || r.env.Success || r.env.Code != want || data.Status != want {
-			t.Errorf("%s: %d %s, want 403 error envelope with data.status %q", key, r.status, r.body, want)
+	for key, want := range map[string]string{"sk-banned": console.AccountDisabled, "sk-tenant": console.AccountSuspended} {
+		_, err := c.Verify(ctx, key)
+		refusal(t, err, 403, want)
+		var e *console.Error
+		if !errors.As(err, &e) || e.AccountStatus != want {
+			t.Errorf("%s: AccountStatus from data.status: got %v, want %q", key, err, want)
 		}
 	}
 }
@@ -287,7 +298,7 @@ func TestHoldSettleReleaseMovesQuota(t *testing.T) {
 		logs[0].ModelName != "compute/a10g-24gb-x1" || logs[1].GPUSeconds != 1500 || logs[0].JobID != "job_hold_1" {
 		t.Fatalf("consume logs %+v", logs)
 	}
-	if _, err := c.Settle(ctx, "hold_1", console.SettleRequest{EventID: "ue_3", CumulativeQuota: 600_000}); status(t, err) != 409 {
+	if _, err := c.Settle(ctx, "hold_1", console.SettleRequest{EventID: "ue_3", CumulativeQuota: 600_000, SKU: "a10g-24gb-x1"}); status(t, err) != 409 {
 		t.Fatalf("settle after release: want 409, got %v", err)
 	}
 }
@@ -317,20 +328,32 @@ func TestHoldIsIdempotentAndRefusesWithoutBalance(t *testing.T) {
 	if s.Balance(1042) != 24*QuotaPerUnit {
 		t.Fatalf("replay debited twice: %d", s.Balance(1042))
 	}
+	for _, req := range map[string]console.HoldRequest{
+		"quota":      holdReq("hold_1", QuotaPerUnit+1),
+		"sku":        func() console.HoldRequest { r := holdReq("hold_1", QuotaPerUnit); r.SKU = "h100-80gb-x1"; return r }(),
+		"expires_at": func() console.HoldRequest { r := holdReq("hold_1", QuotaPerUnit); r.ExpiresAt++; return r }(),
+	} {
+		_, err := c.Hold(ctx, req)
+		refusal(t, err, 409, CodeIdempotencyConflict)
+	}
+	if s.Balance(1042) != 24*QuotaPerUnit {
+		t.Fatalf("a conflicting replay moved quota: %d", s.Balance(1042))
+	}
 
 	// The token's 8 USD limit binds before the user's 24 USD balance.
-	if _, err := c.Hold(ctx, holdReq("hold_2", 7*QuotaPerUnit+1)); status(t, err) != 402 {
-		t.Fatalf("token limit: want 402, got %v", err)
-	}
+	_, err = c.Hold(ctx, holdReq("hold_2", 7*QuotaPerUnit+1))
+	refusal(t, err, 402, CodeInsufficientBalance)
 	s.SeedKey(Key{Key: "sk-test", TokenID: 771, UserID: 1042, Unlimited: true})
-	if _, err := c.Hold(ctx, holdReq("hold_3", 24*QuotaPerUnit+1)); status(t, err) != 402 {
-		t.Fatalf("entity balance: want 402, got %v", err)
-	}
+	_, err = c.Hold(ctx, holdReq("hold_3", 24*QuotaPerUnit+1))
+	refusal(t, err, 402, CodeInsufficientBalance)
 	if _, err := c.Hold(ctx, holdReq("hold_4", 24*QuotaPerUnit)); err != nil {
 		t.Fatalf("exact balance should hold: %v", err)
 	}
 	if s.Balance(1042) != 0 {
 		t.Fatalf("balance %d", s.Balance(1042))
+	}
+	if r := post(t, s, "/holds", map[string]any{"hold_id": "hold_5"}); r.status != 400 || r.env.Message != CodeInvalidRequest {
+		t.Fatalf("hold without quota: %d %s", r.status, r.body)
 	}
 }
 
@@ -347,13 +370,25 @@ func TestSettleIsIdempotentBoundedAndFinal(t *testing.T) {
 		t.Fatalf("replayed event charged again: %+v %+v logs=%d", a, b, len(s.ConsumeLogs()))
 	}
 
-	if _, err := c.Settle(ctx, "hold_1", console.SettleRequest{EventID: "ue_2", CumulativeQuota: 1_000_001}); status(t, err) != 409 {
-		t.Fatalf("over the hold: want 409 hold_exceeded, got %v", err)
+	_, err = c.Settle(ctx, "hold_1", console.SettleRequest{EventID: "ue_2", CumulativeQuota: 1_000_001, SKU: "a10g-24gb-x1"})
+	refusal(t, err, 409, CodeHoldExceeded)
+	_, err = c.Settle(ctx, "hold_1", console.SettleRequest{EventID: "ue_2b", CumulativeQuota: 399_999, SKU: "a10g-24gb-x1"})
+	refusal(t, err, 409, CodeCumulativeQuotaRegressed)
+	_, err = c.Settle(ctx, "hold_1", console.SettleRequest{EventID: "ue_2c", CumulativeQuota: 500_000, SKU: "h100-80gb-x1"})
+	refusal(t, err, 409, CodeSKUMismatch)
+	_, err = c.Settle(ctx, "hold_1", console.SettleRequest{EventID: "ue_2e", CumulativeQuota: 500_000})
+	refusal(t, err, 409, CodeSKUMismatch)
+	if len(s.ConsumeLogs()) != 1 {
+		t.Fatalf("refused settles wrote consume logs: %+v", s.ConsumeLogs())
 	}
-	if r, _ := extend(t, s, "hold_1", "ext_1", 100_000); r.status != 200 {
-		t.Fatalf("extend: %d %s", r.status, r.body)
+	if r, err := c.Settle(ctx, "hold_1", console.SettleRequest{EventID: "ue_2d", CumulativeQuota: 400_000, SKU: "a10g-24gb-x1"}); err != nil || r.SettledQuota != 400_000 {
+		t.Fatalf("an equal cumulative is not a regression: %+v %v", r, err)
 	}
-	f, err := c.Settle(ctx, "hold_1", console.SettleRequest{EventID: "ue_3", CumulativeQuota: 1_000_001, Final: true})
+
+	if _, err := c.Extend(ctx, "hold_1", ext("ext_1", 100_000)); err != nil {
+		t.Fatal(err)
+	}
+	f, err := c.Settle(ctx, "hold_1", console.SettleRequest{EventID: "ue_3", CumulativeQuota: 1_000_001, Final: true, SKU: "a10g-24gb-x1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,47 +404,59 @@ func TestSettleIsIdempotentBoundedAndFinal(t *testing.T) {
 	if r, err := c.Release(ctx, "hold_1"); err != nil || r.ReleasedQuota != 99_999 {
 		t.Fatalf("release after final: %+v %v", r, err)
 	}
-	if _, err := c.Settle(ctx, "nope", console.SettleRequest{EventID: "ue_4"}); status(t, err) != 404 {
-		t.Fatalf("unknown hold: %v", err)
+	_, err = c.Settle(ctx, "hold_1", console.SettleRequest{EventID: "ue_5", CumulativeQuota: 1_000_001, SKU: "a10g-24gb-x1"})
+	refusal(t, err, 409, CodeHoldClosed)
+
+	_, err = c.Settle(ctx, "nope", console.SettleRequest{EventID: "ue_4", SKU: "a10g-24gb-x1"})
+	if !errors.Is(err, console.ErrHoldNotFound) || errors.Is(err, console.ErrBridgeDisabled) {
+		t.Fatalf("unknown hold: want ErrHoldNotFound, got %v", err)
 	}
-	if r := post(t, s, "/holds/nope/settle", map[string]any{"event_id": "ue_5"}); r.status != 404 || r.env.Code != CodeHoldNotFound {
-		t.Fatalf("unknown hold must be a JSON 404 with code hold_not_found: %d %s", r.status, r.body)
+	if r := post(t, s, "/holds/nope/settle", map[string]any{"event_id": "ue_6"}); r.status != 404 || r.env.Message != CodeHoldNotFound || r.env.Code != CodeHoldNotFound {
+		t.Fatalf("unknown hold must be a JSON 404 hold_not_found: %d %s", r.status, r.body)
 	}
-	if _, err := c.Settle(ctx, "nope", ev); status(t, err) != 409 {
-		t.Fatalf("event id reused on another hold: %v", err)
-	}
+	_, err = c.Settle(ctx, "nope", ev)
+	refusal(t, err, 409, CodeIdempotencyConflict)
 }
 
 func TestExtend(t *testing.T) {
 	s, c := seeded(t)
-	if _, err := c.Hold(context.Background(), holdReq("hold_1", QuotaPerUnit)); err != nil {
+	ctx := context.Background()
+	if _, err := c.Hold(ctx, holdReq("hold_1", QuotaPerUnit)); err != nil {
 		t.Fatal(err)
 	}
-	r, out := extend(t, s, "hold_1", "ext_01J8A", 300_000)
-	if r.status != 200 || out.HoldID != "hold_1" || out.Quota != 800_000 || out.RemainQuota != 25*QuotaPerUnit-800_000 {
-		t.Fatalf("extend %d %s", r.status, r.body)
+	out, err := c.Extend(ctx, "hold_1", ext("ext_01J8A", 300_000))
+	if err != nil || out.HoldID != "hold_1" || out.Quota != 800_000 || out.RemainQuota != 25*QuotaPerUnit-800_000 {
+		t.Fatalf("extend %+v %v", out, err)
 	}
-	if r, _ := extend(t, s, "hold_1", "ext_01J8B", 7*QuotaPerUnit); r.status != 402 || r.env.Code != CodeInsufficientBalance {
-		t.Fatalf("extend past the token limit: want 402, got %d %s", r.status, r.body)
+	// A hold replay is compared with the original create request, not with
+	// the hold's extended quota.
+	if r, err := c.Hold(ctx, holdReq("hold_1", QuotaPerUnit)); err != nil || r.Quota != QuotaPerUnit {
+		t.Fatalf("hold replay after extend: %+v %v", r, err)
 	}
+	_, err = c.Hold(ctx, holdReq("hold_1", 800_000))
+	refusal(t, err, 409, CodeIdempotencyConflict)
+	_, err = c.Extend(ctx, "hold_1", ext("ext_01J8B", 7*QuotaPerUnit))
+	refusal(t, err, 402, CodeInsufficientBalance)
 	if h, _ := s.Hold("hold_1"); h.Quota != 800_000 {
 		t.Fatalf("refused extend changed the hold: %+v", h)
 	}
-	for name, body := range map[string]map[string]any{
-		"no extend_id":    {"additional_quota": 1},
-		"extend_id > 64":  {"extend_id": "ext_" + strings.Repeat("A", 61), "additional_quota": 1},
-		"no amount":       {"extend_id": "ext_01J8C"},
-		"negative amount": {"extend_id": "ext_01J8D", "additional_quota": -1},
+	for name, req := range map[string]console.ExtendRequest{
+		"no extend_id":    ext("", 1),
+		"extend_id > 64":  ext("ext_"+strings.Repeat("A", 61), 1),
+		"no amount":       ext("ext_01J8C", 0),
+		"negative amount": ext("ext_01J8D", -1),
 	} {
-		if r := post(t, s, "/holds/hold_1/extend", body); r.status != 400 {
-			t.Errorf("%s: %d, want 400", name, r.status)
+		_, err := c.Extend(ctx, "hold_1", req)
+		var e *console.Error
+		if !errors.As(err, &e) || e.Status != 400 || e.Message != CodeInvalidRequest {
+			t.Errorf("%s: want 400 invalid_request, got %v", name, err)
 		}
 	}
-	if r, _ := extend(t, s, "hold_1", "ext_"+strings.Repeat("A", 60), 1); r.status != 200 {
-		t.Errorf("64-char extend_id: %d %s", r.status, r.body)
+	if _, err := c.Extend(ctx, "hold_1", ext("ext_"+strings.Repeat("A", 60), 1)); err != nil {
+		t.Errorf("64-char extend_id: %v", err)
 	}
-	if r, _ := extend(t, s, "nope", "ext_01J8E", 1); r.status != 404 || r.env.Code != CodeHoldNotFound {
-		t.Errorf("unknown hold: %d %s", r.status, r.body)
+	if _, err := c.Extend(ctx, "nope", ext("ext_01J8E", 1)); !errors.Is(err, console.ErrHoldNotFound) {
+		t.Errorf("unknown hold: %v", err)
 	}
 }
 
@@ -427,25 +474,16 @@ func TestExtendIsIdempotentOnExtendID(t *testing.T) {
 	// The console commits the extend and the response is lost; compute retries
 	// with the same extend_id and must reserve exactly once.
 	s.InjectFault(Fault{Route: RouteExtend, AfterApply: true})
-	body := map[string]any{"extend_id": "ext_01J8RETRY", "additional_quota": 300_000}
-	req, _ := json.Marshal(body)
-	full := "/api/compute/v1/holds/hold_1/extend"
-	ts := s.Now().Unix()
-	hr, _ := http.NewRequest("POST", s.URL+full, bytes.NewReader(req))
-	hr.Header.Set(console.HeaderTimestamp, strconv.FormatInt(ts, 10))
-	hr.Header.Set(console.HeaderSignature, console.Sign(vectorSecret, "POST", full, ts, req))
-	if resp, err := http.DefaultClient.Do(hr); err == nil {
-		resp.Body.Close()
-		t.Fatal("dropped response should surface as a transport error")
+	if _, err := c.Extend(ctx, "hold_1", ext("ext_01J8RETRY", 300_000)); err == nil || errors.As(err, new(*console.Error)) {
+		t.Fatalf("dropped response should surface as a transport error, got %v", err)
 	}
-
-	first, out := extend(t, s, "hold_1", "ext_01J8RETRY", 300_000)
-	if first.status != 200 || out.Quota != 800_000 || out.RemainQuota != before-300_000 {
-		t.Fatalf("retry: %d %s", first.status, first.body)
+	out, err := c.Extend(ctx, "hold_1", ext("ext_01J8RETRY", 300_000))
+	if err != nil || out.Quota != 800_000 || out.RemainQuota != before-300_000 {
+		t.Fatalf("retry: %+v %v", out, err)
 	}
-	again, out2 := extend(t, s, "hold_1", "ext_01J8RETRY", 300_000)
-	if again.status != 200 || out2 != out {
-		t.Fatalf("second retry should return the original result: %d %s", again.status, again.body)
+	again, err := c.Extend(ctx, "hold_1", ext("ext_01J8RETRY", 300_000))
+	if err != nil || *again != *out {
+		t.Fatalf("second retry: %+v %v", again, err)
 	}
 	if s.Balance(1042) != before-300_000 || s.TokenRemainQuota(771) != 8*QuotaPerUnit-2*QuotaPerUnit-300_000 {
 		t.Fatalf("reserved more than once: balance %d token %d", s.Balance(1042), s.TokenRemainQuota(771))
@@ -457,28 +495,30 @@ func TestExtendIsIdempotentOnExtendID(t *testing.T) {
 		t.Fatalf("extend calls %+v", calls)
 	}
 
-	for name, try := range map[string]func() (rawResponse, extendOut){
-		"different amount": func() (rawResponse, extendOut) { return extend(t, s, "hold_1", "ext_01J8RETRY", 300_001) },
-		"different hold":   func() (rawResponse, extendOut) { return extend(t, s, "hold_2", "ext_01J8RETRY", 300_000) },
-	} {
-		if r, _ := try(); r.status != 409 || r.env.Code != CodeIdempotencyConflict {
-			t.Errorf("%s: %d %s, want 409 idempotency_conflict", name, r.status, r.body)
-		}
-	}
+	_, err = c.Extend(ctx, "hold_1", ext("ext_01J8RETRY", 300_001))
+	refusal(t, err, 409, CodeIdempotencyConflict)
+	_, err = c.Extend(ctx, "hold_2", ext("ext_01J8RETRY", 300_000))
+	refusal(t, err, 409, CodeIdempotencyConflict)
 	if s.Balance(1042) != before-300_000 {
 		t.Fatalf("a conflicting extend moved quota: %d", s.Balance(1042))
 	}
 
-	// A committed extend still replays after the hold has closed.
+	// A replay answers with the hold's current state, so after a later extend
+	// it reports the larger quota, and it still succeeds once the hold closed.
+	if _, err := c.Extend(ctx, "hold_1", ext("ext_01J8MORE", 100_000)); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := c.Extend(ctx, "hold_1", ext("ext_01J8RETRY", 300_000)); err != nil || r.Quota != 900_000 || r.RemainQuota != before-400_000 {
+		t.Fatalf("replay reports current state: %+v %v", r, err)
+	}
 	if _, err := c.Release(ctx, "hold_1"); err != nil {
 		t.Fatal(err)
 	}
-	if r, o := extend(t, s, "hold_1", "ext_01J8RETRY", 300_000); r.status != 200 || o != out {
-		t.Fatalf("replay after release: %d %s", r.status, r.body)
+	if _, err := c.Extend(ctx, "hold_1", ext("ext_01J8RETRY", 300_000)); err != nil {
+		t.Fatalf("replay after release: %v", err)
 	}
-	if r, _ := extend(t, s, "hold_1", "ext_01J8NEW", 1); r.status != 409 || r.env.Code != CodeHoldClosed {
-		t.Fatalf("new extend on a released hold: %d %s", r.status, r.body)
-	}
+	_, err = c.Extend(ctx, "hold_1", ext("ext_01J8NEW", 1))
+	refusal(t, err, 409, CodeHoldClosed)
 }
 
 func TestRateLimitIsOffByDefaultAndAnswers429WithRetryAfter(t *testing.T) {
@@ -497,11 +537,20 @@ func TestRateLimitIsOffByDefaultAndAnswers429WithRetryAfter(t *testing.T) {
 		}
 	}
 	r := post(t, s, "/verify", map[string]string{"key": "sk-test"})
-	if r.status != 429 || r.env.Code != CodeRateLimited || r.header.Get("Retry-After") != "1" {
+	if r.status != 429 || r.env.Message != CodeRateLimited || r.header.Get("Retry-After") != "1" {
 		t.Fatalf("over the burst: %d Retry-After=%q %s", r.status, r.header.Get("Retry-After"), r.body)
 	}
-	if _, err := c.Verify(ctx, "sk-test"); status(t, err) != 429 {
-		t.Fatalf("client sees 429: %v", err)
+	_, err := c.Verify(ctx, "sk-test")
+	refusal(t, err, 429, CodeRateLimited)
+
+	// The limiter runs before HMAC: an unsigned request is also a 429.
+	resp, err := http.Post(s.URL+vectorPath, "application/json", bytes.NewReader(vectorBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 429 {
+		t.Fatalf("unsigned request over the limit: %d, want 429", resp.StatusCode)
 	}
 
 	// One second on the fake clock refills DefaultRate tokens.
@@ -527,7 +576,7 @@ func TestExpiredHoldsAreSweptAndReported(t *testing.T) {
 	if _, err := c.Hold(ctx, holdReq("hold_1", QuotaPerUnit)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Settle(ctx, "hold_1", console.SettleRequest{EventID: "ue_1", CumulativeQuota: 100_000}); err != nil {
+	if _, err := c.Settle(ctx, "hold_1", console.SettleRequest{EventID: "ue_1", CumulativeQuota: 100_000, SKU: "a10g-24gb-x1"}); err != nil {
 		t.Fatal(err)
 	}
 	// Past expires_at, and far enough that the client signs with the new clock.
@@ -536,22 +585,13 @@ func TestExpiredHoldsAreSweptAndReported(t *testing.T) {
 	if s.Balance(1042) != 25*QuotaPerUnit-100_000 {
 		t.Fatalf("sweep did not return the unsettled part: %d", s.Balance(1042))
 	}
-	for _, err := range []error{
-		func() error {
-			_, e := c.Settle(ctx, "hold_1", console.SettleRequest{EventID: "ue_2", CumulativeQuota: 200_000})
-			return e
-		}(),
-		func() error { _, e := c.Release(ctx, "hold_1"); return e }(),
-	} {
-		var e *console.Error
-		if !errors.As(err, &e) || e.Status != 409 || e.Message != CodeHoldExpired {
-			t.Errorf("want 409 hold_expired, got %v", err)
-		}
-	}
-	if r, _ := extend(t, s, "hold_1", "ext_1", 1); r.status != 409 || r.env.Code != CodeHoldExpired {
-		t.Errorf("extend on an expired hold: %d %s", r.status, r.body)
-	}
-	if r, err := c.Settle(ctx, "hold_1", console.SettleRequest{EventID: "ue_1", CumulativeQuota: 100_000}); err != nil || r.SettledQuota != 100_000 {
+	_, err := c.Settle(ctx, "hold_1", console.SettleRequest{EventID: "ue_2", CumulativeQuota: 200_000, SKU: "a10g-24gb-x1"})
+	refusal(t, err, 409, CodeHoldExpired)
+	_, err = c.Release(ctx, "hold_1")
+	refusal(t, err, 409, CodeHoldExpired)
+	_, err = c.Extend(ctx, "hold_1", ext("ext_1", 1))
+	refusal(t, err, 409, CodeHoldExpired)
+	if r, err := c.Settle(ctx, "hold_1", console.SettleRequest{EventID: "ue_1", CumulativeQuota: 100_000, SKU: "a10g-24gb-x1"}); err != nil || r.SettledQuota != 100_000 {
 		t.Errorf("an event settled before expiry still replays: %+v %v", r, err)
 	}
 }
@@ -612,24 +652,24 @@ func TestConsoleDownMidJobLosesNoUsageAndDoubleChargesNothing(t *testing.T) {
 	if _, err := c.Hold(ctx, holdReq("hold_1", 2*QuotaPerUnit)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Settle(ctx, "hold_1", console.SettleRequest{EventID: "ue_1", CumulativeQuota: 100_000}); err != nil {
+	if _, err := c.Settle(ctx, "hold_1", console.SettleRequest{EventID: "ue_1", CumulativeQuota: 100_000, SKU: "a10g-24gb-x1"}); err != nil {
 		t.Fatal(err)
 	}
 
 	s.InjectFault(Fault{Route: RouteSettle, AfterApply: true})
-	if _, err := c.Settle(ctx, "hold_1", console.SettleRequest{EventID: "ue_2", CumulativeQuota: 250_000}); err == nil {
+	if _, err := c.Settle(ctx, "hold_1", console.SettleRequest{EventID: "ue_2", CumulativeQuota: 250_000, SKU: "a10g-24gb-x1"}); err == nil {
 		t.Fatal("dropped response should surface as an error")
 	}
 	s.SetDown(true)
-	if _, err := c.Settle(ctx, "hold_1", console.SettleRequest{EventID: "ue_3", CumulativeQuota: 400_000}); err == nil {
+	if _, err := c.Settle(ctx, "hold_1", console.SettleRequest{EventID: "ue_3", CumulativeQuota: 400_000, SKU: "a10g-24gb-x1"}); err == nil {
 		t.Fatal("down console should fail")
 	}
 	s.SetDown(false)
 
 	for _, ev := range []console.SettleRequest{
-		{EventID: "ue_2", CumulativeQuota: 250_000},
-		{EventID: "ue_3", CumulativeQuota: 400_000},
-		{EventID: "ue_4", CumulativeQuota: 550_000, Final: true},
+		{EventID: "ue_2", CumulativeQuota: 250_000, SKU: "a10g-24gb-x1"},
+		{EventID: "ue_3", CumulativeQuota: 400_000, SKU: "a10g-24gb-x1"},
+		{EventID: "ue_4", CumulativeQuota: 550_000, Final: true, SKU: "a10g-24gb-x1"},
 	} {
 		if _, err := c.Settle(ctx, "hold_1", ev); err != nil {
 			t.Fatalf("%s: %v", ev.EventID, err)

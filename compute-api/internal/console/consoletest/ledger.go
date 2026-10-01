@@ -112,7 +112,7 @@ func (s *Server) verify(_ *http.Request, body []byte) response {
 		Key string `json:"key"`
 	}
 	if !decode(body, &in) {
-		return fail(http.StatusBadRequest, CodeBadRequest)
+		return fail(http.StatusBadRequest, CodeInvalidRequest)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -150,30 +150,36 @@ func (s *Server) verify(_ *http.Request, body []byte) response {
 	return ok(id)
 }
 
+type holdRequest struct {
+	HoldID    string `json:"hold_id"`
+	UserID    int    `json:"user_id"`
+	TokenID   int    `json:"token_id"`
+	Quota     int64  `json:"quota"`
+	JobID     string `json:"job_id"`
+	SKU       string `json:"sku"`
+	ExpiresAt int64  `json:"expires_at"`
+}
+
 func (s *Server) hold(_ *http.Request, body []byte) response {
-	var in struct {
-		HoldID    string `json:"hold_id"`
-		UserID    int    `json:"user_id"`
-		TokenID   int    `json:"token_id"`
-		Quota     int64  `json:"quota"`
-		JobID     string `json:"job_id"`
-		SKU       string `json:"sku"`
-		ExpiresAt int64  `json:"expires_at"`
-	}
+	var in holdRequest
 	if !decode(body, &in) || in.HoldID == "" || in.Quota <= 0 {
-		return fail(http.StatusBadRequest, CodeBadRequest)
+		return fail(http.StatusBadRequest, CodeInvalidRequest)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sweep()
-	// Replay returns the original row, even if the replayed body differs.
+	// Compared field by field, not byte for byte: a replay re-marshalled
+	// with another key order is still the same request.
 	if prev, seen := s.holdResp[in.HoldID]; seen {
-		return ok(prev)
+		if prev.req != in {
+			return fail(http.StatusConflict, CodeIdempotencyConflict)
+		}
+		return ok(prev.resp)
 	}
 	u := s.users[in.UserID]
 	k := s.tokens[in.TokenID]
 	if u == nil || k == nil || k.UserID != u.ID {
-		return fail(http.StatusBadRequest, CodeBadRequest)
+		return fail(http.StatusBadRequest, CodeInvalidRequest)
 	}
 	if !s.canDebit(u.ID, k.TokenID, in.Quota) {
 		return fail(http.StatusPaymentRequired, CodeInsufficientBalance)
@@ -191,7 +197,7 @@ func (s *Server) hold(_ *http.Request, body []byte) response {
 		ExpiresAt: in.ExpiresAt,
 	}
 	out := holdData{HoldID: in.HoldID, Quota: in.Quota, RemainQuota: s.currentBalance(u.ID)}
-	s.holdResp[in.HoldID] = out
+	s.holdResp[in.HoldID] = holdRecord{req: in, resp: out}
 	return ok(out)
 }
 
@@ -225,7 +231,7 @@ func (s *Server) settle(r *http.Request, body []byte) response {
 		Final           bool   `json:"final"`
 	}
 	if !decode(body, &in) || in.EventID == "" || in.CumulativeQuota < 0 {
-		return fail(http.StatusBadRequest, CodeBadRequest)
+		return fail(http.StatusBadRequest, CodeInvalidRequest)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -240,20 +246,20 @@ func (s *Server) settle(r *http.Request, body []byte) response {
 	if refusal != nil {
 		return *refusal
 	}
+	// Compared literally, so an omitted sku is a mismatch too: the spec says
+	// "differs from the hold's", and a consume log needs the real SKU.
+	sku := in.SKU
+	if sku != h.SKU {
+		return fail(http.StatusConflict, CodeSKUMismatch)
+	}
 	if in.CumulativeQuota > h.Quota {
 		return fail(http.StatusConflict, CodeHoldExceeded)
 	}
-	// A cumulative below what is already settled moves nothing: the bridge
-	// has no refund verb, and an out-of-order event must not un-charge.
+	if in.CumulativeQuota < h.Settled {
+		return fail(http.StatusConflict, CodeCumulativeQuotaRegressed)
+	}
 	delta := in.CumulativeQuota - h.Settled
-	if delta < 0 {
-		delta = 0
-	}
 	h.Settled += delta
-	sku := in.SKU
-	if sku == "" {
-		sku = h.SKU
-	}
 	s.logs = append(s.logs, ConsumeLog{
 		UserID:     h.UserID,
 		TenantID:   h.TenantID,
@@ -280,19 +286,20 @@ func (s *Server) extend(r *http.Request, body []byte) response {
 		AdditionalQuota int64  `json:"additional_quota"`
 	}
 	if !decode(body, &in) || in.AdditionalQuota <= 0 || in.ExtendID == "" || len(in.ExtendID) > MaxExtendIDLen {
-		return fail(http.StatusBadRequest, CodeBadRequest)
+		return fail(http.StatusBadRequest, CodeInvalidRequest)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sweep()
 	// Checked before the hold's state so a retry of an extend that committed
-	// still gets its original answer after the hold has closed. extend_ids are
-	// unique across holds, like event_ids.
+	// still succeeds after the hold has closed. The spec answers a replay with
+	// the hold's current state, not the original response.
 	if prev, seen := s.extends[in.ExtendID]; seen {
 		if prev.holdID != holdID || prev.amount != in.AdditionalQuota {
 			return fail(http.StatusConflict, CodeIdempotencyConflict)
 		}
-		return ok(prev.resp)
+		h := s.holds[holdID]
+		return ok(holdData{HoldID: h.HoldID, Quota: h.Quota, RemainQuota: s.currentBalance(h.UserID)})
 	}
 	h, refusal := s.lookupActive(holdID)
 	if refusal != nil {
@@ -304,7 +311,7 @@ func (s *Server) extend(r *http.Request, body []byte) response {
 	s.debit(h.UserID, h.TokenID, in.AdditionalQuota)
 	h.Quota += in.AdditionalQuota
 	out := holdData{HoldID: h.HoldID, Quota: h.Quota, RemainQuota: s.currentBalance(h.UserID)}
-	s.extends[in.ExtendID] = extendRecord{holdID: holdID, amount: in.AdditionalQuota, resp: out}
+	s.extends[in.ExtendID] = extendRecord{holdID: holdID, amount: in.AdditionalQuota}
 	return ok(out)
 }
 
