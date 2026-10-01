@@ -7,7 +7,18 @@ here, in the commit that adds it. Permissive licences only (ADR-0002).
 
 | Component | Licence | Notes |
 |---|---|---|
-| Go standard library | BSD-3-Clause | No third-party modules yet. `go.mod` has no `require` block; keep it that way until something earns its place. |
+| Go standard library | BSD-3-Clause | |
+| [github.com/jackc/pgx/v5](https://github.com/jackc/pgx) v5.8.0 | MIT | Postgres driver and pool for the job store (`internal/store`). Chosen over `lib/pq` for native `jsonb`/`bytea`/array handling and a maintained pool; v5.8.0 is the newest release whose `go.mod` still accepts Go 1.24, which the Dockerfile builds with. |
+| [github.com/jackc/pgpassfile](https://github.com/jackc/pgpassfile) v1.0.0 | MIT | Transitive, via pgx: `.pgpass` lookup. |
+| [github.com/jackc/pgservicefile](https://github.com/jackc/pgservicefile) v0.0.0-20240606120523-5a60cdf6a761 | MIT | Transitive, via pgx: `pg_service.conf` lookup. |
+| [github.com/jackc/puddle/v2](https://github.com/jackc/puddle) v2.2.2 | MIT | Transitive, via `pgxpool`: the connection pool. |
+| [golang.org/x/sync](https://pkg.go.dev/golang.org/x/sync) v0.17.0 | BSD-3-Clause | Transitive, via puddle (`semaphore`). |
+| [golang.org/x/text](https://pkg.go.dev/golang.org/x/text) v0.29.0 | BSD-3-Clause | Transitive, via pgx: SASLprep for SCRAM passwords. |
+
+The modules above are what `go list -deps ./...` reaches; `go.mod` lists
+nothing else. pgx's own test dependencies (testify and friends) are not in
+our build graph. The `cmd/compute-api` binary links them once it imports
+`internal/store`, which it does not yet.
 
 ## Run alongside, over HTTP or as a separate container (not linked)
 

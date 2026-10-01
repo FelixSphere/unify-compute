@@ -54,6 +54,25 @@ jobs:
   compute-api:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # The job store's tests run against a real Postgres; they skip without
+    # COMPUTE_TEST_DATABASE_URL, so this service is what makes CI exercise
+    # them. Same major as deploy/compose.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: compute
+          POSTGRES_PASSWORD: compute
+          POSTGRES_DB: compute_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U compute -d compute_test"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      COMPUTE_TEST_DATABASE_URL: postgres://compute:compute@localhost:5432/compute_test?sslmode=disable
     defaults:
       run:
         working-directory: compute-api
