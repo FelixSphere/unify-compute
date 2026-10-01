@@ -1,0 +1,89 @@
+#!/bin/bash
+# Bootstraps the unify-compute staging host: Docker, the data volume, secrets
+# from SSM, and the compose stack from the repository. Rendered by instance.tf;
+# any edit here replaces the instance.
+set -euo pipefail
+exec > >(tee -a /var/log/unify-compute-bootstrap.log) 2>&1
+
+dnf update -y
+dnf install -y docker
+systemctl enable --now docker
+
+COMPOSE_DIR=/usr/local/lib/docker/cli-plugins
+mkdir -p "$COMPOSE_DIR"
+curl -fsSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-aarch64" \
+  -o "$COMPOSE_DIR/docker-compose"
+chmod +x "$COMPOSE_DIR/docker-compose"
+
+# ---------------------------------------------------------------------------
+# Data volume. Nitro ignores the requested /dev/sdf; the by-id link is named
+# after the volume id. Wait for it, format only if empty, mount at /data.
+# ---------------------------------------------------------------------------
+DEV="/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_$(echo "${volume_id}" | tr -d '-')"
+for _ in $(seq 1 60); do
+  [ -b "$DEV" ] && break
+  sleep 2
+done
+[ -b "$DEV" ] || { echo "data volume ${volume_id} never appeared at $DEV"; lsblk; exit 1; }
+if ! blkid "$DEV" >/dev/null 2>&1; then
+  mkfs -t xfs -L unifydata "$DEV"
+fi
+mkdir -p /data
+grep -q 'LABEL=unifydata' /etc/fstab || echo "LABEL=unifydata /data xfs defaults,nofail 0 2" >>/etc/fstab
+mount -a
+mkdir -p /data/postgres /data/console /data/console-logs /data/skypilot
+
+# ---------------------------------------------------------------------------
+# Secrets from SSM. Never in user_data itself: instance metadata is readable
+# by any process on the box.
+# ---------------------------------------------------------------------------
+get_param() {
+  aws ssm get-parameter --with-decryption --region '${region}' \
+    --name "$1" --query 'Parameter.Value' --output text
+}
+
+install -d -m 0700 /opt/unify-compute
+cat >/opt/unify-compute/.env <<ENV
+ENVIRONMENT=${environment}
+CONSOLE_IMAGE=${console_image}
+COMPUTE_API_IMAGE=${compute_api_image}
+POSTGRES_PASSWORD=$(get_param '${ssm_postgres_password}')
+REDIS_PASSWORD=$(get_param '${ssm_redis_password}')
+SESSION_SECRET=$(get_param '${ssm_session_secret}')
+COMPUTE_BRIDGE_SECRET=$(get_param '${ssm_bridge_secret}' 2>/dev/null || true)
+CONSOLE_BIND=0.0.0.0
+COMPUTE_API_BIND=0.0.0.0
+SESSION_COOKIE_SECURE=true
+SESSION_COOKIE_TRUSTED_URL=https://${console_domain}
+DATA_DIR=/data
+ENV
+chmod 0600 /opt/unify-compute/.env
+
+cat >/opt/unify-compute/docker-compose.yml <<'COMPOSE'
+${compose_file}
+COMPOSE
+
+cat >/opt/unify-compute/postgres-init.sql <<'SQL'
+${postgres_init}
+SQL
+
+cat >/etc/systemd/system/unify-compute.service <<'UNIT'
+[Unit]
+Description=unify-compute staging stack (console + compute-api)
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/unify-compute
+ExecStart=/usr/bin/docker compose --env-file /opt/unify-compute/.env up -d --remove-orphans
+ExecStop=/usr/bin/docker compose --env-file /opt/unify-compute/.env down
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable --now unify-compute.service
+echo "${name} bootstrap complete"

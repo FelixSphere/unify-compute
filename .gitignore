@@ -38,3 +38,13 @@ next-env.d.ts
 /work/
 
 *.tsbuildinfo
+
+# unify-compute: terraform, compose, go
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+deploy/compose/.env
+deploy/compose/data/
+compute-api/bin/
+.bin/

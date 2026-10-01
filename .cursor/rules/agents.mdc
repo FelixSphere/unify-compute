@@ -1,0 +1,9 @@
+---
+description: Project conventions (canonical source is AGENTS.md)
+alwaysApply: true
+---
+
+Read and follow @AGENTS.md at the repo root. It is the canonical set of
+conventions for this project (repo map, decisions, licence boundary, commands,
+git workflow, deployment authority) and is shared across every AI coding agent
+used on this repo — do not duplicate or fork its content here.

@@ -1,0 +1,99 @@
+# unify-compute — local and staging profile.
+#
+# Two deployables by decision (ADR-0002): the UnifyAPI console (AGPL fork, the
+# account plane) and compute-api (this repo, proprietary). They share nothing
+# but HTTP. Same file locally and on the staging instance; the staging stack
+# renders .env from SSM and sets the *_BIND variables to 0.0.0.0 because the
+# load balancer has to reach the containers.
+#
+# Loopback by default. Public exposure is the ALB's job, decided per
+# environment, never a default of this file.
+
+services:
+  console:
+    # Pinned tag published by unifyapi-console's fork-image.yml. Keep in step
+    # with the UnifyAPI production pin unless testing a console change.
+    image: ${CONSOLE_IMAGE:?set CONSOLE_IMAGE}
+    restart: unless-stopped
+    command: --log-dir /app/logs
+    ports:
+      - "${CONSOLE_BIND:-127.0.0.1}:3000:3000"
+    volumes:
+      - ${DATA_DIR:-./data}/console:/data
+      - ${DATA_DIR:-./data}/console-logs:/app/logs
+    environment:
+      SQL_DSN: postgresql://unify:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/console
+      REDIS_CONN_STRING: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD}@redis:6379
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET}
+      # Secure cookies need the exact HTTPS origin list; locally over plain
+      # HTTP both stay unset so the console's OriginGuard is off.
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      SESSION_COOKIE_TRUSTED_URL: ${SESSION_COOKIE_TRUSTED_URL:-}
+      # Dark until the console ships the bridge routes; then the same value as
+      # compute-api's COMPUTE_BRIDGE_SECRET. Never the production value.
+      COMPUTE_BRIDGE_SECRET: ${COMPUTE_BRIDGE_SECRET:-}
+      NODE_NAME: unify-compute-${ENVIRONMENT:-local}
+      TZ: UTC
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:3000/api/status | grep -q '\"success\":true' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  compute-api:
+    image: ${COMPUTE_API_IMAGE:?set COMPUTE_API_IMAGE}
+    restart: unless-stopped
+    ports:
+      - "${COMPUTE_API_BIND:-127.0.0.1}:8080:8080"
+    environment:
+      LISTEN_ADDR: 0.0.0.0:8080
+      # Inside the compose network the console is reachable by service name.
+      CONSOLE_URL: http://console:3000
+      COMPUTE_BRIDGE_SECRET: ${COMPUTE_BRIDGE_SECRET:-}
+      DATABASE_URL: postgresql://unify:${POSTGRES_PASSWORD}@postgres:5432/compute
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # distroless has no shell or wget; the ALB health check covers staging and
+    # `make smoke` covers everything else.
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: unify
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: console
+    volumes:
+      - ${DATA_DIR:-./data}/postgres:/var/lib/postgresql/data
+      # Creates the second database for compute-api on first boot only.
+      - ./postgres-init.sql:/docker-entrypoint-initdb.d/10-compute.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U unify -d console"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}"]
+
+  # SkyPilot API server. Off by default (compose profile) until compute-api has
+  # a backend to drive it. The image and tag must be verified against the
+  # FelixSphere/skypilot pinned release before this profile is enabled; the
+  # value below is a placeholder that `docker compose config` accepts.
+  skypilot:
+    profiles: ["skypilot"]
+    image: ${SKYPILOT_IMAGE:-berkeleyskypilot/skypilot:0.13.0}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:46580:46580"
+    volumes:
+      - ${DATA_DIR:-./data}/skypilot:/root/.sky

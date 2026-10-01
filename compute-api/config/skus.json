@@ -1,0 +1,27 @@
+{
+  "note": "Illustrative staging catalogue. Prices here are placeholders for developing the billing flow and are not customer-facing until reviewed and this note is removed. A change to this file is a release with money in it.",
+  "skus": [
+    {
+      "id": "a10g-24gb-x1",
+      "gpu": "NVIDIA A10G",
+      "gpu_count": 1,
+      "gpu_memory_gb": 24,
+      "vcpus": 4,
+      "memory_gb": 16,
+      "price_usd_per_hour": "1.2000",
+      "regions": ["us-east-1"],
+      "available": true
+    },
+    {
+      "id": "l4-24gb-x1",
+      "gpu": "NVIDIA L4",
+      "gpu_count": 1,
+      "gpu_memory_gb": 24,
+      "vcpus": 4,
+      "memory_gb": 16,
+      "price_usd_per_hour": "0.9000",
+      "regions": ["us-east-1"],
+      "available": false
+    }
+  ]
+}

@@ -1,0 +1,98 @@
+# The machine checks for this repository. There are no credentials here and no
+# deploy job: releases are the CI/CD agent's (.claude/agents/cicd.md), and the
+# marketing site ships through OpenAI Sites, not from this workflow.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  repository-hygiene:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reject Terraform state, saved plans and env files
+        run: |
+          tracked=$(git ls-files '*.tfplan' '*.tfstate' '*.tfstate.*' 'deploy/compose/.env')
+          if [ -n "$tracked" ]; then
+            echo "These must never be committed:"; echo "$tracked"; exit 1
+          fi
+
+      - name: Agent entry files point at AGENTS.md
+        run: |
+          grep -qx '@AGENTS.md' CLAUDE.md
+          grep -q 'AGENTS.md' .cursor/rules/agents.mdc
+          grep -q 'AGENTS.md' .github/copilot-instructions.md
+
+  site:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Scoped to our code. components/ui and hooks are generated shadcn
+      # output and fail oxlint's a11y and react-compiler rules as shipped; see
+      # AGENTS.md. Formatting is not checked yet: app/ predates .oxfmtrc.json.
+      - run: npx oxlint app lib
+      - run: npm run build
+
+  compute-api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: compute-api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: compute-api/go.mod
+          cache-dependency-path: compute-api/go.mod
+      # gofmt is checked rather than run: a diff in CI is a review comment, a
+      # rewrite in CI is a surprise commit nobody read.
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then echo "$unformatted"; gofmt -d .; exit 1; fi
+      - run: go vet ./...
+      - run: go test ./...
+      - run: go build ./...
+      - name: Container builds
+        run: docker build --build-arg BUILD=${{ github.sha }} -t compute-api:ci .
+
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      - run: make tf-validate
+
+      # Catches a malformed compose file before it reaches an instance, where
+      # the failure mode is a boot that silently does nothing.
+      - run: make compose-config
+
+      - name: shellcheck
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q shellcheck
+          shellcheck scripts/*.sh
