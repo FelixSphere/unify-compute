@@ -28,6 +28,11 @@ yarn-error.log*
 
 # local environment
 .env*
+# ...but the templates are the point: CONTRIBUTING.md says to copy them, and
+# `.env*` silently swallowed deploy/compose/.env.example so it was never
+# committed while four files referenced it.
+!.env.example
+!**/.env.example
 
 # deployment and generated files
 .vercel

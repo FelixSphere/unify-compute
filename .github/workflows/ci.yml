@@ -84,9 +84,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Pinned to the floor in versions.tf, not to the latest release: CI's
+      # job is to prove the minimum version we claim to support actually
+      # works. It was 1.9.8, which cannot parse backend.tf's `use_lockfile` —
+      # invisible here only because `make tf-validate` runs `-backend=false`.
       - uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "1.9.8"
+          terraform_version: "1.10.5"
           terraform_wrapper: false
 
       - run: make tf-validate

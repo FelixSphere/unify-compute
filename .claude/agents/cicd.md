@@ -44,9 +44,12 @@ account. Two consequences:
   Staging runs its own console container from the same pinned image
   (`CONSOLE_IMAGE` in `deploy/compose/.env.example`), with a separate database.
   Never point staging compute at the production console.
-- **State:** Terraform state for staging is local to whoever applies it and
-  contains generated secrets. It must not be committed. `ci.yml` rejects
-  `*.tfstate` files. Moving it to S3 with locking is an open task.
+- **State:** Terraform state for staging lives in S3 with native locking
+  (`deploy/aws/staging/backend.tf`), key `unify-compute/staging/terraform.tfstate`.
+  The bucket is **not bootstrapped yet** — run `scripts/tf-backend-bootstrap.sh`
+  before the first `terraform init`, or `init` fails. `use_lockfile` needs
+  Terraform >= 1.10. State must still never be committed; `ci.yml` rejects
+  `*.tfstate` files.
 
 ## Applying staging for the first time
 

@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.9"
+  required_version = ">= 1.10"
 
   required_providers {
     aws = {
@@ -8,9 +8,10 @@ terraform {
     }
   }
 
-  # State is local until an S3 backend with locking exists. It contains no
-  # secrets (those live in SSM and are read at boot), but it is still the only
-  # record of what was applied: never commit it (ci.yml enforces this).
+  # State lives in S3 with native locking; see backend.tf. `use_lockfile` is
+  # why the floor is 1.10 and not 1.9 — on 1.9.x this configuration parses as
+  # an unknown argument and `init` fails, which is a worse place to learn it
+  # than here.
 }
 
 provider "aws" {
