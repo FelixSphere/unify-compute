@@ -47,16 +47,47 @@ compute product would share 2 requests/s and a burst of settles would starve
 
 Instead the bridge has its own limiter: default **50 requests/s with a burst of
 100**, configurable on the console with `COMPUTE_BRIDGE_RATE_LIMIT`. Over the
-limit the console answers `429` with a `Retry-After` header (seconds), and
-compute-api waits at least that long before retrying. The HMAC check still runs
-on every request; the limiter only bounds volume.
+limit the console answers `429` with a `Retry-After` header (seconds) and
+`message: "rate_limited"`, and compute-api waits at least that long before
+retrying.
+
+The limiter runs **before** HMAC verification: the cheap rejection comes
+first, so unsigned or forged traffic is bounded too and cannot make the console
+spend HMAC work without limit. A `429` therefore says nothing about whether
+the request was correctly signed.
 
 ## Errors and `404`
 
-Errors use the envelope with `success: false`, and `message` carries a stable
-machine-readable code (`hold_not_found`, `hold_expired`, `hold_exceeded`,
-`idempotency_conflict`, …) where one is listed below. Two `404`s exist and are
-distinguished by the body:
+Every error body (except the disabled bridge's, which has none) is the envelope
+with `success: false` and a stable machine-readable code from the table below
+in `message`:
+
+```json
+{ "success": false, "message": "hold_not_found", "data": null }
+```
+
+Implementations may additionally include a `code` field with the same value;
+clients must read `message` and must not depend on `code` being present.
+Human-readable text, where a server wants one, goes in the console's logs, not
+in `message`.
+
+| `message` | Status | When |
+|---|---|---|
+| `invalid_request` | `400` | Body is not valid JSON, or a required field is missing or out of range |
+| `invalid_signature` | `401` | `X-Compute-Signature` missing or wrong |
+| `invalid_timestamp` | `401` | `X-Compute-Timestamp` missing, unparsable, or more than 30 s from the console's clock |
+| `invalid_key` | `401` | `verify`: key unknown, disabled or expired |
+| `disabled` | `403` | `verify`: the key's user is disabled |
+| `suspended` | `403` | `verify`: the billing tenant is suspended |
+| `insufficient_balance` | `402` | `holds`, `extend`: the entity's (or a limited token's) remaining quota is below the amount |
+| `hold_not_found` | `404` | The `hold_id` in the path is unknown |
+| `hold_exceeded` | `409` | `settle`: `cumulative_quota` above the hold |
+| `hold_expired` | `409` | `settle`, `extend`, `release`: the hold passed `expires_at` and was swept |
+| `hold_closed` | `409` | `settle`, `extend`: the hold was released or final-settled |
+| `idempotency_conflict` | `409` | An idempotency id reused with a different request (see `settle` and `extend`) |
+| `rate_limited` | `429` | Over the bridge limiter; `Retry-After` is set |
+
+Two `404`s exist and are distinguished by the body:
 
 | Response | Meaning |
 |---|---|
@@ -107,12 +138,13 @@ account is never a `200`.
 
 Errors:
 
-- `401` unknown, disabled or expired key (`success: false`, message from the
-  console's existing i18n).
-- `403` the key is valid but the account may not spend: `success: false`, the
-  console's i18n message, and `data: { "status": "suspended" }` for a
-  suspended tenant or `data: { "status": "disabled" }` for a disabled user.
-  compute-api reads `data.status` to tell the customer which one applies.
+- `401`, `message: "invalid_key"`: the key is unknown, or the **key** (token)
+  is disabled or expired.
+- `403`: the key is valid but the account may not spend. A disabled **user**
+  is `message: "disabled"` with `data: { "status": "disabled" }`; a suspended
+  tenant is `message: "suspended"` with `data: { "status": "suspended" }`. A
+  disabled user is a `403`, not a `401`: the credential is fine, the account
+  is not, and compute-api tells the customer so.
 
 ### `POST /api/compute/v1/holds`
 
@@ -153,7 +185,10 @@ Response `data`:
 Semantics: the console moves `cumulative_quota − previously_settled` from the
 hold to consumed, and writes one consume-log row per call through
 `RecordConsumeLog` with `model_name = "compute/<sku>"` so it appears in the
-customer's usage view and in tenant reporting. Idempotent on `event_id`.
+customer's usage view and in tenant reporting. Idempotent on `event_id`,
+which is unique across **all** holds: a replay on the same hold returns the
+original result, and the same `event_id` on a different hold is `409
+idempotency_conflict` with nothing recorded.
 `cumulative_quota` above the hold is refused with `409 hold_exceeded`; compute
 must extend first. `final: true` settles and releases the remainder in one
 call.
@@ -165,11 +200,13 @@ Request:
 { "extend_id": "ext_01J8…", "additional_quota": 300000 }
 ```
 
-`extend_id` is required: client-generated, `ext_` followed by a ULID, at most
-64 characters. Same refusal rules as creating a hold (`402`). Response `data`
+`extend_id` is required and client-generated. compute-api generates `ext_`
+followed by a ULID; the prefix is a convention, and the console enforces only
+that it is non-empty and at most 64 characters (`400 invalid_request`
+otherwise). Same refusal rules as creating a hold (`402`). Response `data`
 echoes the new `quota` and `remain_quota`.
 
-Idempotent per hold on `extend_id`. An extend that commits but whose response
+Idempotent on `extend_id`, which, like `event_id`, is unique across all holds. An extend that commits but whose response
 is lost would otherwise be retried and reserve `additional_quota` a second
 time: the surplus comes back only at final settle, release or expiry, so for
 the life of the job the customer's balance reads low and a later hold or
@@ -177,8 +214,8 @@ extend can fail with a false `402`.
 
 - Same `extend_id` and same `additional_quota`: `200` with the hold's current
   state (`quota`, `remain_quota`); nothing is reserved again.
-- Same `extend_id` with a different `additional_quota`: `409`,
-  `message: "idempotency_conflict"`; nothing moves.
+- Same `extend_id` with a different `additional_quota`, or on a different
+  hold: `409 idempotency_conflict`; nothing moves.
 
 ### `POST /api/compute/v1/holds/{hold_id}/release`
 
@@ -193,6 +230,7 @@ Following the fork's rule "prefer adding a file over editing one". Files:
 model/compute_hold.go            compute_holds table (hold_id PK, user_id, tenant_id, token_id,
                                  job_id, sku, quota, settled_quota, status, expires_at, timestamps)
                                  + compute_settlements table (event_id PK, hold_id, quota_delta, gpu_seconds)
+                                 + compute_extensions table (extend_id PK, hold_id, additional_quota)
 model/compute_hold_test.go       hold/settle/release/expire, idempotency, tenant vs untenanted user
 controller/compute_bridge.go     HMAC verification, the five handlers, envelope responses
 controller/compute_bridge_test.go signature vector shared with compute-api, replay window, disabled-when-unset
@@ -230,15 +268,21 @@ Approved by the operator after the first implementations (compute-api PR #9,
 the fake console; PR #10, the job store; unifyapi-console PR #225, the bridge
 server) found gaps:
 
-- `extend` takes a required `extend_id` and is idempotent per hold; a
-  different amount under the same id is `409 idempotency_conflict`.
+- `extend` takes a required `extend_id` (non-empty, ≤ 64 chars; `ext_` + ULID
+  by convention), unique across all holds; a different amount or a different
+  hold under the same id is `409 idempotency_conflict`.
+- A settle `event_id` reused on a different hold is `409 idempotency_conflict`.
 - `verify` refuses a suspended tenant or disabled user with `403` and
-  `data.status` = `"suspended"` / `"disabled"`; it never returns those as `200`.
+  `data.status` = `"suspended"` / `"disabled"`; it never returns those as `200`,
+  and a disabled user is no longer a `401`.
+- Every error body carries a machine code in `message` (an extra `code` field
+  with the same value is optional; clients read `message`); the codes are
+  listed under "Errors and `404`".
 - The two `404`s are distinguished: empty body = bridge disabled, JSON
   `hold_not_found` = unknown hold.
 - Bridge routes leave the console's global API limiter for a dedicated one
-  (50 rps, burst 100, `COMPUTE_BRIDGE_RATE_LIMIT`), answering `429` with
-  `Retry-After`.
+  (50 rps, burst 100, `COMPUTE_BRIDGE_RATE_LIMIT`), checked before the
+  signature, answering `429 rate_limited` with `Retry-After`.
 - File references corrected to `client.go` / `client_test.go`.
 - The Builder bridge answers `401`, not `404`, when its secret is unset; the
   compute bridge's `404` is kept on purpose.

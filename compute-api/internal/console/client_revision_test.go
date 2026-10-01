@@ -66,14 +66,14 @@ func TestVerify403SurfacesAccountStatus(t *testing.T) {
 		t.Run(status, func(t *testing.T) {
 			c := revisionClient(t, func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusForbidden)
-				_, _ = w.Write([]byte(`{"success":false,"message":"user is banned","data":{"status":"` + status + `"}}`))
+				_, _ = w.Write([]byte(`{"success":false,"message":"` + status + `","data":{"status":"` + status + `"}}`))
 			})
 			id, err := c.Verify(context.Background(), "sk-test")
 			if id != nil {
 				t.Fatalf("identity returned on 403: %+v", id)
 			}
 			var e *Error
-			if !errors.As(err, &e) || e.Status != 403 || e.AccountStatus != status || e.Message != "user is banned" {
+			if !errors.As(err, &e) || e.Status != 403 || e.AccountStatus != status || e.Message != status {
 				t.Fatalf("got %#v", err)
 			}
 		})
