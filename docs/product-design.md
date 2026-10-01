@@ -8,6 +8,7 @@
   balance (ADR-0001); compute-api is separate and proprietary, HTTP only to the
   console (ADR-0002); SkyPilot is the orchestration layer (ADR-0003); upstreams
   are SkyPilot clouds with trust tiers (ADR-0006, PR #3, not yet merged);
+  P2 is deferred (operator, 2026-10-01);
   artifacts live in our S3 (ADR-0005, Proposed, in the finetune worktree).
 
 ## What the two references actually are
@@ -69,8 +70,8 @@ their supply side.
    yes).
 6. **Scoped keys and signed webhooks.** A key that can run compute but not see
    billing; a webhook on terminal states signed like the bridge.
-7. **Serverless endpoints on the same SKUs** (later): min/max replicas, scale to
-   zero, OpenAI-compatible route. SkyServe gives us the mechanism.
+7. **Serverless endpoints on the same SKUs** (P2, deferred): min/max replicas,
+   scale to zero, OpenAI-compatible route. SkyServe gives us the mechanism.
 
 **Leave**
 
@@ -90,20 +91,22 @@ their supply side.
  ─────────        ─────────                    ────             ─────                ──────
  SKUs (+fabric)   Jobs            v1           Artifacts  v1    Hold/settle   v1     sk- key        v1
  Tiers (R2)       Templates       P1           Inputs     v1    3 meters      P1     Scoped keys    P1
- Upstreams (R6)   Events/webhook  P1           Volumes    P2    Zero-balance  P1     OpenAPI + CLI  P1
- Availability P1  Instances (SSH) P2                            Usage export  P1     Terraform      P3
- Quotas       P1  Endpoints       P2                            Reserved      P3
+ Upstreams (R6)   Events/webhook  P1           Volumes   (P2)   Zero-balance  P1     OpenAPI + CLI  P1
+ Availability P1  Instances      (P2)                           Usage export  P1     Terraform      P3
+ Quotas       P1  Endpoints      (P2)                           Reserved      P3
                   Multi-node      P3
+
+ (P2) = deferred by the operator on 2026-10-01; not planned.
 ```
 
 - **v1** is the existing contract made real: a job submitted with an `sk-` key
   runs on one upstream, is metered, settled, and its artifacts downloadable.
 - **P1** makes v1 usable by someone other than us without hand-holding:
   templates, events, quotas, the billing semantics written down, a CLI.
-- **P2** adds the two other workload shapes customers of both references expect:
-  interactive instances (with volumes, since an instance without persistent
-  disk is a toy) and serverless endpoints. Each needs an ADR because v1
-  explicitly excludes them.
+- **P2 — deferred.** The operator decided on 2026-10-01 not to do interactive
+  instances, volumes or serverless endpoints yet, design included. They are
+  the other workload shapes customers of both references expect, and each
+  would need an ADR because v1 excludes them; revisit after R1 is green.
 - **P3** is what only makes sense with revenue: reserved capacity, multi-node,
   Terraform provider.
 
@@ -123,8 +126,9 @@ code, **X** another repository, **I** infrastructure.
 |---|---|---|
 | W0 | Merge #1 → `main` (merge commit, so #2 and #3 keep their history), retarget and merge #2 (red `pinned-images` is known and intended), then #3 | operator / any agent with approval |
 
-Everything in compute-api depends on W0; doc tasks D1–D5 do not, and can start
-now on `main-ph0vlz`.
+#1 and #2 merged on 2026-10-01 (`ae6cb25`, `89600be`). #3 waits on the
+operator's test-guard approval because it modifies existing tests. Tasks that
+need #3's code (C3, C4, C7) wait for it; everything else cuts from `main`.
 
 ### Wave 1 — start in parallel
 
@@ -132,12 +136,10 @@ now on `main-ph0vlz`.
 |---|---|---|---|---|
 | D1 | ADR-0007: product surfaces and phasing (this document, condensed into a decision) | `docs/adr/0007-*`, `docs/architecture.md` | — | ADR `Status: Proposed`; architecture.md links it; no present-tense claims about unbuilt things |
 | D2 | Billing semantics spec: three meters, billable-state table, zero-balance policy (ADR-0008) | `docs/spec/metering.md`, `docs/adr/0008-*`, `docs/spec/job-api.md` metering section | — | Table covers every job state × meter; zero-balance ADR answers the architecture.md open question; hold sizing and settlement cadence decided with numbers |
-| D3 | ADR-0009: interactive instances and volumes — scope, isolation per tier, billing while stopped | `docs/adr/0009-*` | — | Design only. States what SkyPilot gives (`sky launch` clusters, autostop) and what we must add |
-| D4 | ADR-0010: serverless endpoints on SkyServe — routing, scale-to-zero, how a request is metered against the balance | `docs/adr/0010-*` | — | Design only. Says whether endpoints bill per second of replica or per request |
 | C1 | Job store: Postgres schema, migrations, repository layer, idempotency (24 h) | `compute-api/internal/store/`, `THIRD-PARTY-LICENSES.md` | W0 | `go test` runs against a real Postgres in CI; driver is MIT/BSD and recorded |
 | C2 | Fake console: an in-process test server implementing the bridge contract (verify/hold/settle/extend/release) from the spec, for compute-api tests | `compute-api/internal/console/consoletest/` | W0 | Signature vector from `client_test.go` verified by the fake; no code from the console repo |
 | X1 | Console-side bridge routes in `FelixSphere/unifyapi-console` (AGPL, new files only) | other repo | spec only | Routes behind `COMPUTE_BRIDGE_SECRET`, 404 without it; the pinned signature vector passes; released only via the UnifyAPI CI/CD agent |
-| C3 | OpenAPI 3.1 document generated from `spec/job-api.md` and served at `/compute/v1/openapi.json` | `compute-api/internal/api/`, `docs/spec/openapi.json` | W0 | A test fails if a route exists without an OpenAPI entry |
+| C3 | OpenAPI 3.1 document generated from `spec/job-api.md` and served at `/compute/v1/openapi.json` | `compute-api/internal/api/`, `docs/spec/openapi.json` | W0 incl. #3 | A test fails if a route exists without an OpenAPI entry |
 
 ### Wave 2 — the job path end to end
 
@@ -158,7 +160,6 @@ now on `main-ph0vlz`.
 | C10 | Usage export: FOCUS-shaped CSV/JSON per account and month | C5 | Same rows feed the upstream reconciliation (R12) |
 | C11 | CLI `unify` (Go, stdlib): `jobs submit/get/logs/cancel`, `skus`, `templates` | C3 | Generated from or tested against the OpenAPI document |
 | R1 | First staging run: publish the image, pin its digest, apply staging, run the reference fine-tune as a job | C4, C5, X1 in staging console, I1 | **CI/CD agent only.** Exercise: submit → hold → run → settle → artifacts → release, plus cancel mid-run and console-down mid-run |
-| — | P2 build (instances, volumes, endpoints) | D3/D4 accepted, R1 green | Re-plan then; not broken down here on purpose |
 
 ### Dependency graph
 
@@ -172,7 +173,7 @@ W0 ──┬─ C1 ──┬─ C4 ── C9
      ├─ C7                 │
      └─ I1 ────────────────┤
 X1 ────────────────────────┘
-D1, D2, D3, D4 — no code dependency; D2 gates C5
+D1, D2 — no code dependency; D2 gates C5
 ```
 
 ### Rules every task agent follows
