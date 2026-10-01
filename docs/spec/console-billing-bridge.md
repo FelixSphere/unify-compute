@@ -84,7 +84,9 @@ in `message`.
 | `hold_exceeded` | `409` | `settle`: `cumulative_quota` above the hold |
 | `hold_expired` | `409` | `settle`, `extend`, `release`: the hold passed `expires_at` and was swept |
 | `hold_closed` | `409` | `settle`, `extend`: the hold was released or final-settled |
-| `idempotency_conflict` | `409` | An idempotency id reused with a different request (see `settle` and `extend`) |
+| `sku_mismatch` | `409` | `settle`: `sku` differs from the hold's `sku` |
+| `cumulative_quota_regressed` | `409` | `settle`: `cumulative_quota` is lower than the amount already settled |
+| `idempotency_conflict` | `409` | A `hold_id`, `event_id` or `extend_id` reused with a different request or on a different hold (see `holds`, `settle` and `extend`) |
 | `rate_limited` | `429` | Over the bridge limiter; `Retry-After` is set |
 
 Two `404`s exist and are distinguished by the body:
@@ -163,7 +165,16 @@ Response `data`:
 Semantics: decrement the billing entity's quota and the token's `remain_quota`
 (unless unlimited) atomically, mirroring `PreConsumeTokenQuota` plus the
 entity-level pre-consume, and persist a `compute_holds` row. Idempotent on
-`hold_id`: a replay returns the original row with `200`. Refuse with `402` if
+`hold_id`:
+
+- Same `hold_id` and the same request body: `200` with the original row;
+  nothing is reserved again.
+- Same `hold_id` with a different body: `409 idempotency_conflict`; nothing
+  moves. The comparison is against the hold's original request (`user_id`,
+  `token_id`, `quota`, `job_id`, `sku`, `expires_at`), not its current
+  quota, so a retried create still matches after the hold was extended.
+
+Refuse with `402` if
 `remain_quota < quota`. Expired holds (past `expires_at`) are released by a
 console-side sweeper and reported to compute on the next `settle`/`release` as
 `409 hold_expired`.
@@ -190,7 +201,9 @@ which is unique across **all** holds: a replay on the same hold returns the
 original result, and the same `event_id` on a different hold is `409
 idempotency_conflict` with nothing recorded.
 `cumulative_quota` above the hold is refused with `409 hold_exceeded`; compute
-must extend first. `final: true` settles and releases the remainder in one
+must extend first. `cumulative_quota` below what is already settled is
+`409 cumulative_quota_regressed` (the bridge has no refund verb), and a `sku`
+that differs from the hold's is `409 sku_mismatch`; neither records anything. `final: true` settles and releases the remainder in one
 call.
 
 ### `POST /api/compute/v1/holds/{hold_id}/extend`
@@ -206,9 +219,9 @@ that it is non-empty and at most 64 characters (`400 invalid_request`
 otherwise). Same refusal rules as creating a hold (`402`). Response `data`
 echoes the new `quota` and `remain_quota`.
 
-Idempotent on `extend_id`, which, like `event_id`, is unique across all holds. An extend that commits but whose response
-is lost would otherwise be retried and reserve `additional_quota` a second
-time: the surplus comes back only at final settle, release or expiry, so for
+Idempotent on `extend_id`, which, like `event_id`, is unique across all
+holds. An extend that commits but whose response is lost would otherwise be
+retried and reserve `additional_quota` a second time: the surplus comes back only at final settle, release or expiry, so for
 the life of the job the customer's balance reads low and a later hold or
 extend can fail with a false `402`.
 
@@ -272,6 +285,11 @@ server) found gaps:
   by convention), unique across all holds; a different amount or a different
   hold under the same id is `409 idempotency_conflict`.
 - A settle `event_id` reused on a different hold is `409 idempotency_conflict`.
+- A `hold_id` replay with the same body returns the original row (`200`); with
+  a different body it is `409 idempotency_conflict` (no separate
+  `hold_id_conflict` code).
+- `settle` refuses a different `sku` (`409 sku_mismatch`) and a lower
+  cumulative amount (`409 cumulative_quota_regressed`).
 - `verify` refuses a suspended tenant or disabled user with `403` and
   `data.status` = `"suspended"` / `"disabled"`; it never returns those as `200`,
   and a disabled user is no longer a `401`.
