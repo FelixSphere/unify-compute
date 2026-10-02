@@ -30,9 +30,12 @@ account. Two consequences:
 ## The state of the world (keep this section true)
 
 - **Marketing site:** live at https://compute.unifyai.us, hosted on OpenAI
-  Sites (`.openai/hosting.json`), served through Cloudflare. It does not
-  deploy through this repository's CI. Content changes ship through the Sites
-  project, not Terraform.
+  Sites (`.openai/hosting.json`), served through Cloudflare. That is still
+  true. The move to AWS (operator request, 2026-10-02) is in progress: the
+  site becomes a container image (`ghcr.io/felixsphere/unify-compute-site`)
+  released with compute-api through `release.yml`. Until production exists
+  and `compute.unifyai.us` is cut over, Sites is what customers see, and
+  content changes ship through the Sites project.
 - **Staging:** defined in `deploy/aws/staging/`, target hostnames
   `staging.compute.unifyai.us` (compute-api) and
   `console.staging.compute.unifyai.us` (a staging console with its own empty
@@ -40,6 +43,10 @@ account. Two consequences:
   First apply is a deliberate act: see "Applying staging for the first time".
 - **Production compute API:** does not exist. There is no production stack in
   this repository yet.
+- **Release pipeline:** `.github/workflows/release.yml`, dispatch only.
+  **Written, never run**: no environment exists for it to release to. The
+  first staging release is also its first test; read every step's output.
+  No release records exist yet (`deploy/releases/`).
 - **Console:** production `app.unifyapi.ai` belongs to the UnifyAPI CI/CD agent.
   Staging runs its own console container from the same pinned image
   (`CONSOLE_IMAGE` in `deploy/compose/.env.example`), with a separate database.
@@ -75,22 +82,66 @@ account. Two consequences:
 
 ## Before you ship anything
 
-1. **Know what you are shipping.** `git log <last-tag>..main --oneline`.
-2. **A `user_data` change replaces the instance.** The data volume survives
+1. **Know what you are shipping.** A release is two digests. Find the commit
+   each was built from (its `sha-<commit>` tag), then
+   `git log <previous build>..<new build> --oneline` for each. The previous
+   builds are in the last record in `deploy/releases/`, and on the host
+   (`mode=status`).
+2. **Nothing else is in flight.** `gh run list --workflow release.yml`.
+   The workflow refuses a second concurrent run; check anyway, so you are not
+   the one refused halfway through someone else's release.
+3. **A `user_data` change replaces the instance.** The data volume survives
    (`prevent_destroy`), the containers do not. Say so before applying.
-3. **Never let `terraform apply` destroy the data volume.** If a plan proposes
+   Terraform is for the instance, not for releases.
+4. **Never let `terraform apply` destroy the data volume.** If a plan proposes
    it, stop.
-4. **Run the smoke script after every deploy** and read it. A compute-api that
-   returns 200 on `/healthz` but 502 on `/compute/v1/skus` is not healthy.
 5. **Pricing goes out with the code that reads it.** Do not hot-edit
    `skus.json` on the instance.
 
+## Releasing
+
+The procedure, what each step refuses, and what the hosts must provide are
+in `docs/staging.md`, section "Releasing". In short:
+
+```bash
+# before: what the host runs now (read-only)
+gh workflow run release.yml --ref main -f environment=staging -f mode=status -f reason="before <name>"
+
+# staging, then production with the SAME digests
+gh workflow run release.yml --ref main -f environment=staging -f compute_api_image=ghcr.io/felixsphere/unify-compute-api@sha256:<d> -f site_image=ghcr.io/felixsphere/unify-compute-site@sha256:<d> -f reason="<name>"
+gh workflow run release.yml --ref main -f environment=production -f compute_api_image=<same> -f site_image=<same> -f reason="<name>"
+```
+
+- **Staging first is enforced, not advised.** Production refuses digests
+  without a successful staging run of `release.yml` that uploaded a manifest
+  with exactly those digests. Do not look for a way around it.
+- **HOTFIX** at the start of `reason` bypasses that one gate, loudly, for a
+  live outage, a security issue or data being lost, and nothing else. It
+  still backs up, checks the host, and smokes. Record it with `hotfix: true`
+  and a `## What was skipped` section, and release the same digests to
+  staging afterwards.
+- **The run is not the evidence.** After it, exercise what the release
+  changes, on the environment, and write `deploy/releases/YYYY-MM-DD-<name>.md`
+  (format in `deploy/releases/README.md`; the run summary has the field
+  block). CI fails every PR once a successful release is a day old with no
+  record.
+- **Any other command that writes data or restarts a service** on a host
+  takes the same lock first:
+  `flock -w 900 /run/lock/unify-compute-ops.lock <command>`.
+
 ## Rolling back
 
-Repoint `COMPUTE_API_IMAGE` (and, if involved, `CONSOLE_IMAGE`) to the previous
-digest in the instance's compose file over SSM, `docker compose up -d`, smoke,
-then commit the same pin here so the next instance rebuild lands on it. Pin by
-digest, not tag: a tag can be repointed, a digest cannot.
+```bash
+gh workflow run release.yml --ref main -f environment=<env> -f mode=rollback -f reason="rollback: <why>"
+```
+
+It cuts back to the host's `PREVIOUS_RELEASE` through the same lock, backup
+and checks. A failed cutover already restored the previous images by itself;
+a failed smoke did not, because the host had passed its own checks, so
+deciding is yours. A rollback does not restore the database; if the bad
+release migrated it, the runbook in `docs/staging.md` restores the dump it
+took. One rollback goes one step back; a second one re-applies what you
+rolled back from. A rollback needs its own record.
 
 ## The rule you enforce
 
