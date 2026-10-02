@@ -30,7 +30,7 @@ variable "console_image" {
 }
 
 variable "ami_id" {
-  description = "Empty for the first apply only; then pin the ami_id_in_use output here."
+  description = "Pinned from ami_id_in_use after the first apply (2026-10-02). Moving it replaces the instance."
   type        = string
-  default     = ""
+  default     = "ami-065b1b834d2a83a7a"
 }
