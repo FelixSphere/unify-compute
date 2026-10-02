@@ -8,7 +8,9 @@ module "stack" {
   region      = var.region
   environment = "staging"
   name        = "unify-compute-staging"
-  vpc_cidr    = "10.70.0.0/16"
+  # 10.70 is Unify Data's VPC in this account; ranges stay unique per stack so
+  # any two can still be peered or put behind one VPN.
+  vpc_cidr = "10.72.0.0/16"
 
   api_domain      = "staging.compute.unifyai.us"
   site_domain     = "site.staging.compute.unifyai.us"
