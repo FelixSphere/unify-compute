@@ -1,0 +1,134 @@
+# Serves the static export of the marketing site (compute.unifyai.us).
+#
+# Plain HTTP on :8080. The ALB terminates TLS and owns the http -> https
+# redirect, so nothing here looks at X-Forwarded-Proto. There is no admin API
+# and no automatic HTTPS: this process has nothing to configure at runtime.
+{
+	admin off
+	auto_https off
+	persist_config off
+}
+
+(csp) {
+	# Origins are HubSpot's published CSP list for the features this site
+	# loads: the tracking code (js.hs-scripts.com), which pulls in analytics,
+	# the cookie banner, conversations / chat and collected forms. Source:
+	# https://knowledge.hubspot.com/domains-and-urls/ssl-and-domain-security-in-hubspot
+	# (the Content Security Policy table).
+	#
+	# 'unsafe-inline' in script-src is required by the static export, not by
+	# HubSpot: vinext streams the RSC payload as inline <script> chunks that
+	# differ per page and per build, and a static file server cannot attach a
+	# nonce. style-src needs it for React style={} attributes and the chat
+	# widget's injected styles.
+	#
+	# Report-only until it has been watched on a real hostname. HubSpot only
+	# renders the chat widget on the domains its chatflow targets, so neither
+	# localhost nor the current Sites deployment (which predates the loader)
+	# could show that this policy lets the chat load. Enforce it — rename the
+	# header to Content-Security-Policy — once the browser console on staging
+	# shows the chat open with no report-only violations.
+	Content-Security-Policy-Report-Only "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self' https://*.hsforms.com https://*.hubspot.com; script-src 'self' 'unsafe-inline' https://*.hs-scripts.com https://*.hs-analytics.net https://*.hs-banner.com https://*.usemessages.com https://*.hubspot.com https://*.hscollectedforms.net https://*.hsadspixel.net https://*.hsforms.net https://*.hsforms.com https://*.hsleadflows.net https://static.hsappstatic.net; connect-src 'self' https://*.hubspot.com https://*.hubapi.com https://*.hs-banner.com https://*.hscollectedforms.net https://*.hsforms.com https://*.hs-analytics.net https://*.usemessages.com wss://*.hubspot.com; img-src 'self' data: https://*.hubspot.com https://*.hubspot.net https://*.hsforms.com https://*.hsforms.net https://*.hs-banner.com https://*.hubspotusercontent-na1.net https://*.hubspotusercontent.com https://track.hubspot.com; frame-src https://*.hubspot.com https://*.hsforms.net https://*.hsforms.com https://*.usemessages.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; media-src 'self' https://*.hubspot.com https://*.hubspot.net; worker-src 'self' blob:; manifest-src 'self'"
+}
+
+(security_headers) {
+	-Server
+	X-Content-Type-Options nosniff
+	Referrer-Policy strict-origin-when-cross-origin
+	X-Frame-Options DENY
+	Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+	# Set here and not on the ALB so it is versioned with the site. Browsers
+	# ignore HSTS on plain HTTP, but this response only reaches a browser
+	# through the ALB's HTTPS listener. No includeSubDomains: the staging and
+	# console hosts under compute.unifyai.us are separate services.
+	Strict-Transport-Security "max-age=31536000"
+	# HTML and the RSC payload share a URL; only the RSC header tells them
+	# apart. `+` keeps encode's Vary: Accept-Encoding.
+	+Vary RSC
+	import csp
+}
+
+:8080 {
+	# SITE_ROOT exists so the Caddyfile can be tested against a local build.
+	root * {$SITE_ROOT:/srv}
+	encode zstd gzip
+
+	# Before the security headers and the file server: the ALB polls this and
+	# it must not depend on a file in the export existing.
+	handle /healthz {
+		header Cache-Control no-store
+		respond "ok" 200
+	}
+
+	header {
+		import security_headers
+	}
+
+	# Client-side navigation. vinext's router fetches the target page with
+	# `RSC: 1` and expects the prerendered flight payload (privacy.rsc,
+	# index.rsc), not the HTML. It only accepts the payload when the
+	# compatibility id matches the one baked into the bundle at build time —
+	# next.config.ts sets that from SITE_BUILD_ID, and so does this. On any
+	# mismatch the router falls back to a full page load, which is still
+	# correct, only slower.
+	@rsc header RSC 1
+	handle @rsc {
+		header Content-Type text/x-component
+		header X-Vinext-RSC-Compatibility-Id {$SITE_BUILD_ID}
+		header Cache-Control no-cache
+		rewrite / /index.rsc
+		rewrite * {path}.rsc
+		file_server
+	}
+
+	# The export writes /privacy as privacy.html. A trailing slash has no file
+	# behind it; redirect rather than serve the 404 for a URL people type.
+	@trailing path_regexp trailing ^(.+)/$
+	redir @trailing {re.trailing.1} 308
+
+	# Go's built-in MIME table has none of these, and the alpine image may not
+	# ship /etc/mime.types; a manifest served as text/plain is ignored by
+	# browsers, and nosniff makes a wrong type fatal.
+	@webmanifest path *.webmanifest
+	header @webmanifest Content-Type application/manifest+json
+	@ico path *.ico
+	header @ico Content-Type image/x-icon
+	@woff2 path *.woff2
+	header @woff2 Content-Type font/woff2
+	@woff path *.woff
+	header @woff Content-Type font/woff
+	@rscfile path *.rsc
+	header @rscfile Content-Type text/x-component
+
+	# Content-hashed by Vite: a new build is a new file name.
+	@hashed path /_next/static/*
+	header @hashed Cache-Control "public, max-age=31536000, immutable"
+
+	# Fixed names that are versioned by hand (-v3) when the artwork changes,
+	# plus favicon.ico and apple-touch-icon.png, which clients fetch by fixed
+	# path and the HTML busts with ?v=3. An hour bounds how stale a missed
+	# bump can be.
+	@public path /favicon.ico /favicon-32-v3.png /icon-v3.svg /apple-touch-icon.png /manifest-v3.webmanifest /og-image-v3.png /icons/* /brand/* /email/*
+	header @public Cache-Control "public, max-age=3600"
+
+	handle {
+		# The HTML has no hash in its name and points at the hashed assets, so
+		# it must be revalidated on every load or a release is invisible. `?`
+		# leaves the asset rules above in place.
+		header ?Cache-Control no-cache
+		try_files {path} {path}.html
+		file_server {
+			hide .*
+		}
+	}
+
+	# handle_errors does not inherit the site's header directives.
+	handle_errors 404 {
+		rewrite * /404.html
+		header {
+			import security_headers
+			Cache-Control no-cache
+		}
+		file_server
+	}
+}
