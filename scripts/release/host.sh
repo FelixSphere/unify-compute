@@ -9,7 +9,12 @@
 #   ENV_NAME=staging|production
 #   RELEASE_ID=<workflow run id>
 #   REGION=us-east-1
-#   TARGET='COMPUTE_API_IMAGE=ghcr.io/...@sha256:... SITE_IMAGE=ghcr.io/...@sha256:...'
+#   TARGET='COMPUTE_API_IMAGE=<acct>.dkr.ecr.<region>.amazonaws.com/unify-compute-api@sha256:... SITE_IMAGE=...'
+#
+# Our images are pulled from the runtime registry, ECR in this account, with
+# the instance role (ADR-0009, "Runtime registry: ECR"). The workflow copies
+# each digest there from GHCR before it sends this script; GHCR is never
+# contacted from a host.
 #
 # POSIX sh on purpose: SSM's AWS-RunShellScript runs the payload with `sh`.
 # No pipefail, no arrays, no [[ ]].
@@ -41,8 +46,10 @@ BACKUP_BUCKET_PARAM=${BACKUP_BUCKET_PARAM:-$SSM_PREFIX/backup_bucket}
 PG_SERVICE=${PG_SERVICE:-postgres}
 PG_USER=${PG_USER:-unify}
 # KEY:compose-service:repository. A release may only change these keys, and
-# each only to a digest of its own repository.
-MANAGED=${MANAGED:-"COMPUTE_API_IMAGE:compute-api:ghcr.io/felixsphere/unify-compute-api SITE_IMAGE:site:ghcr.io/felixsphere/unify-compute-site"}
+# each only to a digest of its own repository in this account's ECR registry
+# (ECR_REGISTRY, read from STS below rather than taken from the payload).
+MANAGED=${MANAGED:-"COMPUTE_API_IMAGE:compute-api:unify-compute-api SITE_IMAGE:site:unify-compute-site"}
+UNIT=${UNIT:-unify-compute.service}
 # compute-api is distroless and has no container healthcheck, so "running" is
 # all docker can say about it. This probe is what says it answers.
 LOCAL_PROBES=${LOCAL_PROBES:-http://127.0.0.1:8080/healthz}
@@ -63,7 +70,7 @@ compose() { docker compose --env-file "$ENV_FILE" "$@"; }
 
 keys() { for m in $MANAGED; do printf '%s\n' "${m%%:*}"; done; }
 service_of() { for m in $MANAGED; do [ "${m%%:*}" = "$1" ] && { r=${m#*:}; printf '%s' "${r%%:*}"; return; }; done; }
-repo_of() { for m in $MANAGED; do [ "${m%%:*}" = "$1" ] && { printf '%s' "${m##*:}"; return; }; done; }
+repo_of() { for m in $MANAGED; do [ "${m%%:*}" = "$1" ] && { printf '%s/%s' "$ECR_REGISTRY" "${m##*:}"; return; }; done; }
 
 env_get() { sed -n "s/^$1=//p" "$ENV_FILE" | tail -n 1; }
 
@@ -180,20 +187,25 @@ EOF
 
 print_set() { for kv in $2; do say "$1 $kv"; done; }
 
-ghcr_login() {
-  # Only if the stack provides pull credentials; public packages need none.
-  user=$(aws ssm get-parameter --region "$REGION" --name "$SSM_PREFIX/ghcr_pull_user" --query Parameter.Value --output text 2>/dev/null || true)
-  token=$(aws ssm get-parameter --region "$REGION" --with-decryption --name "$SSM_PREFIX/ghcr_pull_token" --query Parameter.Value --output text 2>/dev/null || true)
-  if [ -n "$user" ] && [ -n "$token" ]; then
-    printf '%s' "$token" | docker login ghcr.io -u "$user" --password-stdin >/dev/null
-    say "ghcr: logged in as $user"
-  fi
+# The instance role's 12-hour token. No pipe from aws into docker: POSIX sh
+# has no pipefail, and a failed get-login-password would reach docker as an
+# empty password.
+ecr_login() {
+  pw=$(aws ecr get-login-password --region "$REGION") || die "could not get an ECR token with the instance role"
+  printf '%s' "$pw" | docker login --username AWS --password-stdin "$ECR_REGISTRY" >/dev/null \
+    || die "docker login to $ECR_REGISTRY failed"
+  unset pw
+  say "ecr: logged in to $ECR_REGISTRY"
 }
 
 backup() {
   B="$BACKUP_ROOT/$STAMP-$RELEASE_ID"
   mkdir -p "$B"; chmod 0700 "$B"
   cp -p "$ENV_FILE" "$B/env.before"
+  if [ "$FIRST_START" = 1 ]; then
+    say "BACKUP $B none-first-start"
+    return
+  fi
   printf '%s\n' "$CURRENT" | tr ' ' '\n' > "$B/PREVIOUS_RELEASE"
 
   if ! bucket=$(aws ssm get-parameter --region "$REGION" --name "$BACKUP_BUCKET_PARAM" --query Parameter.Value --output text); then
@@ -262,11 +274,34 @@ case "$ACTION" in
     ;;
   *) die "unknown ACTION $ACTION" ;;
 esac
+account=$(aws sts get-caller-identity --region "$REGION" --query Account --output text) \
+  || die "could not read this instance's AWS account"
+case "$account" in [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ;; *) die "unexpected account id '$account'" ;; esac
+ECR_REGISTRY="$account.dkr.ecr.$REGION.amazonaws.com"
 validate_set "$TARGET"
 
-# Refuse to start a second stack beside the first. If nothing is running in
-# this directory's project, COMPOSE_DIR is probably not where the unit runs.
-[ -n "$(compose ps -q)" ] || die "no running containers in the compose project at $COMPOSE_DIR; is this the directory the systemd unit uses?"
+# Refuse to start a second stack beside the first: this must be the directory
+# the systemd unit runs compose in.
+unit_dir=$(systemctl show -p WorkingDirectory --value "$UNIT")
+[ "$unit_dir" = "$COMPOSE_DIR" ] || die "$UNIT runs compose in '$unit_dir', not $COMPOSE_DIR"
+
+# A host whose stack has never come up. Staging's first boot (2026-10-02)
+# wrote the .env and the unit, then failed its first pull, so nothing ran and
+# no database was ever created. That is the only case in which releasing onto
+# a host with no containers is right: nothing to back up, nothing to restore,
+# and nothing to roll back to. Anything else with no containers (a host that
+# has released before, or one with a database on disk) means something
+# stopped the stack, and a release must not paper over that.
+FIRST_START=0
+if [ -z "$(compose ps -q)" ]; then
+  [ ! -s "$STATE_DIR/history.log" ] \
+    || die "no running containers in $COMPOSE_DIR, but this host has released before; find out what stopped $UNIT first"
+  pgdata="$(env_get DATA_DIR)/postgres"
+  [ -z "$(ls -A "$pgdata" 2>/dev/null)" ] \
+    || die "no running containers in $COMPOSE_DIR, but $pgdata holds a database; find out what stopped $UNIT first"
+  FIRST_START=1
+  say "first start: the stack has never run on this host (no containers, no release history, no database)"
+fi
 
 print_set CURRENT "$CURRENT"
 print_set TARGET "$TARGET"
@@ -281,7 +316,7 @@ fi
 
 # Pull before touching anything. A missing digest or an image without arm64
 # fails here, with the old stack still up and nothing to undo.
-ghcr_login
+ecr_login
 for kv in $TARGET; do docker pull -q "${kv#*=}"; done
 
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
@@ -294,7 +329,9 @@ SWAPPED=0
 on_exit() {
   rc=$?
   trap - EXIT
-  if [ "$rc" -ne 0 ] && [ "$SWAPPED" = 1 ]; then
+  if [ "$rc" -ne 0 ] && [ "$SWAPPED" = 1 ] && [ "$FIRST_START" = 1 ]; then
+    say "!!! first start failed (exit $rc). Nothing ran before, so there is nothing to restore; the containers are left as they are for diagnosis."
+  elif [ "$rc" -ne 0 ] && [ "$SWAPPED" = 1 ]; then
     set +e
     say "!!! cutover failed (exit $rc); restoring the previous images"
     cp -p "$B/env.before" "$ENV_FILE.restore" && mv -f "$ENV_FILE.restore" "$ENV_FILE"
@@ -313,15 +350,27 @@ trap on_exit EXIT
 
 SWAPPED=1
 write_env "$TARGET"
-compose up -d --remove-orphans --quiet-pull
+if [ "$FIRST_START" = 1 ]; then
+  # Through the unit, so its failed state from the boot is cleared and it
+  # reflects what runs.
+  systemctl start "$UNIT" || die "$UNIT did not start"
+else
+  compose up -d --remove-orphans --quiet-pull
+fi
 verify "$TARGET" || die "the new release is not healthy"
 
-tmp="$STATE_DIR/PREVIOUS_RELEASE.new"
-printf '%s\n' "$CURRENT" | tr ' ' '\n' > "$tmp" && mv -f "$tmp" "$STATE_DIR/PREVIOUS_RELEASE"
+# After a first start there is no previous release: the refs the boot wrote
+# never ran, so a rollback must refuse rather than go to them.
+if [ "$FIRST_START" = 1 ]; then
+  rm -f "$STATE_DIR/PREVIOUS_RELEASE"
+else
+  tmp="$STATE_DIR/PREVIOUS_RELEASE.new"
+  printf '%s\n' "$CURRENT" | tr ' ' '\n' > "$tmp" && mv -f "$tmp" "$STATE_DIR/PREVIOUS_RELEASE"
+fi
 printf '%s\n' "$TARGET" | tr ' ' '\n' > "$STATE_DIR/CURRENT_RELEASE"
 printf '%s %s %s %s\n' "$STAMP" "$ACTION" "$RELEASE_ID" "$TARGET" >> "$STATE_DIR/history.log"
 SWAPPED=0
 
 prune_local_backups
-print_set PREVIOUS "$CURRENT"
+[ "$FIRST_START" = 1 ] || print_set PREVIOUS "$CURRENT"
 print_set RELEASED "$TARGET"
