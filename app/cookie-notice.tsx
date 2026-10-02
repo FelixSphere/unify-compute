@@ -86,7 +86,7 @@ export function CookieNotice() {
       aria-label="Cookie notice"
       className="fixed bottom-24 left-4 right-4 z-50 max-w-[480px] rounded-lg bg-(--u-btn-secondary-bg) p-5 text-(--u-btn-secondary-fg) sm:bottom-6 sm:left-6 sm:right-auto"
     >
-      <p className="m-0 font-mono text-[11px] uppercase tracking-[0.14em] text-(--u-btn-secondary-fg)">
+      <p className="m-0 font-mono text-[11px] uppercase tracking-[0.14em] text-(--u-muted-on-dark)">
         Cookie notice
       </p>
       <p className="m-0 mt-3 text-[14px] leading-[1.55]">

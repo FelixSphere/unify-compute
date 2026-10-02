@@ -1,6 +1,6 @@
-# Notifications: customer email for job outcomes
+# Notifications: UnifyAI Compute customer email for job outcomes
 
-- **Status:** Spec, nothing built. Compute sends no mail today. No code in this
+- **Status:** Spec, nothing built. UnifyAI Compute sends no mail today. No code in this
   repository builds, renders or sends email, and this document does not add
   any.
 - Depends on: [`job-api.md`](job-api.md) (job states, `error.code`, the
@@ -20,9 +20,9 @@
 | Layout (`docs/spec/email/base.html`) | Copied from the kit. Not wired to anything. |
 | Logo PNGs (`public/email/`) | Served by the marketing site at `https://compute.unifyai.us/email/…` once this branch is released. On the local production build (`wrangler dev`) the kit's `@2x` file names answer `307` to the `%402x` spelling, which then returns `200`. Image proxies normally follow that redirect, but check the live URLs once before the first send. |
 | Customer email addresses | **Compute does not have them.** The UnifyAPI console owns accounts and contact details (ADR-0001). |
-| Delivery path | **Open.** See [Delivery](#delivery-open). |
-| Job web page for the CTA to open | **Does not exist.** See [Open points](#open-points). |
-| Sender name and address | **Not decided.** See [Open points](#open-points). |
+| Delivery path | **Proposed:** a new console bridge verb, `notify`. Not built on either side. See [Delivery](#delivery-proposed). |
+| Job web page for the CTA to open | **Decided by the operator, 2026-10-01:** `https://compute.unifyai.us/jobs/{job_id}`. **The page does not exist yet, and none of these emails is sent until it does.** |
+| Sender name and address | **Decided by the operator, 2026-10-01:** `UnifyAI Compute <no-reply@compute.unifyai.us>`. No mail domain is set up yet; it is set up when sending is built. |
 
 ## Messages
 
@@ -58,11 +58,11 @@ These values are the same in every message.
 |---|---|
 | `{{lang}}` / `{{dir}}` | `en` / `ltr` (compute has no other locale) |
 | `{{asset_base}}` | `https://compute.unifyai.us/email` |
-| `{{product_name}}` | `Compute`, as the brand owner asked. See the naming note under open points. |
+| `{{product_name}}` | `Compute`. The product is **UnifyAI Compute** (user decision, 2026-10-01). The header shows the UnifyAI lockup and then this descriptor, so the full name reads once. The same slot fills the footer. |
 | `{{product_url}}` / `{{product_domain}}` | `https://compute.unifyai.us` / `compute.unifyai.us` |
 | `{{footer_reason}}` | "You're receiving this because a job you submitted with your UnifyAPI key changed state." |
 | Focal element | Option (a), the CTA button: amber `#F5A623` with **ink `#0E0E0E` text**, exactly as in `base.html`. Never white on amber. Amber appears only on this button. |
-| `{{cta_url}}` | The job's page, `…/jobs/{id}`. That page does not exist yet (open points). The raw link under the button is the same URL. |
+| `{{cta_url}}` | `https://compute.unifyai.us/jobs/{job_id}` (decided by the operator, 2026-10-01). The page does not exist yet, so nothing is sent until it does. The raw link under the button is the same URL. |
 
 All three messages use these detail rows. Values are mono, as in the layout.
 
@@ -91,7 +91,7 @@ not carry.
 
 | Part | Content |
 |---|---|
-| Subject | `Compute job finished: {job id}` |
+| Subject | `UnifyAI Compute: job {job id} finished` |
 | Preheader | `Ran {gpu_seconds} GPU-seconds on {gpu}. Outputs are ready to download.` |
 | Eyebrow | `JOB FINISHED` |
 | Headline | `Your job finished.` |
@@ -104,7 +104,7 @@ not carry.
 
 | Part | Content |
 |---|---|
-| Subject | `Compute job failed: {job id}` |
+| Subject | `UnifyAI Compute: job {job id} failed` |
 | Preheader | One sentence with the `error.message` from the Job. If the job never reached `UP`, add: `No GPU time was charged.` |
 | Eyebrow | `JOB FAILED` |
 | Headline | `Your job failed.` |
@@ -120,7 +120,7 @@ that compute itself stopped (`job-api.md`; `metering.md` H4 and H5).
 
 | Part | `balance_exhausted` (H4, B12) | `billing_unavailable` (H5, B13) |
 |---|---|---|
-| Subject | `Compute job stopped: balance exhausted` | `Compute job stopped: billing unavailable` |
+| Subject | `UnifyAI Compute: job stopped, balance exhausted` | `UnifyAI Compute: job stopped, billing unavailable` |
 | Preheader | `Your UnifyAPI balance could not cover more GPU time for {job id}.` | `We couldn't reach billing for {job id}, so we stopped it before it overspent its hold.` |
 | Eyebrow | `JOB STOPPED` | `JOB STOPPED` |
 | Headline | `Your job was stopped: balance exhausted.` | `Your job was stopped: billing unavailable.` |
@@ -133,48 +133,44 @@ The focal element stays the job link in both variants. The top-up action lives
 in the UnifyAPI console. A second button would put amber on the page twice, so
 the safety line names the action as text instead.
 
-## Delivery (open)
+## Delivery (proposed)
 
-Compute cannot email a customer today. It never sees an address: the console
-owns contact details (ADR-0001), and ADR-0008's consequences say this "must be
-resolved before the first paid customer". The named options are listed below.
-None is chosen here.
+**Proposed by the operator, 2026-10-01: the console sends, through a new bridge
+verb `notify`.** The console already holds customer email addresses (ADR-0001),
+and compute never sees them. ADR-0008 open point 1 already names the verb as
+`POST /api/compute/v1/notify`; this spec proposes it and does not specify it.
+Before any email can go out, this still needs:
 
-- **The console sends.** A new bridge verb asks the console to email a user.
-  ADR-0008 open point 1 names it as `POST /api/compute/v1/notify`, "not
-  proposed here, only named", and `metering.md` lists it as optional. The
-  console's existing sender is `console/common/email.go` over SES, per the kit
-  README. Because of ADR-0002, the console-side half would be new AGPL code in
-  the console repository, and compute would send it only the template data.
+- the verb, specified in `console-billing-bridge.md` and signed like the other
+  bridge calls;
+- the console-side handler, written as new AGPL files in `unifyapi-console`
+  (ADR-0002). The console's existing sender is `console/common/email.go` over
+  SES, per the kit README. Compute sends the template data, and either the
+  rendered HTML and plain text or the slot values; which of the two is part
+  of specifying the verb;
+- the `compute.unifyai.us` mail domain for the sender above, or a decision
+  that the console's SES identity sends on its behalf;
+- the job page at `https://compute.unifyai.us/jobs/{job_id}`.
+
+ADR-0008's consequences say a notification path "must be resolved before the
+first paid customer". These are the alternatives that were considered and not
+proposed:
+
 - **Compute sends.** Compute would need the address from the console, which
-  is new data crossing the bridge, plus its own mail provider and sending
-  domain.
+  is new data crossing the bridge, plus its own mail provider.
 - **Neither, for now.** Job events and webhooks (ADR-0007 P1) carry the same
-  information, and email waits.
+  information.
 
-Whichever path is chosen, the `{{…}}` values above are the contract. The
-rendered HTML and the plain-text part come from `base.html` with those slots
-filled.
+The `{{…}}` values above are the contract whichever side renders them.
 
 ## Open points
 
-Each of these is for the user or the brand owner to decide.
-
-1. **Sender display name and address.** The kit's rule is `<product name>
-   <no-reply@…>`, e.g. `Compute <no-reply@compute.unifyai.us>`. No mail domain
-   is set up for `compute.unifyai.us`, and if the console sends, its own SES
-   identity may dictate the address.
-2. **Delivery path.** See the section above.
-3. **Product name in the header and sender.** The brand owner asked for
-   `Compute`. The kit README's rule is "`{{product_name}}` is the product's
-   current name", and the current name is not uniform. The repository and
-   docs say `unify-compute`, the kit README lists `unify-compute`, the
-   marketing site's title says `unifyAI`, and the unmerged
-   `feat/cross-terminal` branch calls it `UnifyCompute`. `Compute` does not
-   contradict any of these, since it reads as the descriptor after the
-   UnifyAI lockup, but they should be settled together.
-4. **Where `{{cta_url}}` points.** No customer UI shows a job yet. It could be
-   a future console page, a compute dashboard, or the API URL. The API URL
-   needs a key and is not a page.
-5. **More messages.** An early warning at the first refused extension (H4, about
-   50 minutes before the cancel), and `interrupted` (B9).
+1. **Delivery path.** The `notify` verb is proposed and still needs the
+   console-side work listed above. It is not accepted until the bridge spec
+   changes.
+2. **Job page.** `https://compute.unifyai.us/jobs/{job_id}` is decided but does
+   not exist. Nothing is sent before it does.
+3. **Mail domain** for `no-reply@compute.unifyai.us`. It is set up when sending
+   is built.
+4. **More messages.** An early warning at the first refused extension (H4,
+   about 50 minutes before the cancel), and `interrupted` (B9).

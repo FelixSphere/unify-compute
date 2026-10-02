@@ -1,6 +1,6 @@
 {
-  "name": "unifyAI — On-demand inference & GPU compute",
-  "short_name": "unifyAI",
+  "name": "UnifyAI Compute",
+  "short_name": "Compute",
   "start_url": "/",
   "display": "browser",
   "background_color": "#FAFAF7",

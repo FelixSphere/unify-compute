@@ -11,7 +11,7 @@ import './globals.css';
 
 const HUBSPOT_PORTAL_ID = '46127314';
 
-const title = 'unifyAI — On-demand inference & GPU compute';
+const title = 'UnifyAI Compute — On-demand inference & GPU compute';
 const description =
   'Compute beyond chat. On-demand GPU compute for batch processing, embeddings, document pipelines, and fine-tuning, with consumption-based billing.';
 // Browsers keep favicons long after the file changes, so every icon swap

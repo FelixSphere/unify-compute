@@ -1,4 +1,4 @@
-/* UnifyAI · canonical design tokens · v1 (2026-10-01)
+/* UnifyAI · canonical design tokens · v1.1 (2026-10-01) · v1.1 adds --u-muted-on-dark
  * ONE file for all five products (UnifyAPI, Unify Gateway, unify-compute, UnifyData, UnifySelfAI).
  * Copy it verbatim into your repo. Do not edit values locally; changes go through ~/unifyai-brand-kit.
  * Derived from the logo package's design-tokens.css, with two accessibility fixes:
@@ -14,6 +14,7 @@
   --u-muted: #6B6B66;          /* muted text, captions, table headers */
   --u-stone: #8B8B86;          /* rules on dark, disabled, NEVER body text on paper */
   --u-slate: #2E3440;          /* heavy surfaces: sidebars on dark, hero panels, secondary buttons */
+  --u-muted-on-dark: #B8B8B2;  /* muted text on Slate (6.3:1) or Ink (10:1) */
   --u-amber-500: #F5A623;      /* the one accent */
   --u-amber-600: #E5930A;
   --u-amber-700: #BE7A09;

@@ -3,13 +3,14 @@ import Link from 'next/link';
 import { BrandLockup, CompanyLine } from '../brand';
 
 export const metadata: Metadata = {
-  title: 'Privacy Policy — unifyAI',
+  title: 'Privacy Policy — UnifyAI Compute',
   description:
-    'How unifyAI collects, uses, and protects your information, and the cookies this site uses.',
+    'How UnifyAI collects, uses, and protects your information, and the cookies this site uses.',
 };
 
-// Text is FelixSphere's policy verbatim (FelixSphere LLC is the legal entity); only the Website
-// definition and the last-updated date differ. Keep it in sync with felixsphere.com/legal/privacy.
+// UnifyAI is the Company and data controller (user decision, 2026-10-01). The text started from
+// FelixSphere's policy but no longer tracks it; edit it here. The contact mailbox stays on
+// felixsphere.com only until a unifyai.us mailbox exists (unifyai.us has no MX record).
 export default function PrivacyPolicy() {
   return (
     <main id="top">
@@ -74,7 +75,8 @@ export default function PrivacyPolicy() {
           <strong> Company </strong>
           (referred to as either &quot;the Company&quot;, &quot;We&quot;,
           &quot;Us&quot; or &quot;Our&quot; in this Agreement) refers to
-          FelixSphere LLC, 6 KAREN CT.
+          UnifyAI, Lebuh Bandar Utama PJU 6, 47800 Petaling Jaya, Selangor,
+          Malaysia.
         </p>
 
         <p>For the purpose of the GDPR, the Company is the Data Controller.</p>
@@ -154,7 +156,7 @@ export default function PrivacyPolicy() {
 
         <p>
           <strong> Website </strong>
-          refers to unifyAI, accessible from https://compute.unifyai.us
+          refers to UnifyAI Compute, accessible from https://compute.unifyai.us
         </p>
 
         <p>
@@ -825,13 +827,6 @@ export default function PrivacyPolicy() {
         </p>
 
         <p>By email: contactus@felixsphere.com</p>
-
-        <p>
-          By visiting this page on our website:{' '}
-          <a href="https://www.felixsphere.com/contact-us">
-            https://www.felixsphere.com/contact-us
-          </a>
-        </p>
 
         <p>By phone number: 408.462.2806</p>
       </article>

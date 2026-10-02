@@ -87,23 +87,24 @@ a:focus-visible, button:focus-visible { outline: none; box-shadow: var(--u-focus
 .wrap { width: min(1240px, calc(100% - 96px)); margin: auto; }
 
 /* The mark inside the 148px lockup is 34px tall and the SVG carries 8.5px of
-   padding, so 28px more on each open side keeps the brand's clear space (the
-   mark's own height). The page gutter covers the left edge. */
+   padding. In the 64px header UI-STANDARD relaxes clear space to 12px a side
+   plus the divider; the footer and the hero diagram keep the full rule (the
+   mark's own height, 28px beyond the SVG's padding). */
 .brand { display: block; flex-shrink: 0; padding: 28px 28px 28px 0; }
 .brand-lockup { display: block; width: 148px; height: auto; }
 .brand-group { display: flex; align-items: center; }
-.product-divider { width: 1px; height: 22px; background: var(--u-border); margin-right: 16px; }
+.nav .brand { padding: 0 4px 0 0; }
+.product-divider { width: 1px; height: 22px; background: var(--u-border); margin-right: 12px; }
 .product-name { font-family: var(--u-font-display); font-weight: 500; font-size: 17px; white-space: nowrap; }
 
-.nav { min-height: 108px; display: flex; align-items: center; justify-content: space-between; gap: 0 24px; border-bottom: var(--u-rule); }
+.nav { height: var(--u-header-height); display: flex; align-items: center; justify-content: space-between; gap: 0 24px; border-bottom: var(--u-rule); }
 .nav nav { display: flex; gap: 32px; font-size: var(--u-text-sm); color: var(--u-text-2); }
 .nav nav a:hover, footer a:not(.brand):hover, .text-link:hover { color: var(--u-text); text-decoration: underline; text-underline-offset: 4px; }
 
-.button, .nav-link { display: inline-flex; align-items: center; justify-content: center; gap: 12px; height: var(--u-btn-height); padding: 0 20px; border-radius: var(--u-radius); font-family: var(--u-font-body); font-size: 15px; font-weight: 600; transition: background .2s; }
+.button { display: inline-flex; align-items: center; justify-content: center; gap: 12px; height: var(--u-btn-height); padding: 0 20px; border-radius: var(--u-radius); font-family: var(--u-font-body); font-size: 15px; font-weight: 600; transition: background .2s; }
 .primary { background: var(--u-btn-primary-bg); color: var(--u-btn-primary-fg); }
 .primary:hover { background: var(--u-accent-hover); }
 .primary:active { background: var(--u-accent-active); }
-.nav-link { background: var(--u-btn-secondary-bg); color: var(--u-btn-secondary-fg); }
 
 .hero { display: grid; grid-template-columns: 1.12fr 1fr; gap: 56px; align-items: center; padding-block: 88px; }
 .eyebrow { font-family: var(--u-font-mono); font-size: var(--u-text-xs); letter-spacing: 1.6px; text-transform: uppercase; color: var(--u-text-muted); margin: 0 0 28px; display: flex; align-items: center; gap: 8px; }
@@ -117,10 +118,10 @@ h3 { font-size: var(--u-h3); }
 .text-link { font-size: 15px; font-weight: 600; display: flex; gap: 8px; align-items: center; }
 .hero-note { display: flex; align-items: center; gap: 8px; color: var(--u-text-muted); font-size: var(--u-text-xs); margin-top: 24px; }
 
-/* Slate is the brand's heavy surface. Text on it is Paper (11.9:1); Stone is
-   only for rules here, as tokens.css allows ("rules on dark"). */
+/* Slate is the brand's heavy surface: Paper text (11.9:1), --u-muted-on-dark
+   for secondary labels, Stone only for rules. */
 .compute-panel { border-radius: var(--u-radius); background: var(--u-slate); color: var(--u-paper); overflow: hidden; }
-.panel-head { display: flex; justify-content: space-between; gap: 8px; padding: 20px; border-bottom: 1px solid var(--u-stone); font: 11px var(--u-font-mono); letter-spacing: 1px; }
+.panel-head { display: flex; justify-content: space-between; gap: 8px; padding: 20px; border-bottom: 1px solid var(--u-stone); font: 11px var(--u-font-mono); letter-spacing: 1px; color: var(--u-muted-on-dark); }
 .panel-head > span:first-child { display: flex; align-items: center; gap: 8px; }
 .diagram-inputs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 32px 24px 0; }
 .diagram-inputs > span { display: flex; gap: 8px; align-items: center; justify-content: center; border: 1px solid var(--u-stone); border-radius: var(--u-radius); padding: 12px 4px; font-size: var(--u-text-xs); }
@@ -129,7 +130,7 @@ h3 { font-size: var(--u-h3); }
 .engine { display: flex; align-items: center; flex-wrap: wrap; gap: 0 28px; margin: 24px 48px 0; padding: 0 28px; background: var(--u-ink); border-radius: var(--u-radius); position: relative; }
 .engine:before { position: absolute; content: ''; top: -24px; height: 24px; left: 50%; border-left: 1px solid var(--u-stone); }
 .engine .brand-lockup { margin-block: 28px; }
-.engine-caption { font-size: var(--u-text-xs); }
+.engine-caption { font-size: var(--u-text-xs); color: var(--u-muted-on-dark); }
 .engine-bars { margin-left: auto; display: flex; gap: 4px; align-items: flex-end; height: 28px; }
 .engine-bars i { display: block; width: 4px; background: var(--u-accent); height: 12px; }
 .engine-bars i:nth-child(2n) { height: 20px; }
@@ -140,8 +141,8 @@ h3 { font-size: var(--u-h3); }
 .chip-grid { display: grid; grid-template-columns: repeat(3, 8px); gap: 4px; width: max-content; margin: 0 auto 12px; }
 .chip-grid i { width: 8px; height: 8px; border: 1px solid var(--u-stone); }
 .chip-grid .lit { background: var(--u-paper); border-color: var(--u-paper); }
-.gpu > span:last-child { font: 11px var(--u-font-mono); letter-spacing: 1px; }
-.panel-foot { border-top: 1px solid var(--u-stone); padding: 16px 20px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; font: 11px var(--u-font-mono); }
+.gpu > span:last-child { font: 11px var(--u-font-mono); letter-spacing: 1px; color: var(--u-muted-on-dark); }
+.panel-foot { border-top: 1px solid var(--u-stone); padding: 16px 20px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; font: 11px var(--u-font-mono); color: var(--u-muted-on-dark); }
 
 .principles { border-block: var(--u-rule); background: var(--u-surface); }
 .principles .wrap { display: flex; justify-content: space-between; gap: 24px; padding-block: 24px; }
@@ -173,15 +174,14 @@ h3 { font-size: var(--u-h3); }
 .consumption > div:first-child > p:not(.eyebrow) { line-height: 1.8; color: var(--u-text-2); max-width: 496px; margin: 24px 0; }
 .pricing-note { color: var(--u-text-muted); font-size: var(--u-text-sm); }
 .billing-card { border-radius: var(--u-radius); background: var(--u-slate); color: var(--u-paper); padding: 32px; }
-.billing-title { display: flex; align-items: center; gap: 8px; font: 11px var(--u-font-mono); letter-spacing: 1px; }
+.billing-title { display: flex; align-items: center; gap: 8px; font: 11px var(--u-font-mono); letter-spacing: 1px; color: var(--u-muted-on-dark); }
 .billing-card p { font-family: var(--u-font-display); font-weight: 700; font-size: var(--u-h1); line-height: 1.2; letter-spacing: -1px; margin: 32px 0; }
 .billing-card p span { color: var(--u-accent); }
-.billing-bottom { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--u-stone); padding-top: 20px; font-size: var(--u-text-sm); }
+.billing-bottom { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--u-stone); padding-top: 20px; font-size: var(--u-text-sm); color: var(--u-muted-on-dark); }
 
 footer { display: flex; align-items: center; column-gap: 32px; flex-wrap: wrap; border-top: var(--u-rule); padding-block: 8px; margin-bottom: 12px; }
 footer > span { font-size: var(--u-text-sm); color: var(--u-text-muted); }
 footer > a:not(.brand) { display: flex; gap: 8px; align-items: center; margin-left: auto; font-size: var(--u-text-sm); }
-footer > .footer-privacy + a { margin-left: 0; }
 footer > .copyright { width: 100%; font-size: var(--u-text-xs); padding-bottom: 28px; }
 
 .legal { max-width: 760px; padding-block: 72px 96px; line-height: 1.75; color: var(--u-text-2); }
@@ -202,8 +202,8 @@ footer > .copyright { width: 100%; font-size: var(--u-text-xs); padding-bottom: 
 
 @media (min-width: 1450px) { .hero { padding-block: 104px; } }
 @media (max-width: 1100px) { .wrap { width: calc(100% - 56px); } .hero { gap: 32px; } .hero-actions { gap: 16px; } .diagram-inputs { margin-inline: 12px; gap: 4px; } .panel-label { display: none; } .engine { margin-inline: 32px; } .workload { padding-inline: 20px; } .consumption { gap: 48px; } .steps { gap: 36px; } }
-@media (max-width: 800px) { .nav nav { gap: 16px; } .nav-link { display: none; } .hero { grid-template-columns: 1fr; padding-block: 56px; gap: 40px; } .hero-copy { max-width: 572px; } .hero-description, .hero-detail { max-width: 540px; } .compute-panel { max-width: 560px; width: 100%; margin: auto; } .workload-grid { grid-template-columns: repeat(2, 1fr); } .workload:nth-child(3) { border-left: 0; border-top: var(--u-rule); } .workload:nth-child(4) { border-top: var(--u-rule); } .workload p { min-height: auto; } .section-heading { align-items: flex-start; flex-direction: column; gap: 20px; } .section { padding-block: 60px; } .steps { gap: 24px; } .consumption { gap: 36px; } .billing-card { padding: 24px; } .billing-card p { font-size: var(--u-h2); } .principles span { font-size: var(--u-text-xs); gap: 8px; } .subtle-label { display: none; } footer { column-gap: 20px; } }
-/* A phone gets the navigation on its own row under the lockup, so the header
-   never squeezes the lockup's clear space or overflows 375px. */
-@media (max-width: 520px) { .wrap { width: calc(100% - 48px); } .nav { flex-wrap: wrap; } .nav nav { width: 100%; gap: 16px; padding-bottom: 20px; } .nav nav a:last-child { display: none; } h1 { font-size: var(--u-h1); letter-spacing: -1px; } h2 { font-size: var(--u-h2); letter-spacing: -.4px; } .eyebrow { font-size: 11px; letter-spacing: 1.2px; } .hero-actions { align-items: flex-start; flex-direction: column; gap: 20px; } .hero-detail { font-size: var(--u-text-sm); } .principles .wrap { flex-wrap: wrap; gap: 8px 20px; } .principles .wrap > span:last-child { width: 100%; } .workload-grid { grid-template-columns: 1fr; } .workload + .workload { border-left: 0; border-top: var(--u-rule); } .card-top { margin-bottom: 24px; } .workload p { font-size: var(--u-text-md); max-width: 360px; } .steps, .consumption { grid-template-columns: 1fr; } .steps { gap: 32px; margin-top: 32px; } .steps p { max-width: none; } .panel-head { padding: 16px; } .diagram-inputs > span { flex-direction: column; gap: 8px; font-size: 11px; } .gpu-grid { gap: 8px; margin-inline: 16px; } .panel-foot { padding-inline: 16px; } .flow-lines { margin-inline: 44px; } .engine { margin-inline: 16px; } .engine-caption { width: 100%; padding-bottom: 28px; } .engine-bars { position: absolute; right: 20px; top: 40px; } .engine-bars i { width: 3px; } footer > span:nth-child(2) { display: none; } footer > a:not(.brand) { font-size: var(--u-text-xs); gap: 4px; } .section { padding-block: 48px; } }
+@media (max-width: 800px) { .nav nav { gap: 16px; } .hero { grid-template-columns: 1fr; padding-block: 56px; gap: 40px; } .hero-copy { max-width: 572px; } .hero-description, .hero-detail { max-width: 540px; } .compute-panel { max-width: 560px; width: 100%; margin: auto; } .workload-grid { grid-template-columns: repeat(2, 1fr); } .workload:nth-child(3) { border-left: 0; border-top: var(--u-rule); } .workload:nth-child(4) { border-top: var(--u-rule); } .workload p { min-height: auto; } .section-heading { align-items: flex-start; flex-direction: column; gap: 20px; } .section { padding-block: 60px; } .steps { gap: 24px; } .consumption { gap: 36px; } .billing-card { padding: 24px; } .billing-card p { font-size: var(--u-h2); } .principles span { font-size: var(--u-text-xs); gap: 8px; } .subtle-label { display: none; } footer { column-gap: 20px; } }
+/* On a phone the 64px bar holds the lockup and descriptor only; the links
+   move to a row beneath it rather than overflow 375px. */
+@media (max-width: 520px) { .wrap { width: calc(100% - 48px); } .nav { height: auto; flex-wrap: wrap; } .brand-group { height: var(--u-header-height); } .nav nav { width: 100%; gap: 16px; padding-bottom: 16px; } .nav nav a:last-child { display: none; } h1 { font-size: var(--u-h1); letter-spacing: -1px; } h2 { font-size: var(--u-h2); letter-spacing: -.4px; } .eyebrow { font-size: 11px; letter-spacing: 1.2px; } .hero-actions { align-items: flex-start; flex-direction: column; gap: 20px; } .hero-detail { font-size: var(--u-text-sm); } .principles .wrap { flex-wrap: wrap; gap: 8px 20px; } .principles .wrap > span:last-child { width: 100%; } .workload-grid { grid-template-columns: 1fr; } .workload + .workload { border-left: 0; border-top: var(--u-rule); } .card-top { margin-bottom: 24px; } .workload p { font-size: var(--u-text-md); max-width: 360px; } .steps, .consumption { grid-template-columns: 1fr; } .steps { gap: 32px; margin-top: 32px; } .steps p { max-width: none; } .panel-head { padding: 16px; } .diagram-inputs > span { flex-direction: column; gap: 8px; font-size: 11px; } .gpu-grid { gap: 8px; margin-inline: 16px; } .panel-foot { padding-inline: 16px; } .flow-lines { margin-inline: 44px; } .engine { margin-inline: 16px; } .engine-caption { width: 100%; padding-bottom: 28px; } .engine-bars { position: absolute; right: 20px; top: 40px; } .engine-bars i { width: 3px; } footer > span:nth-child(2) { display: none; } footer > a:not(.brand) { font-size: var(--u-text-xs); gap: 4px; } .section { padding-block: 48px; } }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { transition: none !important; } }
