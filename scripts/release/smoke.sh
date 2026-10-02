@@ -32,9 +32,12 @@ API_ORIGIN="${API_ORIGIN%/}"
 EXPECT_BUILD="${EXPECT_BUILD:-}"
 WAIT_SECONDS="${WAIT_SECONDS:-150}"
 ICON_PATH="${ICON_PATH:-/icon-v3.svg}"
-# The icon's name is versioned (app/layout.tsx), so it may be cached for a
-# long time; at least a day is the floor we hold the site container to.
-ICON_MIN_MAX_AGE="${ICON_MIN_MAX_AGE:-86400}"
+# The icon must be cacheable, for at least the hour deploy/site/Caddyfile
+# gives hand-versioned files (-v3) and the fixed-name icons: an hour bounds
+# how stale a missed version bump can be. This floor said a day until the
+# first staging release (2026-10-02, run 37054858851) failed on it against a
+# container doing exactly what its Caddyfile intends.
+ICON_MIN_MAX_AGE="${ICON_MIN_MAX_AGE:-3600}"
 
 fail=0
 body="$(mktemp)"; headers="$(mktemp)"
