@@ -1,0 +1,120 @@
+{
+  "note": "Curated job templates. A change to an image digest, command or default SKU changes what customers run under a name they trust, and is reviewed like a SKU change. Images are pinned by digest; the tag beside it is for the reader. See docs/spec/templates.md.",
+  "templates": [
+    {
+      "id": "batch-embed",
+      "title": "Batch embeddings with vLLM",
+      "description": "Embeds an OpenAI batch file of /v1/embeddings requests with vLLM's batch runner and writes one result line per request. Default model Qwen3-Embedding-0.6B (Apache-2.0), downloaded from Hugging Face at start.",
+      "image": "vllm/vllm-openai:v0.30.0-cu129@sha256:a67f8f186d4567612ac37a55bd82295006002b18858eb12a8af2f05f86c2ae3f",
+      "image_licence": "Apache-2.0",
+      "image_source": "https://hub.docker.com/r/vllm/vllm-openai (tag v0.30.0-cu129, pushed 2026-09-22; Dockerfile at github.com/vllm-project/vllm/blob/v0.30.0/docker/Dockerfile)",
+      "command": [
+        "bash",
+        "-c",
+        "exec vllm run-batch -i /mnt/in/requests.jsonl -o /mnt/out/results.jsonl --model \"$MODEL\" ${MODEL_REVISION:+--revision \"$MODEL_REVISION\"} --runner pooling"
+      ],
+      "env": {
+        "MODEL": "Qwen/Qwen3-Embedding-0.6B",
+        "MODEL_REVISION": "97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3"
+      },
+      "sku": "a10g-24gb-x1",
+      "max_runtime_seconds": 3600,
+      "inputs": [
+        {
+          "mount": "/mnt/in",
+          "description": "Directory containing requests.jsonl: one OpenAI batch line per request with url /v1/embeddings"
+        }
+      ],
+      "outputs": [
+        {
+          "mount": "/mnt/out",
+          "description": "results.jsonl: one OpenAI batch result line per request, matched by custom_id"
+        }
+      ],
+      "overridable": [
+        "sku",
+        "providers",
+        "spec.env",
+        "spec.max_runtime_seconds"
+      ],
+      "available": true
+    },
+    {
+      "id": "batch-infer-vllm",
+      "title": "Batch chat completions with vLLM",
+      "description": "Runs an OpenAI batch file of /v1/chat/completions requests through vLLM's batch runner and writes one result line per request. Default model Qwen3-4B-Instruct-2507 (Apache-2.0), downloaded from Hugging Face at start.",
+      "image": "vllm/vllm-openai:v0.30.0-cu129@sha256:a67f8f186d4567612ac37a55bd82295006002b18858eb12a8af2f05f86c2ae3f",
+      "image_licence": "Apache-2.0",
+      "image_source": "https://hub.docker.com/r/vllm/vllm-openai (tag v0.30.0-cu129, pushed 2026-09-22; Dockerfile at github.com/vllm-project/vllm/blob/v0.30.0/docker/Dockerfile)",
+      "command": [
+        "bash",
+        "-c",
+        "exec vllm run-batch -i /mnt/in/requests.jsonl -o /mnt/out/results.jsonl --model \"$MODEL\" ${MODEL_REVISION:+--revision \"$MODEL_REVISION\"} --max-model-len \"$MAX_MODEL_LEN\""
+      ],
+      "env": {
+        "MODEL": "Qwen/Qwen3-4B-Instruct-2507",
+        "MODEL_REVISION": "cdbee75f17c01a7cc42f958dc650907174af0554",
+        "MAX_MODEL_LEN": "8192"
+      },
+      "sku": "a10g-24gb-x1",
+      "max_runtime_seconds": 3600,
+      "inputs": [
+        {
+          "mount": "/mnt/in",
+          "description": "Directory containing requests.jsonl: one OpenAI batch line per request with url /v1/chat/completions"
+        }
+      ],
+      "outputs": [
+        {
+          "mount": "/mnt/out",
+          "description": "results.jsonl: one OpenAI batch result line per request, matched by custom_id"
+        }
+      ],
+      "overridable": [
+        "sku",
+        "providers",
+        "spec.env",
+        "spec.max_runtime_seconds"
+      ],
+      "available": true
+    },
+    {
+      "id": "finetune-lora",
+      "title": "LoRA fine-tune with evaluation",
+      "description": "The reference fine-tune: zero-shot and 3-shot baselines, a gate that stops if few-shot is already good enough, LoRA SFT with TRL and PEFT, and an eval with the adapter. Default base model Qwen3-4B-Instruct-2507 (Apache-2.0).",
+      "image": "",
+      "command": [
+        "bash",
+        "-c",
+        "set -euo pipefail\nSCHEMA_ARG=\"\"\n[ -n \"${SCHEMA}\" ] && SCHEMA_ARG=\"--schema ${SCHEMA}\"\npython eval.py --model \"$BASE_MODEL\" --test /mnt/in/test.jsonl $SCHEMA_ARG --out /mnt/out/eval_zero_shot.json\npython eval.py --model \"$BASE_MODEL\" --test /mnt/in/test.jsonl --train /mnt/in/train.jsonl --few-shot 3 $SCHEMA_ARG --out /mnt/out/eval_few_shot.json\npython - \"$FEW_SHOT_GATE\" <<'PY'\nimport json, sys\ns = json.load(open(\"/mnt/out/eval_few_shot.json\"))[\"summary\"]\nrate = s[\"schema_valid_rate\"] if s[\"schema_valid_rate\"] is not None else s[\"json_parseable_rate\"]\nif rate >= float(sys.argv[1]):\n    open(\"/mnt/out/RESULT\", \"w\").write(\"task_not_worth_finetuning\\n\")\n    print(f\"few-shot already at {rate:.3f}; stopping before training\")\nPY\nif [ -f /mnt/out/RESULT ]; then exit 0; fi\npython train.py --model \"$BASE_MODEL\" --train /mnt/in/train.jsonl --val /mnt/in/val.jsonl --out /mnt/out/adapter --timestamps /mnt/out/timestamps.json\npython eval.py --model \"$BASE_MODEL\" --lora /mnt/out/adapter --test /mnt/in/test.jsonl $SCHEMA_ARG --out /mnt/out/eval_lora.json\necho completed > /mnt/out/RESULT\n"
+      ],
+      "env": {
+        "BASE_MODEL": "Qwen/Qwen3-4B-Instruct-2507",
+        "FEW_SHOT_GATE": "0.95",
+        "SCHEMA": ""
+      },
+      "sku": "a10g-24gb-x1-spot",
+      "max_runtime_seconds": 7200,
+      "inputs": [
+        {
+          "mount": "/mnt/in",
+          "description": "Output of finetune/prepare_data.py: train.jsonl, val.jsonl, test.jsonl, and optionally a JSON schema whose path is passed in SCHEMA"
+        }
+      ],
+      "outputs": [
+        {
+          "mount": "/mnt/out",
+          "description": "eval_zero_shot.json, eval_few_shot.json, eval_lora.json, adapter/, timestamps.json and RESULT (completed or task_not_worth_finetuning)"
+        }
+      ],
+      "overridable": [
+        "sku",
+        "providers",
+        "spec.env",
+        "spec.max_runtime_seconds"
+      ],
+      "available": false,
+      "unavailable_reason": "No image exists yet: the reference run installs finetune/requirements.txt with pip on SkyPilot's default VM image and uploads finetune/ as its workdir. The image with those scripts at its working directory is published and pinned in R1. See docs/spec/templates.md, finetune-lora."
+    }
+  ]
+}

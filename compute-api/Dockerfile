@@ -14,6 +14,7 @@ FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /app
 COPY --from=build /out/compute-api /app/compute-api
 COPY config/skus.json /app/config/skus.json
+COPY config/templates.json /app/config/templates.json
 ENV LISTEN_ADDR=0.0.0.0:8080
 EXPOSE 8080
 USER nonroot

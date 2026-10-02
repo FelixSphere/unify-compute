@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/FelixSphere/unify-compute/compute-api/internal/sku"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/template"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/upstream"
 )
 
@@ -27,6 +28,9 @@ type Server struct {
 	Build     string
 	Catalogue *sku.Catalogue
 	Upstreams *upstream.Registry
+	// Templates is set after New so existing callers keep their signature; nil
+	// serves an empty list and refuses every `template` on submit.
+	Templates *template.Set
 	Log       *slog.Logger
 	mux       *http.ServeMux
 }
@@ -36,6 +40,7 @@ func New(build string, cat *sku.Catalogue, reg *upstream.Registry, log *slog.Log
 	s.mux.HandleFunc("GET /healthz", s.health)
 	s.mux.HandleFunc("GET /compute/v1/skus", s.listSKUs)
 	s.mux.HandleFunc("GET /compute/v1/upstreams", s.listUpstreams)
+	s.mux.HandleFunc("GET /compute/v1/templates", s.listTemplates)
 	s.mux.Handle("POST /compute/v1/jobs", s.auth(http.HandlerFunc(s.submitJob)))
 	s.mux.Handle("GET /compute/v1/jobs", s.auth(s.notImplemented("job listing")))
 	s.mux.Handle("GET /compute/v1/jobs/{id}", s.auth(s.notImplemented("job lookup")))
@@ -110,40 +115,93 @@ func (s *Server) listUpstreams(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": out})
 }
 
+// listTemplates is public like /skus: a template is what a customer reads
+// before they have a key worth using.
+func (s *Server) listTemplates(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": s.Templates.List()})
+}
+
+// submitRequest decodes optional fields as pointers or nil-able collections so
+// a template submit can tell "not sent" from "sent as zero".
 type submitRequest struct {
-	SKU       string   `json:"sku"`
+	Template  string   `json:"template"`
+	SKU       *string  `json:"sku"`
 	Providers []string `json:"providers"`
 	Spec      struct {
-		MaxRuntimeSeconds int64 `json:"max_runtime_seconds"`
+		Image             *string           `json:"image"`
+		Command           []string          `json:"command"`
+		Env               map[string]string `json:"env"`
+		Inputs            []template.Input  `json:"inputs"`
+		Outputs           []template.Output `json:"outputs"`
+		MaxRuntimeSeconds *int64            `json:"max_runtime_seconds"`
 	} `json:"spec"`
 }
 
 // submitJob validates everything the catalogue and registry can decide
-// without persistence: the SKU, the customer's provider restriction, the
-// runtime ceiling, and whether this deployment can launch it at all. What
+// without persistence: the template and its overrides, the SKU, the
+// customer's provider restriction, the runtime ceiling, and whether this
+// deployment can launch it at all. A template is resolved into a spec first
+// and that spec then meets exactly the checks a hand-written one does. What
 // survives is what the backend will receive; until it exists the answer is
 // still 501.
 func (s *Server) submitJob(w http.ResponseWriter, r *http.Request) {
-	var req submitRequest
+	var raw submitRequest
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody))
-	if err := dec.Decode(&req); err != nil {
+	if err := dec.Decode(&raw); err != nil {
 		invalid(w, "malformed_body", "", "Body must be a JSON object; see docs/spec/job-api.md.")
 		return
 	}
-	if req.SKU == "" {
+	var (
+		skuID     string
+		providers = raw.Providers
+		runtime   int64
+	)
+	if raw.Template == "" {
+		if raw.SKU != nil {
+			skuID = *raw.SKU
+		}
+		if raw.Spec.MaxRuntimeSeconds != nil {
+			runtime = *raw.Spec.MaxRuntimeSeconds
+		}
+	} else {
+		t, err := s.Templates.Get(raw.Template)
+		if err != nil {
+			invalid(w, "unknown_template", "template", fmt.Sprintf("template %q is not offered; see GET /compute/v1/templates", raw.Template))
+			return
+		}
+		if !t.Available {
+			invalid(w, "template_unavailable", "template", fmt.Sprintf("template %q is listed but not currently runnable: %s", t.ID, t.UnavailableReason))
+			return
+		}
+		res, err := t.Resolve(template.Overrides{
+			SKU: raw.SKU, Providers: raw.Providers, Image: raw.Spec.Image, Command: raw.Spec.Command,
+			Env: raw.Spec.Env, Inputs: raw.Spec.Inputs, Outputs: raw.Spec.Outputs, MaxRuntimeSeconds: raw.Spec.MaxRuntimeSeconds,
+		})
+		if err != nil {
+			var fe *template.FieldError
+			if errors.As(err, &fe) {
+				invalid(w, fe.Code, fe.Field, fe.Msg)
+				return
+			}
+			writeError(w, http.StatusInternalServerError, apiError{Type: "internal_error", Code: "template_resolution_failed", Message: err.Error()})
+			return
+		}
+		skuID, providers, runtime = res.SKU, res.Providers, res.Spec.MaxRuntimeSeconds
+	}
+	if skuID == "" {
 		invalid(w, "missing_sku", "sku", "Choose a sku from GET /compute/v1/skus.")
 		return
 	}
-	item, err := s.Catalogue.Get(req.SKU)
+	item, err := s.Catalogue.Get(skuID)
 	if err != nil {
-		invalid(w, "unknown_sku", "sku", fmt.Sprintf("sku %q is not offered", req.SKU))
+		invalid(w, "unknown_sku", "sku", fmt.Sprintf("sku %q is not offered", skuID))
 		return
 	}
 	if !item.Available {
-		invalid(w, "sku_unavailable", "sku", fmt.Sprintf("sku %q is listed but not currently sold", req.SKU))
+		invalid(w, "sku_unavailable", "sku", fmt.Sprintf("sku %q is listed but not currently sold", skuID))
 		return
 	}
-	switch rt := req.Spec.MaxRuntimeSeconds; {
+	switch rt := runtime; {
 	case rt <= 0:
 		invalid(w, "missing_max_runtime", "spec.max_runtime_seconds", "spec.max_runtime_seconds must be a positive integer")
 		return
@@ -151,13 +209,13 @@ func (s *Server) submitJob(w http.ResponseWriter, r *http.Request) {
 		invalid(w, "runtime_over_ceiling", "spec.max_runtime_seconds", fmt.Sprintf("max_runtime_seconds %d exceeds the platform ceiling of %d", rt, MaxRuntimeSeconds))
 		return
 	}
-	if _, _, err := s.Upstreams.Place(item, req.Providers); err != nil {
+	if _, _, err := s.Upstreams.Place(item, providers); err != nil {
 		switch {
 		case errors.Is(err, sku.ErrProviderNotOffered):
-			invalid(w, "provider_not_offered", "providers", fmt.Sprintf("sku %q: %v", req.SKU, err))
+			invalid(w, "provider_not_offered", "providers", fmt.Sprintf("sku %q: %v", skuID, err))
 		case errors.Is(err, upstream.ErrNoEnabledProvider):
 			writeError(w, http.StatusServiceUnavailable, apiError{Type: "upstream_unavailable", Code: "upstream_unavailable",
-				Message: fmt.Sprintf("sku %q has no upstream enabled in this deployment", req.SKU)})
+				Message: fmt.Sprintf("sku %q has no upstream enabled in this deployment", skuID)})
 		default:
 			writeError(w, http.StatusInternalServerError, apiError{Type: "internal_error", Code: "placement_failed", Message: err.Error()})
 		}
