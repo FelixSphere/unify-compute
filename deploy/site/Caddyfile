@@ -37,11 +37,9 @@
 	Referrer-Policy strict-origin-when-cross-origin
 	X-Frame-Options DENY
 	Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
-	# Set here and not on the ALB so it is versioned with the site. Browsers
-	# ignore HSTS on plain HTTP, but this response only reaches a browser
-	# through the ALB's HTTPS listener. No includeSubDomains: the staging and
-	# console hosts under compute.unifyai.us are separate services.
-	Strict-Transport-Security "max-age=31536000"
+	# No Strict-Transport-Security here: the ALB sets it (see ADR-0009). TLS
+	# and HSTS belong to the layer that terminates TLS, and setting it here
+	# too would send the header twice.
 	# HTML and the RSC payload share a URL; only the RSC header tells them
 	# apart. `+` keeps encode's Vary: Accept-Encoding.
 	+Vary RSC

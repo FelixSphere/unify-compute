@@ -37,6 +37,11 @@ common=(
 )
 
 check /healthz 200 "Cache-Control: no-store"
+# The ALB sets Strict-Transport-Security (ADR-0009). If the container sent it
+# as well, browsers would receive the header twice.
+if grep -qi '^strict-transport-security:' "$tmp/headers"; then
+  echo "FAIL /healthz: container sends Strict-Transport-Security; the ALB owns it"; fail=1
+fi
 check / 200 "Content-Type: text/html" "Cache-Control: no-cache" "${common[@]}"
 grep -q '<title>Unify Compute — On-demand inference &amp; GPU compute</title>' "$tmp/body" \
   || { echo "FAIL /: title missing"; fail=1; }
