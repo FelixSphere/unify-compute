@@ -26,7 +26,7 @@ const (
 
 // Canonical returns the string both sides sign: METHOD, PATH, TIMESTAMP and
 // the exact body, newline-separated. The console's test suite must pin the
-// same vector as sign_test.go.
+// same vector as TestSignatureVector in client_test.go.
 func Canonical(method, path string, ts int64, body []byte) []byte {
 	var b bytes.Buffer
 	b.WriteString(method)
@@ -64,14 +64,51 @@ func New(baseURL string, secret []byte) (*Client, error) {
 	}, nil
 }
 
+// Codes the console puts in the envelope's message, plus CodeBridgeDisabled,
+// which the client assigns itself because a disabled bridge sends no body.
+const (
+	CodeBridgeDisabled      = "bridge_disabled"
+	CodeHoldNotFound        = "hold_not_found"
+	CodeIdempotencyConflict = "idempotency_conflict"
+)
+
+// Values of Error.AccountStatus on a 403 from verify.
+const (
+	AccountSuspended = "suspended"
+	AccountDisabled  = "disabled"
+)
+
+var (
+	ErrBridgeDisabled = errors.New("console bridge: " + CodeBridgeDisabled)
+	ErrHoldNotFound   = errors.New("console bridge: " + CodeHoldNotFound)
+)
+
 // Error is a non-2xx bridge response. Status carries the console's HTTP code
 // so callers can map 402 → insufficient_balance, 409 → conflict, and so on.
+// AccountStatus is data.status from a 403, telling a suspended tenant apart
+// from a disabled user.
 type Error struct {
-	Status  int
-	Message string
+	Status        int
+	Message       string
+	AccountStatus string
 }
 
-func (e *Error) Error() string { return fmt.Sprintf("console bridge: %d %s", e.Status, e.Message) }
+func (e *Error) Error() string {
+	if e.AccountStatus != "" {
+		return fmt.Sprintf("console bridge: %d %s (account %s)", e.Status, e.Message, e.AccountStatus)
+	}
+	return fmt.Sprintf("console bridge: %d %s", e.Status, e.Message)
+}
+
+func (e *Error) Is(target error) bool {
+	switch target {
+	case ErrBridgeDisabled:
+		return e.Status == http.StatusNotFound && e.Message == CodeBridgeDisabled
+	case ErrHoldNotFound:
+		return e.Status == http.StatusNotFound && e.Message == CodeHoldNotFound
+	}
+	return false
+}
 
 type envelope struct {
 	Success bool            `json:"success"`
@@ -103,12 +140,26 @@ func (c *Client) post(ctx context.Context, path string, in, out any) error {
 	if err != nil {
 		return err
 	}
+	// The spec makes a bodiless 404 mean "bridge disabled"; a JSON 404 is an
+	// unknown hold. Mixing them up would retry forever against a dark console.
+	if resp.StatusCode == http.StatusNotFound && len(bytes.TrimSpace(raw)) == 0 {
+		return &Error{Status: resp.StatusCode, Message: CodeBridgeDisabled}
+	}
 	var env envelope
 	if err := json.Unmarshal(raw, &env); err != nil {
 		return &Error{Status: resp.StatusCode, Message: "non-JSON response"}
 	}
 	if resp.StatusCode/100 != 2 || !env.Success {
-		return &Error{Status: resp.StatusCode, Message: env.Message}
+		e := &Error{Status: resp.StatusCode, Message: env.Message}
+		if resp.StatusCode == http.StatusForbidden && len(env.Data) > 0 {
+			var d struct {
+				Status string `json:"status"`
+			}
+			if json.Unmarshal(env.Data, &d) == nil {
+				e.AccountStatus = d.Status
+			}
+		}
+		return e
 	}
 	if out != nil {
 		return json.Unmarshal(env.Data, out)
@@ -181,10 +232,17 @@ func (c *Client) Settle(ctx context.Context, holdID string, req SettleRequest) (
 	return &out, nil
 }
 
-func (c *Client) Extend(ctx context.Context, holdID string, additionalQuota int64) (*HoldResult, error) {
+// ExtendRequest carries ExtendID ("ext_" + ULID, ≤ 64 chars) so a retry after
+// a lost response does not reserve the quota twice. Reuse the same ExtendID
+// and amount when retrying.
+type ExtendRequest struct {
+	ExtendID        string `json:"extend_id"`
+	AdditionalQuota int64  `json:"additional_quota"`
+}
+
+func (c *Client) Extend(ctx context.Context, holdID string, req ExtendRequest) (*HoldResult, error) {
 	var out HoldResult
-	in := map[string]int64{"additional_quota": additionalQuota}
-	if err := c.post(ctx, "/holds/"+holdID+"/extend", in, &out); err != nil {
+	if err := c.post(ctx, "/holds/"+holdID+"/extend", req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
