@@ -1,0 +1,54 @@
+# When the operator comments `LGTM` on a pull request, re-run the test guard.
+#
+# test-guard.yml already accepts a bare `LGTM` from the operator as approval
+# of a test change, but a comment is not a `pull_request` event, so the guard
+# never re-ran on its own: the check stayed red after the operator had
+# approved, and somebody had to press "Re-run". This closes that gap and
+# nothing else.
+#
+# It decides nothing. It only asks the guard to run again; the guard itself
+# still checks who wrote the comment, that it is exactly `LGTM`, and that it
+# is newer than the head commit. A comment from anybody else, or anything but
+# `LGTM`, does nothing here.
+#
+# `issue_comment` runs this file from the default branch, never from the pull
+# request, so a pull request cannot change what this workflow does.
+name: Test guard re-run on LGTM
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  actions: write          # to re-run the guard
+  pull-requests: read
+
+jobs:
+  rerun-guard:
+    if: >-
+      github.repository == 'FelixSphere/unify-compute' &&
+      github.event.issue.pull_request &&
+      github.event.comment.user.login == 'Yuchengw'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Re-run the test guard for this pull request's head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          body=$(jq -r '.comment.body' "$GITHUB_EVENT_PATH" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')
+          if [ "$body" != "LGTM" ]; then
+            echo "Not a bare LGTM; nothing to do."
+            exit 0
+          fi
+          head=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '.head.sha')
+          run=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/test-guard.yml/runs?head_sha=${head}&per_page=1" \
+            --jq '.workflow_runs[0].id // empty')
+          if [ -z "$run" ]; then
+            echo "No test-guard run for ${head} yet; it will read the LGTM when it runs."
+            exit 0
+          fi
+          gh run rerun "$run" --repo "$GITHUB_REPOSITORY"
+          echo "Re-ran test guard run ${run} for PR #${PR} at ${head}." | tee -a "$GITHUB_STEP_SUMMARY"
