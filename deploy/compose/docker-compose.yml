@@ -26,9 +26,10 @@ services:
       - "${COMPUTE_API_BIND:-127.0.0.1}:8080:8080"
     environment:
       LISTEN_ADDR: 0.0.0.0:8080
-      # The console service name where one runs alongside (staging, local);
-      # https://app.unifyapi.ai in production.
-      CONSOLE_URL: ${CONSOLE_URL:-http://console:3000}
+      # The console service name where one runs alongside (staging, local).
+      # `-`, not `:-`: an explicitly empty CONSOLE_URL (production while the
+      # bridge is dark) must stay empty, not become the local console.
+      CONSOLE_URL: ${CONSOLE_URL-http://console:3000}
       # Clouds this deployment may launch into (ADR-0006).
       UPSTREAMS: ${UPSTREAMS:-aws}
       # Empty means the bridge is dark. Production keeps it empty until the
