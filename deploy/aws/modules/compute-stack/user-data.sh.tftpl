@@ -107,15 +107,12 @@ COMPUTE_BRIDGE_SECRET=$(get_param '${ssm_bridge_secret}' 2>/dev/null || true)
 COMPUTE_BRIDGE_SECRET=
 %{ endif ~}
 
-# Private GHCR packages: log in only if both parameters exist and are
-# non-empty, the same rule scripts/release/host.sh applies before a release.
-# Without this a private image would make the first `compose up` fail to pull.
-GHCR_USER=$(get_param '${ssm_prefix}/ghcr_pull_user' 2>/dev/null || true)
-GHCR_TOKEN=$(get_param '${ssm_prefix}/ghcr_pull_token' 2>/dev/null || true)
-if [ -n "$GHCR_USER" ] && [ -n "$GHCR_TOKEN" ]; then
-  printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
-fi
-unset GHCR_TOKEN
+# Our images come from the runtime registry (ADR-0009, "Runtime registry:
+# ECR"), with this instance's role. The token lasts 12 hours, which is enough
+# for this boot; every release logs in again before it pulls.
+ECR_PASSWORD=$(aws ecr get-login-password --region '${region}')
+printf '%s' "$ECR_PASSWORD" | docker login --username AWS --password-stdin '${ecr_registry}'
+unset ECR_PASSWORD
 
 # /opt/unify-compute/compose is the contract with the release pipeline
 # (scripts/release/host.sh, COMPOSE_DIR): it runs `docker compose` there with

@@ -3,7 +3,7 @@
 TF_ROOT     := deploy/aws
 # Every root that is init'ed and applied on its own. The module under
 # deploy/aws/modules is validated through the environments that call it.
-TF_STACKS   := $(TF_ROOT)/envs/staging $(TF_ROOT)/envs/production $(TF_ROOT)/shared/github-oidc
+TF_STACKS   := $(TF_ROOT)/envs/staging $(TF_ROOT)/envs/production $(TF_ROOT)/shared/github-oidc $(TF_ROOT)/shared/ecr
 COMPOSE_DIR := deploy/compose
 BUILD       := $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 IMAGE       ?= ghcr.io/felixsphere/unify-compute-api:$(BUILD)

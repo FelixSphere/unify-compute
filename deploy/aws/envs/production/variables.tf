@@ -19,15 +19,16 @@ variable "manage_site_dns" {
 # Image pins for production. Same rule as staging: digests only, checked by
 # CI's pinned-images job, red until each has been published. Production should
 # pin a digest staging has already run.
+# Ours are ECR refs with the GHCR build's digest; see staging/variables.tf.
 
 variable "compute_api_image" {
   type    = string
-  default = "ghcr.io/felixsphere/unify-compute-api@sha256:10cf58392547078e2134f5ff0e1a0c9b0416ca7e186746f07e243697ed58ce4a"
+  default = "871376691052.dkr.ecr.us-east-1.amazonaws.com/unify-compute-api@sha256:10cf58392547078e2134f5ff0e1a0c9b0416ca7e186746f07e243697ed58ce4a"
 }
 
 variable "site_image" {
   type    = string
-  default = "ghcr.io/felixsphere/unify-compute-site@sha256:a918fe89b1cc2227ad486ef9391526529c90aa770fb0d2b4f0526ed5d6b84c0a"
+  default = "871376691052.dkr.ecr.us-east-1.amazonaws.com/unify-compute-site@sha256:a918fe89b1cc2227ad486ef9391526529c90aa770fb0d2b4f0526ed5d6b84c0a"
 }
 
 variable "ami_id" {
