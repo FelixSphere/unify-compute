@@ -140,9 +140,162 @@ Staging is healthy when all of these hold, checked by `scripts/smoke.sh`:
 - `http://` on any of the three names answers `301` to `https://`, and HTTPS
   responses carry `strict-transport-security: max-age=31536000`.
 
-## Releasing to staging
+## Releasing
 
-Image swap over SSM, same as the console's production procedure: `docker pull`
-the new digest first, edit the image line in `/opt/unify-compute/docker-compose.yml`,
-`docker compose up -d compute-api`, smoke, then commit the pin. Terraform is
-for the instance, not for releases.
+**Status: written, never run.** `.github/workflows/release.yml` exists; no
+environment has been released through it, because no environment exists
+(staging is not applied, production is not defined). The first run of it is
+also the first test of it. Record that in the first release record.
+
+Only the CI/CD agent dispatches it (`.claude/agents/cicd.md`). Merging to
+`main` runs `ci.yml` and stops.
+
+### What a release is
+
+A set of two image digests, one per deployable:
+
+| Env key on the host | Image | Published by |
+|---|---|---|
+| `COMPUTE_API_IMAGE` | `ghcr.io/felixsphere/unify-compute-api@sha256:…` | `publish-image.yml` |
+| `SITE_IMAGE` | `ghcr.io/felixsphere/unify-compute-site@sha256:…` | the site publish workflow |
+
+Both are always named, even when only one changed, so every release record
+and every staging-first comparison is of a complete set. Tags are refused: a
+tag can be repointed, a digest cannot.
+
+### Release, in order
+
+```bash
+# 0. nothing else in flight, and read what the host runs now. `status` is
+#    read-only; its output is the "before" in the record.
+gh run list --repo FelixSphere/unify-compute --workflow release.yml --limit 5
+gh workflow run release.yml --repo FelixSphere/unify-compute --ref main \
+  -f environment=staging -f mode=status -f reason="before <release name>"
+
+# 1. staging
+gh workflow run release.yml --repo FelixSphere/unify-compute --ref main \
+  -f environment=staging \
+  -f compute_api_image=ghcr.io/felixsphere/unify-compute-api@sha256:<d> \
+  -f site_image=ghcr.io/felixsphere/unify-compute-site@sha256:<d> \
+  -f reason="<release name>"
+gh run watch --repo FelixSphere/unify-compute <run id>
+
+# 2. exercise on staging what this release changes, then write the record
+#    (deploy/releases/README.md). The run summary has the field block.
+
+# 3. production: the SAME digests. Refused otherwise.
+gh workflow run release.yml --repo FelixSphere/unify-compute --ref main \
+  -f environment=production \
+  -f compute_api_image=<same> -f site_image=<same> \
+  -f reason="<release name>"
+```
+
+What one run does (`plan` has no AWS credentials; `deploy` has them, through
+OIDC, only inside the GitHub environment named by `environment`):
+
+| Step | Refuses when |
+|---|---|
+| `plan`: runs from main | dispatched from any other ref |
+| `plan`: in-flight check | another `release.yml` run is queued, waiting or running |
+| `plan`: inputs | a digest is not `<its repository>@sha256:<64 hex>` |
+| `plan`: provenance (`scripts/release/provenance.sh`) | the digest has no linux/arm64; no `sha-<commit>` tag points at it; that commit is not on main; CI did not pass on it |
+| `plan`: staging first (`scripts/release/staging-first.sh`), production only | no successful staging run of `release.yml` uploaded a manifest with exactly these digests |
+| `deploy`: find the instance | not exactly one running instance tagged `Name=unify-compute-<env>` |
+| `deploy`: `status` | — (records the before state) |
+| `deploy`: cutover on the host (`scripts/release/host.sh` via `scripts/ssm-run.sh`) | see below |
+| `deploy`: smoke (`scripts/release/smoke.sh`) | any probe fails |
+| `deploy`: served by AWS, production only | after `DNS_CUTOVER=done`: `compute.unifyai.us` does not resolve to the ALB or does not serve compute-api |
+| `deploy`: manifest artifact, last | — (this is what makes the digests eligible for production) |
+
+On the host, under the operations lock `/run/lock/unify-compute-ops.lock`:
+
+1. read the current digests from the compose env file; if they already equal
+   the target, verify health and stop (`NOOP`);
+2. `docker pull` the target digests, before anything is touched;
+3. back up: every Postgres database with `pg_dump -Fc`, each read back with
+   `pg_restore -l`, plus `PREVIOUS_RELEASE` and the env file, to
+   `/data/backups/<stamp>-<run_id>/`; everything but the env file (it holds
+   the secrets) is copied to `s3://<backup_bucket>/<env>/releases/`. No
+   bucket, no cutover;
+4. write the two keys into the env file atomically, `docker compose up -d`;
+5. wait up to 240 s for every container to be running and, where it has a
+   healthcheck, healthy, and for `http://127.0.0.1:8080/healthz` to answer;
+   then 30 s more, and fail if any container's restart count rose or any
+   container was replaced. Both readings are printed either way;
+6. check each service runs exactly the digest asked for;
+7. on any failure in 4–6: restore the env file, `up -d` again, verify that,
+   and fail the job. **The database is not restored automatically**: if the
+   new compute-api migrated it, the dump from step 3 is the way back, and
+   restoring it is a decision, not a reflex;
+8. on success: `/data/releases/PREVIOUS_RELEASE` ← what ran before,
+   `CURRENT_RELEASE` ← the target, one line appended to `history.log`; prune
+   local backups to the newest 10 (never fatal).
+
+Smoke, from the runner, against the environment's `PUBLIC_ORIGIN`:
+`/healthz` 200 naming compute-api **and the build the provenance step found**;
+`/compute/v1/skus` 200 JSON with at least one priced SKU;
+`/compute/v1/jobs` without a key 401 with compute-api's `missing_key`;
+`/` 200 with `<title>Unify Compute`; `/privacy` 200; `/icon-v3.svg` 200 with
+`Cache-Control: max-age` of at least a day. Smoke failing does **not** roll back
+automatically, because by then the host has passed its own checks and the
+fault may be in front of it. The summary prints the rollback command.
+
+### HOTFIX
+
+A `reason` starting with `HOTFIX` lets production take digests staging has
+not run, with a warning on the run and in its summary. Everything else still
+applies: provenance, the backup, the host checks, smoke. It is for a live
+outage, a security issue, or data being lost, nothing else. CI then requires a
+record with `hotfix: true` and a `## What was skipped` section, and the same
+digests go to staging afterwards.
+
+### Rolling back
+
+```bash
+gh workflow run release.yml --repo FelixSphere/unify-compute --ref main \
+  -f environment=<env> -f mode=rollback -f reason="rollback: <why>"
+```
+
+This takes the lock, reads `/data/releases/PREVIOUS_RELEASE` on the host,
+backs up, and cuts over to it through the same steps and checks as a release.
+It needs no digests and skips the staging-first gate, because those digests
+already ran in this environment. Then:
+
+- **It goes one step back, not further.** After a rollback, `PREVIOUS_RELEASE`
+  is the release you rolled back from, so a second rollback re-applies it. To
+  go further back, run an ordinary release with older digests from an earlier
+  record; for production those still need their staging manifest (90 days).
+- **It does not touch the database.** If the bad release ran a migration the
+  old compute-api cannot read, restore the dump the bad release took, under
+  the lock, before or instead of rolling back:
+
+  ```bash
+  # on the host, via SSM send-command. B is the directory from the BACKUP
+  # line of the bad run's cutover output.
+  B=/data/backups/<stamp>-<run_id> flock -w 900 /run/lock/unify-compute-ops.lock sh -c '
+    cd /opt/unify-compute/compose &&
+    docker compose stop compute-api &&
+    docker compose exec -T postgres pg_restore -U unify --clean --if-exists -d compute < "$B/compute.dump" &&
+    docker compose start compute-api'
+  ```
+
+- **Record it.** A rollback is a release (`action: rollback`) and needs its
+  own record.
+- **If the host has no `PREVIOUS_RELEASE`** (first release on a new instance),
+  rollback refuses. Release the previous digests from the last record instead.
+
+### What the environments must provide (agent M2, not yet built)
+
+Assumptions this pipeline makes; a mismatch is a variable at the top of
+`scripts/release/host.sh` or a GitHub environment setting, not a rewrite.
+
+| Where | What |
+|---|---|
+| GitHub environments `staging`, `production` | secret `AWS_DEPLOY_ROLE_ARN`; variables `PUBLIC_ORIGIN` (the origin smoke probes), `AWS_REGION` (default `us-east-1`); production also `DNS_CUTOVER` (`done` after the cutover) and optionally `ALB_DNS_NAME`. Production restricted to `main` with required reviewers |
+| Deploy role | trusts `token.actions.githubusercontent.com` with `sub` = `repo:FelixSphere@164092079/unify-compute@1364156790:environment:<env>` (this repo issues immutable OIDC subjects; see ADR-0009); may `ec2:DescribeInstances`, `ssm:SendCommand` on `AWS-RunShellScript` and on instances tagged for its env only, `ssm:GetCommandInvocation` |
+| Instance | tag `Name=unify-compute-<env>`; SSM agent; `docker compose`, `flock`, `aws`, `curl` |
+| Compose | `/opt/unify-compute/compose/docker-compose.yml` and `.env`, with the systemd unit's `WorkingDirectory` set to that directory; services `compute-api` (port 8080 on the host), `site`, `postgres` (user `unify`); the image keys `COMPUTE_API_IMAGE` and `SITE_IMAGE` |
+| Data volume | mounted at `/data`; `/data/releases` and `/data/backups` are created on first use |
+| SSM | `/unify-compute-<env>/backup_bucket` (bucket name); optionally `ghcr_pull_user` and `ghcr_pull_token` if the packages are private |
+| Instance role | `s3:PutObject` on the backup bucket under `<env>/releases/` |
+| Site image | published with a `sha-<commit>` tag, like compute-api, or provenance cannot place it |
