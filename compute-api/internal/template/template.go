@@ -68,6 +68,8 @@ var overridableFields = map[string]bool{
 	FieldSKU: true, FieldProviders: true, FieldCommand: true, FieldEnv: true, FieldMaxRuntimeSeconds: true,
 }
 
+const hostPart = `[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?`
+
 var (
 	ErrUnknown = errors.New("unknown template")
 
@@ -78,9 +80,11 @@ var (
 	// tag) with the digest made mandatory. Digest because a tag is a moving
 	// pointer: Docker Hub lets a publisher re-push v0.30.0, and the reviewed
 	// diff would no longer be what runs. The tag stays for the human reading
-	// the file; the digest is what is pulled.
+	// the file; the digest is what is pulled. As in docker, the first
+	// component is a registry only if it has a dot or a port or is localhost;
+	// otherwise it is a lowercase path component.
 	imageRe = regexp.MustCompile(`^` +
-		`(?:(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)*(?::[0-9]+)?)/)?` +
+		`(?:(?:localhost(?::[0-9]+)?|` + hostPart + `(?:\.` + hostPart + `)+(?::[0-9]+)?|` + hostPart + `:[0-9]+)/)?` +
 		`[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*` +
 		`(?::(?P<tag>[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}))?` +
 		`@sha256:[a-f0-9]{64}$`)

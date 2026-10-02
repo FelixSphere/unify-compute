@@ -114,7 +114,7 @@
         "spec.max_runtime_seconds"
       ],
       "available": false,
-      "unavailable_reason": "No image exists yet: the reference run installs finetune/requirements.txt with pip on SkyPilot's default VM image and uploads finetune/ as its workdir. The image with those scripts at its working directory is published and pinned in R1. See docs/spec/templates.md, finetune-lora."
+      "unavailable_reason": "No image exists yet: the reference run installs finetune/requirements.txt with pip on SkyPilot's default VM image and uploads finetune/ as its workdir. An image with those scripts at its working directory has to be built, published and pinned by digest first (task R1; not done). See docs/spec/templates.md, finetune-lora."
     }
   ]
 }
