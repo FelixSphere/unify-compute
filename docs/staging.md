@@ -231,7 +231,8 @@ On the host, under the operations lock `/run/lock/unify-compute-ops.lock`:
    `CURRENT_RELEASE` ← the target, one line appended to `history.log`; prune
    local backups to the newest 10 (never fatal).
 
-Smoke, from the runner, against the environment's `PUBLIC_ORIGIN`:
+Smoke, from the runner. The ALB routes by Host, so compute-api is probed at
+the environment's `API_ORIGIN` and the site at its `PUBLIC_ORIGIN`:
 `/healthz` 200 naming compute-api **and the build the provenance step found**;
 `/compute/v1/skus` 200 JSON with at least one priced SKU;
 `/compute/v1/jobs` without a key 401 with compute-api's `missing_key`;
@@ -291,7 +292,7 @@ Assumptions this pipeline makes; a mismatch is a variable at the top of
 
 | Where | What |
 |---|---|
-| GitHub environments `staging`, `production` | secret `AWS_DEPLOY_ROLE_ARN`; variables `PUBLIC_ORIGIN` (the origin smoke probes), `AWS_REGION` (default `us-east-1`); production also `DNS_CUTOVER` (`done` after the cutover) and optionally `ALB_DNS_NAME`. Production restricted to `main` with required reviewers |
+| GitHub environments `staging`, `production` | secret `AWS_DEPLOY_ROLE_ARN`; variables `PUBLIC_ORIGIN` (the site origin smoke probes), `API_ORIGIN` (compute-api's origin), `AWS_REGION` (default `us-east-1`); production also `DNS_CUTOVER` (`done` after the cutover) and optionally `ALB_DNS_NAME`. Both restricted to `main`. Required reviewers were wanted on production; GitHub refused them on this repository's plan (HTTP 422, 2026-10-02), so the release owner rule is the only gate |
 | Deploy role | trusts `token.actions.githubusercontent.com` with `sub` = `repo:FelixSphere@164092079/unify-compute@1364156790:environment:<env>` (this repo issues immutable OIDC subjects; see ADR-0009); may `ec2:DescribeInstances`, `ssm:SendCommand` on `AWS-RunShellScript` and on instances tagged for its env only, `ssm:GetCommandInvocation` |
 | Instance | tag `Name=unify-compute-<env>`; SSM agent; `docker compose`, `flock`, `aws`, `curl` |
 | Compose | `/opt/unify-compute/compose/docker-compose.yml` and `.env`, with the systemd unit's `WorkingDirectory` set to that directory; services `compute-api` (port 8080 on the host), `site`, `postgres` (user `unify`); the image keys `COMPUTE_API_IMAGE` and `SITE_IMAGE` |

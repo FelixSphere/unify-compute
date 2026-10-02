@@ -14,13 +14,13 @@ variable "region" {
 variable "compute_api_image" {
   description = "Publish with .github/workflows/publish-image.yml, then pin the digest it prints."
   type        = string
-  default     = "ghcr.io/felixsphere/unify-compute-api:dev"
+  default     = "ghcr.io/felixsphere/unify-compute-api@sha256:10cf58392547078e2134f5ff0e1a0c9b0416ca7e186746f07e243697ed58ce4a"
 }
 
 variable "site_image" {
-  description = "Marketing site image (agent M1). Not published as of 2026-10-02; pin its digest once it is."
+  description = "Marketing site image, by digest. Rebuild baseline only; releases swap it on the host."
   type        = string
-  default     = "ghcr.io/felixsphere/unify-compute-site:unpublished"
+  default     = "ghcr.io/felixsphere/unify-compute-site@sha256:a918fe89b1cc2227ad486ef9391526529c90aa770fb0d2b4f0526ed5d6b84c0a"
 }
 
 variable "console_image" {

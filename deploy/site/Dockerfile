@@ -7,8 +7,10 @@
 # is what is pulled. Both are multi-arch indexes that carry linux/arm64, which
 # the t4g hosts need. Bump them together with the tag comment.
 
-# node:22.23.3-alpine
-FROM node:22.23.3-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 AS build
+# node:22.23.3-alpine. On the build platform, not the target: the export is
+# static files, identical on every architecture, and building it under QEMU
+# for arm64 outran publish-image.yml's 30-minute timeout on 2026-10-02.
+FROM --platform=$BUILDPLATFORM node:22.23.3-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 AS build
 WORKDIR /src
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund

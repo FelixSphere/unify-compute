@@ -259,10 +259,12 @@ jobs:
         if: inputs.mode != 'status'
         env:
           ORIGIN: ${{ vars.PUBLIC_ORIGIN }}
+          API_ORIGIN: ${{ vars.API_ORIGIN }}
           EXPECT_BUILD: ${{ needs.plan.outputs.build }}
         run: |
           set -euo pipefail
-          [ -n "$ORIGIN" ] || { echo "::error::set the PUBLIC_ORIGIN variable on the $ENVIRONMENT environment"; exit 1; }
+          [ -n "$ORIGIN" ] || { echo "::error::set the PUBLIC_ORIGIN variable (the site origin) on the $ENVIRONMENT environment"; exit 1; }
+          [ -n "$API_ORIGIN" ] || { echo "::error::set the API_ORIGIN variable (compute-api's origin) on the $ENVIRONMENT environment"; exit 1; }
           if ! scripts/release/smoke.sh; then
             {
               echo "## Smoke FAILED after cutover"
@@ -285,6 +287,7 @@ jobs:
           DOMAIN: compute.unifyai.us
           ALB_DNS_NAME: ${{ vars.ALB_DNS_NAME }}
           ORIGIN: https://compute.unifyai.us
+          API_ORIGIN: ${{ vars.API_ORIGIN }}
           EXPECT_BUILD: ${{ needs.plan.outputs.build }}
         run: |
           set -euo pipefail
