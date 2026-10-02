@@ -13,20 +13,20 @@ WORKDIR /src
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY . .
-# next.config.ts turns this into vinext's deploymentId; the Caddyfile echoes
-# it on client-side navigation payloads. They must be the same value.
-ARG SITE_BUILD_ID=dev
-ENV SITE_BUILD_ID=${SITE_BUILD_ID}
+# The *.txt files are the client-side navigation payloads; without them every
+# link click degrades to a full page load.
 RUN npm run build \
  && test -f dist/client/index.html \
+ && test -f dist/client/index.txt \
  && test -f dist/client/privacy.html \
+ && test -f dist/client/privacy.txt \
  && test -f dist/client/404.html \
  && rm -rf dist/client/.vite dist/client/vinext-client-entry-manifest.json
 
 # caddy:2.11.4-alpine
 FROM caddy:2.11.4-alpine@sha256:6aeddd44c3078b0f9a35206472a11420648a79c184603ef95957d0a20044cb2b
+# Only labels the image; the build does not read it.
 ARG SITE_BUILD_ID=dev
-ENV SITE_BUILD_ID=${SITE_BUILD_ID}
 # Caddy still opens its data and config dirs with admin and TLS off. The
 # image's /data and /config are root-owned volumes; point it somewhere the
 # unprivileged user can write instead of running as root.

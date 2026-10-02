@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # Asserts what the site container must do, against a running instance of it.
-#   deploy/site/smoke.sh http://127.0.0.1:8080 <SITE_BUILD_ID the image was built with>
+#   deploy/site/smoke.sh http://127.0.0.1:8080
 # Used by CI on every push and by publish-image.yml before anything is pushed.
 set -euo pipefail
 
-base=${1:?usage: smoke.sh BASE_URL SITE_BUILD_ID}
-build_id=${2:?usage: smoke.sh BASE_URL SITE_BUILD_ID}
+base=${1:?usage: smoke.sh BASE_URL}
 fail=0
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -78,8 +77,20 @@ check /vinext-client-entry-manifest.json 404
 # No directory listing.
 check /brand 404
 
-CURL_ARGS="-H RSC:1" check "/privacy?_rsc=x" 200 \
-  "Content-Type: text/x-component" "X-Vinext-RSC-Compatibility-Id: $build_id" "Vary: RSC"
-CURL_ARGS="-H RSC:1" check "/?_rsc=x" 200 "Content-Type: text/x-component"
+# Client-side navigation: the router fetches the page's flight payload by file
+# name and still sends `RSC: 1`. A rewrite keyed on that header turned these
+# into 404s and every link click into a full page load. The payload must come
+# from the same build as the HTML, or the router discards it.
+privacy_version=$(curl -s "$base/privacy" | grep -oE 'deploymentVersion\\?":\\?"[0-9a-f-]+' | grep -oE '[0-9a-f-]{36}' | head -1)
+for page in /privacy /; do
+  payload=$page.txt; [ "$page" = / ] && payload=/index.txt
+  CURL_ARGS="-H RSC:1" check "$payload" 200 \
+    "Content-Type: text/plain" "Cache-Control: no-cache" "${common[@]}"
+  head -c 2 "$tmp/body" | grep -q '^0:' \
+    || { echo "FAIL $payload: not a flight payload"; fail=1; }
+  if [ -z "$privacy_version" ] || ! grep -q "\"deploymentVersion\":\"$privacy_version\"" "$tmp/body"; then
+    echo "FAIL $payload: deploymentVersion does not match the HTML's ('$privacy_version')"; fail=1
+  fi
+done
 
 exit "$fail"

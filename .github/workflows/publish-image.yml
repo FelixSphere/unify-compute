@@ -199,7 +199,7 @@ jobs:
             curl -fs http://127.0.0.1:8080/healthz >/dev/null && break
             sleep 1
           done
-          deploy/site/smoke.sh http://127.0.0.1:8080 "${{ github.sha }}" || { docker logs site; exit 1; }
+          deploy/site/smoke.sh http://127.0.0.1:8080 || { docker logs site; exit 1; }
 
       - uses: docker/login-action@v3
         with:
