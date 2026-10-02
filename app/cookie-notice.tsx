@@ -84,34 +84,35 @@ export function CookieNotice() {
       // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role
       role="dialog"
       aria-label="Cookie notice"
-      className="fixed bottom-24 left-4 right-4 z-50 max-w-[480px] rounded-[12px] border border-[#34446a] bg-[#101a30] p-5 text-[#f3f4f2] shadow-[0_24px_48px_-16px_rgba(0,0,0,0.5)] sm:bottom-6 sm:left-6 sm:right-auto"
+      className="fixed bottom-24 left-4 right-4 z-50 max-w-[480px] rounded-lg bg-(--u-btn-secondary-bg) p-5 text-(--u-btn-secondary-fg) sm:bottom-6 sm:left-6 sm:right-auto"
     >
-      <p className="m-0 font-mono text-[11px] uppercase tracking-[0.14em] text-[#a2a7a5]">
+      <p className="m-0 font-mono text-(length:--u-text-xs) uppercase tracking-[0.14em] text-(--u-muted-on-dark)">
         Cookie notice
       </p>
-      <p className="m-0 mt-3 text-[14px] leading-[1.55] text-[#d4d7d5]">
+      <p className="m-0 mt-3 text-(length:--u-text-sm) leading-[1.55]">
         We use required, functional, and advertising cookies. Reject to keep
         only essential cookies. See our{' '}
         <Link
           href="/privacy"
-          className="underline! underline-offset-2 hover:text-white!"
+          className="underline! underline-offset-2 hover:decoration-2"
         >
           Privacy Policy
         </Link>
         .
       </p>
       <div className="mt-4 flex gap-2">
+        {/* Equal weight on purpose: rejecting must be as easy as accepting, and UI-STANDARD allows one primary per view (the page has it). */}
         <button
           type="button"
           onClick={reject}
-          className="h-9 flex-1 cursor-pointer rounded-lg border border-[#34446a] bg-transparent text-[14px] font-medium text-inherit hover:bg-[#1b2846]"
+          className="h-(--u-btn-height) flex-1 cursor-pointer rounded-lg border border-(--u-btn-ghost-border) bg-(--u-btn-ghost-bg) text-[15px] font-semibold text-(--u-btn-ghost-fg) hover:bg-(--u-paper)"
         >
           Reject cookies
         </button>
         <button
           type="button"
           onClick={accept}
-          className="h-9 flex-1 cursor-pointer rounded-lg border-0 bg-[#2563eb] text-[14px] font-medium text-white hover:opacity-90"
+          className="h-(--u-btn-height) flex-1 cursor-pointer rounded-lg border border-(--u-btn-ghost-border) bg-(--u-btn-ghost-bg) text-[15px] font-semibold text-(--u-btn-ghost-fg) hover:bg-(--u-paper)"
         >
           Accept all
         </button>

@@ -1,36 +1,24 @@
 import type { Metadata } from 'next';
-import Image from 'next/image';
 import Link from 'next/link';
+import { BrandLockup, CompanyLine } from '../brand';
+import { SiteHeader } from '../site-header';
 
 export const metadata: Metadata = {
-  title: 'Privacy Policy — unifyAI',
+  title: 'Privacy Policy — UnifyAI Compute',
   description:
-    'How unifyAI collects, uses, and protects your information, and the cookies this site uses.',
+    'How UnifyAI collects, uses, and protects your information, and the cookies this site uses.',
 };
 
-// Text is FelixSphere's policy verbatim (FelixSphere LLC is the legal entity); only the Website
-// definition and the last-updated date differ. Keep it in sync with felixsphere.com/legal/privacy.
+// UnifyAI is the Company and data controller (user decision, 2026-10-01). The text started from
+// FelixSphere's policy but no longer tracks it; edit it here. The contact mailbox stays on
+// felixsphere.com only until a unifyai.us mailbox exists (unifyai.us has no MX record).
 export default function PrivacyPolicy() {
   return (
     <main id="top">
       <a className="skip-link" href="#policy">
         Skip to content
       </a>
-      <header className="nav wrap">
-        <Link href="/" className="brand" aria-label="unifyAI home">
-          <Image
-            unoptimized
-            src="/unifyai-mark.png"
-            alt=""
-            width={38}
-            height={38}
-            className="brand-mark"
-          />
-          <span>
-            unify<span className="brand-ai">AI</span>
-          </span>
-        </Link>
-      </header>
+      <SiteHeader />
       <article className="legal wrap" id="policy">
         <h1>Privacy Policy</h1>
         <p className="legal-updated">Last updated: October 1, 2026</p>
@@ -80,7 +68,8 @@ export default function PrivacyPolicy() {
           <strong> Company </strong>
           (referred to as either &quot;the Company&quot;, &quot;We&quot;,
           &quot;Us&quot; or &quot;Our&quot; in this Agreement) refers to
-          FelixSphere LLC, 6 KAREN CT.
+          UnifyAI, Lebuh Bandar Utama PJU 6, 47800 Petaling Jaya, Selangor,
+          Malaysia.
         </p>
 
         <p>For the purpose of the GDPR, the Company is the Data Controller.</p>
@@ -160,7 +149,7 @@ export default function PrivacyPolicy() {
 
         <p>
           <strong> Website </strong>
-          refers to unifyAI, accessible from https://compute.unifyai.us
+          refers to UnifyAI Compute, accessible from https://compute.unifyai.us
         </p>
 
         <p>
@@ -832,34 +821,17 @@ export default function PrivacyPolicy() {
 
         <p>By email: contactus@felixsphere.com</p>
 
-        <p>
-          By visiting this page on our website:{' '}
-          <a href="https://www.felixsphere.com/contact-us">
-            https://www.felixsphere.com/contact-us
-          </a>
-        </p>
-
         <p>By phone number: 408.462.2806</p>
       </article>
       <footer className="wrap">
-        <Link href="/" className="brand">
-          <Image
-            unoptimized
-            src="/unifyai-mark.png"
-            alt=""
-            width={34}
-            height={34}
-            className="brand-mark"
-          />
-          <span>
-            unify<span className="brand-ai">AI</span>
-          </span>
+        <Link href="/" className="brand" aria-label="UnifyAI Compute home">
+          <BrandLockup decorative />
         </Link>
         <span>Compute beyond chat.</span>
         <Link href="/privacy" className="footer-privacy" aria-current="page">
           Privacy
         </Link>
-        <span className="copyright">© {new Date().getFullYear()} unifyAI</span>
+        <CompanyLine />
       </footer>
     </main>
   );

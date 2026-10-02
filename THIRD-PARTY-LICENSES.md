@@ -34,3 +34,29 @@ our build graph. The `cmd/compute-api` binary links them once it imports
 npm dependencies in `package.json` are MIT-licensed shadcn/Radix/Vite ecosystem
 packages plus vinext and the OpenAI Sites plugin; the site is a static export
 and none of them ship in `compute-api`.
+
+### Fonts (self-hosted, shipped to every visitor)
+
+The site serves these font files from its own origin rather than from Google
+Fonts, because loading from Google sends visitors' IP addresses to Google
+(UnifyAI UI standard). The `@fontsource` packages bundle the woff2 files into
+the build, and each package carries the font's licence text in its `LICENSE`.
+
+| Font | Weights | Package | Licence |
+|---|---|---|---|
+| Space Grotesk | 500, 700 | `@fontsource/space-grotesk` 5.3.0 | SIL Open Font License 1.1 |
+| Instrument Sans | 400, 500, 600 | `@fontsource/instrument-sans` 5.3.0 | SIL Open Font License 1.1 |
+| IBM Plex Mono | 400, 500 | `@fontsource/ibm-plex-mono` 5.3.0 | SIL Open Font License 1.1 |
+
+OFL allows bundling and redistribution with the site. It forbids selling the
+fonts by themselves, and a modified font may not use the reserved font name.
+We do neither. Email templates (`docs/spec/email/base.html`) link the same
+three fonts from Google Fonts, as the shared email kit specifies, because mail
+clients do not load self-hosted fonts reliably.
+
+### Brand artwork
+
+`public/brand/`, `public/email/`, `public/icons/`, the favicons and
+`public/og-image-v3.png` are UnifyAI's own artwork from the Option 01 "Inward
+hex" logo package and the UnifyAI brand kit. They are proprietary and are not
+third-party material.
