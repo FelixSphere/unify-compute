@@ -1,19 +1,15 @@
 # Staging
 
-**Status: applied 2026-10-02, not serving.** The stack exists (instance
-`i-0780af3b0bfdc3383`, AMI pinned), but its first `compose up` failed: the
-GHCR packages are private and the host had no credential (`unauthorized`).
-No container has ever run on it. Hosts now pull our images from ECR with the
-instance role instead ([ADR-0009](adr/0009-host-everything-on-aws.md),
-"Runtime registry: ECR"); staging comes up on the first release after
-`shared/ecr`, `shared/github-oidc` and this stack are applied with that
-change. Every hostname answers 502 until then. No release has run
-(`mode=status` has, once, successfully). This page is the
-procedure and the acceptance criteria (`.claude/agents/cicd.md`).
+**Status: running since 2026-10-02.** Instance `i-06125c23285803d7a` (AMI
+pinned; it replaced `i-0780af3b0bfdc3383` in a rebuild for #34). The first instance's boot could not pull from private GHCR. The first release
+(run 37054858851) started it from ECR by the "first start" path, and run
+37055453977 passed smoke and produced the manifest production was gated on.
+Records are in `deploy/releases/`. This page is the procedure and the
+acceptance criteria (`.claude/agents/cicd.md`).
 
 Staging is `deploy/aws/envs/staging/`, a caller of the module in
 `deploy/aws/modules/compute-stack/` that production
-(`deploy/aws/envs/production/`, not applied) shares — see
+(`deploy/aws/envs/production/`, applied 2026-10-02) shares — see
 [ADR-0009](adr/0009-host-everything-on-aws.md), Proposed. Staging is applied
 first, always.
 
@@ -159,10 +155,8 @@ Staging is healthy when all of these hold, checked by `scripts/smoke.sh`:
 
 ## Releasing
 
-**Status: written, never run.** `.github/workflows/release.yml` exists; no
-environment has been released through it, because no environment exists
-(staging is not applied, production is not defined). The first run of it is
-also the first test of it. Record that in the first release record.
+**Status: in use since 2026-10-02.** The first releases to staging and
+production are recorded in `deploy/releases/`.
 
 Only the CI/CD agent dispatches it (`.claude/agents/cicd.md`). Merging to
 `main` runs `ci.yml` and stops.

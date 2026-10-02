@@ -13,7 +13,10 @@ variable "manage_site_dns" {
     touching the live record.
   EOT
   type        = bool
-  default     = false
+  # True since the cutover on 2026-10-02 (Route53 change C07235422LT740FCOOAEW);
+  # the record was imported, not created. Rolling back DNS means setting this
+  # false again after `terraform state rm` (ADR-0009, "Rollback").
+  default = true
 }
 
 # Image pins for production. Same rule as staging: digests only, checked by

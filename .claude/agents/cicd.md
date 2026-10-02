@@ -29,39 +29,40 @@ account. Two consequences:
 
 ## The state of the world (keep this section true)
 
-- **Marketing site:** live at https://compute.unifyai.us, hosted on OpenAI
-  Sites (`.openai/hosting.json`), served through Cloudflare. That is still
-  true. The move to AWS (operator request, 2026-10-02) is in progress: the
-  site becomes a container image (`ghcr.io/felixsphere/unify-compute-site`)
-  released with compute-api through `release.yml`. Until production exists
-  and `compute.unifyai.us` is cut over, Sites is what customers see, and
-  content changes ship through the Sites project.
+- **Marketing site:** live at https://compute.unifyai.us on AWS production
+  since the DNS cutover on 2026-10-02 (Route53 change
+  `C07235422LT740FCOOAEW`, CNAME to `custom-domains.chatgpt.site.` replaced
+  by an A alias to the production ALB). The record is in Terraform
+  (`manage_site_dns = true`, imported). Content ships as the `site` image through
+  `release.yml`, staging first. The OpenAI Sites project and the
+  `_cf-custom-hostname` / `_openai-site-verification` TXT records are kept
+  as the rollback path until the operator closes it (ADR-0009, "Rollback").
 - **Staging:** defined in `deploy/aws/envs/staging/` (module `deploy/aws/modules/compute-stack/`; production in `deploy/aws/envs/production/`, deploy roles in `deploy/aws/shared/github-oidc/`, runtime image registry in `deploy/aws/shared/ecr/`), target hostnames
   `staging.compute.unifyai.us` (compute-api) and
   `console.staging.compute.unifyai.us` (a staging console with its own empty
-  database), plus `site.staging.compute.unifyai.us`. **Applied 2026-10-02**
-  from main a8562dd: 49 resources, VPC 10.72.0.0/16, instance
-  `i-0780af3b0bfdc3383` (AMI `ami-065b1b834d2a83a7a`, pinned in #29), data
-  volume `vol-05c4fb3b4ce0077fe`, ALB
-  `unify-compute-staging-347679141.us-east-1.elb.amazonaws.com`. **Not
-  serving:** the first `compose up` got `unauthorized` from GHCR (private
-  packages); no container has ever run there. The fix is merged code, not yet
-  applied: hosts pull our images from ECR with the instance role, and
-  `release.yml` copies each digest GHCR → ECR before the cutover (ADR-0009,
-  "Runtime registry: ECR"). Do **not** create a GHCR PAT for hosts. To bring
-  staging up: apply `shared/ecr`, then `shared/github-oidc`, then
-  `envs/staging` (one in-place instance-role policy update; read the plan,
-  the instance must not be replaced or stopped), then release to staging;
-  `host.sh` treats this host as a "first start" (no containers, no history,
-  no database) and skips the dump. Edge verified: 301 to https, HSTS once,
-  404 for other hosts, certificate covers all three names.
-- **Production compute API:** does not exist. There is no production stack in
-  this repository yet.
+  database), plus `site.staging.compute.unifyai.us`. **Running** since
+  2026-10-02. 49 resources, VPC 10.72.0.0/16, instance
+  `i-06125c23285803d7a` (AMI `ami-065b1b834d2a83a7a`; rebuilt 2026-10-02 after
+  production, to take #34 the same way), data volume
+  `vol-05c4fb3b4ce0077fe`, ALB
+  `unify-compute-staging-347679141.us-east-1.elb.amazonaws.com`. Hosts pull
+  our images from ECR (`deploy/aws/shared/ecr/`) with the instance role.
+- **Production:** applied 2026-10-02. 48 resources, VPC 10.71.0.0/16,
+  instance `i-07dd2f6d313a0dafd` (rebuilt once, before any release, to pick up
+  #34), data volume `vol-02c8bcba84c4b91a4`, ALB
+  `unify-compute-production-1999053028.us-east-1.elb.amazonaws.com`
+  (deletion protection on), daily DLM snapshots. Serves `compute.unifyai.us`,
+  `site.compute.unifyai.us` and `api.compute.unifyai.us`. compute-api is dark:
+  no bridge secret and no `CONSOLE_URL`. No console runs there.
 - **Release pipeline:** `.github/workflows/release.yml`, dispatch only.
   GitHub environments `staging` and `production` exist, both main-only
   (required reviewers refused on this plan). `mode=status` on staging has run
-  once (run 37050107408: OIDC role, instance lookup, SSM all worked). **No
-  release has run yet**; no release records exist (`deploy/releases/`).
+  once (run 37050107408). Released `ec4bd964…`/`cd7077d3…` (a8562dd) to
+  staging (runs 37054858851, 37055453977) and production (37058109546);
+  records are in `deploy/releases/`. Production has no `PREVIOUS_RELEASE`
+  yet, so `mode=rollback` refuses there until a second release.
+  `DNS_CUTOVER=done`, and production's `PUBLIC_ORIGIN` is
+  `https://compute.unifyai.us`.
 - **Console:** production `app.unifyapi.ai` belongs to the UnifyAPI CI/CD agent.
   Staging runs its own console container from the same pinned image
   (`CONSOLE_IMAGE` in `deploy/compose/.env.example`), with a separate database.
