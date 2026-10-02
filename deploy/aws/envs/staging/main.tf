@@ -27,6 +27,6 @@ module "stack" {
 
   alb_deletion_protection = false
   alb_log_retention_days  = 30 # long enough to investigate last week, not an archive
-  alb_logs_force_destroy  = true
+  buckets_force_destroy   = true
   snapshot_backups        = false # staging data is disposable by design
 }

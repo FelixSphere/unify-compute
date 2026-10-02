@@ -10,12 +10,18 @@ data "aws_route53_zone" "this" {
 locals {
   # The API name is the certificate's primary name in both environments;
   # every other hostname is a SAN.
-  cert_sans = [for k, a in local.apps : a.domain if k != "api"]
+  cert_sans = concat(
+    [for k, a in local.apps : a.domain if k != "api"],
+    var.site_aliases,
+  )
 
-  dns_records = {
-    for k, a in local.apps : k => a.domain
-    if k != "site" || var.manage_site_dns
-  }
+  # Keyed by hostname so a site alias and the site's own record are separate
+  # resources: the alias is always managed, the site's own name only after
+  # the cutover.
+  dns_records = merge(
+    { for k, a in local.apps : a.domain => k if k != "site" || var.manage_site_dns },
+    { for h in var.site_aliases : h => "site" },
+  )
 }
 
 resource "aws_acm_certificate" "this" {
@@ -65,7 +71,7 @@ resource "aws_route53_record" "app" {
   for_each = local.dns_records
 
   zone_id = data.aws_route53_zone.this.zone_id
-  name    = each.value
+  name    = each.key
   type    = "A"
 
   alias {

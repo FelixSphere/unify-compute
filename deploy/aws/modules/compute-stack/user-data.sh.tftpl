@@ -1,7 +1,9 @@
 #!/bin/bash
 # Bootstraps a unify-compute host (${environment}): Docker, the data volume,
 # secrets from SSM, and the compose stack from the repository. Rendered by
-# instance.tf; any edit here replaces the instance.
+# instance.tf. Runs once, at first boot: Terraform ignores later changes to
+# it (see instance.tf), so an edit here reaches a host only through a
+# deliberate `terraform apply -replace`.
 set -euo pipefail
 exec > >(tee -a /var/log/unify-compute-bootstrap.log) 2>&1
 
@@ -105,12 +107,26 @@ COMPUTE_BRIDGE_SECRET=$(get_param '${ssm_bridge_secret}' 2>/dev/null || true)
 COMPUTE_BRIDGE_SECRET=
 %{ endif ~}
 
-install -d -m 0700 /opt/unify-compute
+# Private GHCR packages: log in only if both parameters exist and are
+# non-empty, the same rule scripts/release/host.sh applies before a release.
+# Without this a private image would make the first `compose up` fail to pull.
+GHCR_USER=$(get_param '${ssm_prefix}/ghcr_pull_user' 2>/dev/null || true)
+GHCR_TOKEN=$(get_param '${ssm_prefix}/ghcr_pull_token' 2>/dev/null || true)
+if [ -n "$GHCR_USER" ] && [ -n "$GHCR_TOKEN" ]; then
+  printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+fi
+unset GHCR_TOKEN
 
-# COMPOSE_FILE in .env is read by every `docker compose` run from
-# /opt/unify-compute — the systemd unit and release commands over SSM alike —
-# so nobody has to remember which files make up this environment.
-cat >/opt/unify-compute/.env <<ENV
+# /opt/unify-compute/compose is the contract with the release pipeline
+# (scripts/release/host.sh, COMPOSE_DIR): it runs `docker compose` there with
+# this .env, and must address the same project the systemd unit started.
+APP_DIR=/opt/unify-compute/compose
+install -d -m 0700 "$APP_DIR"
+
+# COMPOSE_FILE in .env is read by every `docker compose` run from $APP_DIR —
+# the systemd unit and release commands over SSM alike — so nobody has to
+# remember which files make up this environment.
+cat >"$APP_DIR/.env" <<ENV
 ENVIRONMENT=${environment}
 %{ if console_enabled ~}
 COMPOSE_FILE=docker-compose.yml:docker-compose.console.yml
@@ -134,18 +150,18 @@ SESSION_COOKIE_SECURE=true
 SESSION_COOKIE_TRUSTED_URL=https://${console_domain}
 %{ endif ~}
 ENV
-chmod 0600 /opt/unify-compute/.env
+chmod 0600 "$APP_DIR/.env"
 
-cat >/opt/unify-compute/docker-compose.yml <<'COMPOSE'
+cat >"$APP_DIR/docker-compose.yml" <<'COMPOSE'
 ${compose_file}
 COMPOSE
 
 %{ if console_enabled ~}
-cat >/opt/unify-compute/docker-compose.console.yml <<'COMPOSE'
+cat >"$APP_DIR/docker-compose.console.yml" <<'COMPOSE'
 ${compose_console_file}
 COMPOSE
 
-cat >/opt/unify-compute/postgres-init-console.sql <<'SQL'
+cat >"$APP_DIR/postgres-init-console.sql" <<'SQL'
 ${postgres_init_console}
 SQL
 %{ endif ~}
@@ -160,9 +176,9 @@ RequiresMountsFor=/data
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-WorkingDirectory=/opt/unify-compute
-ExecStart=/usr/bin/docker compose --env-file /opt/unify-compute/.env up -d --remove-orphans
-ExecStop=/usr/bin/docker compose --env-file /opt/unify-compute/.env down
+WorkingDirectory=/opt/unify-compute/compose
+ExecStart=/usr/bin/docker compose --env-file /opt/unify-compute/compose/.env up -d --remove-orphans
+ExecStop=/usr/bin/docker compose --env-file /opt/unify-compute/compose/.env down
 
 [Install]
 WantedBy=multi-user.target

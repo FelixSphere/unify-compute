@@ -20,11 +20,11 @@ locals {
   # containers; the site is published on 8081 so the two do not collide.
   apps = merge(
     {
-      api  = { port = 8080, health = "/healthz", domain = var.api_domain, priority = 10 }
-      site = { port = 8081, health = "/healthz", domain = var.site_domain, priority = 20 }
+      api  = { port = 8080, health = "/healthz", domain = var.api_domain, priority = 10, aliases = [] }
+      site = { port = 8081, health = "/healthz", domain = var.site_domain, priority = 20, aliases = var.site_aliases }
     },
     local.console_enabled ? {
-      console = { port = 3000, health = "/api/status", domain = var.console_domain, priority = 30 }
+      console = { port = 3000, health = "/api/status", domain = var.console_domain, priority = 30, aliases = [] }
     } : {}
   )
 
@@ -64,6 +64,13 @@ data "aws_iam_policy_document" "secrets" {
   statement {
     actions   = ["ssm:GetParameter", "ssm:GetParameters"]
     resources = ["arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter${local.ssm_prefix}/*"]
+  }
+
+  # The release pipeline's pre-release pg_dump (backup.tf). Put only: the
+  # instance can add dumps, not read or delete the ones already there.
+  statement {
+    actions   = ["s3:PutObject"]
+    resources = ["${aws_s3_bucket.backups.arn}/*"]
   }
 
   statement {
@@ -112,6 +119,7 @@ resource "aws_ebs_volume" "data" {
 locals {
   user_data = templatefile("${path.module}/user-data.sh.tftpl", {
     name                  = var.name
+    ssm_prefix            = local.ssm_prefix
     region                = var.region
     environment           = var.environment
     volume_id             = aws_ebs_volume.data.id
@@ -139,13 +147,8 @@ resource "aws_instance" "this" {
   vpc_security_group_ids = [aws_security_group.instance.id]
   iam_instance_profile   = aws_iam_instance_profile.instance.name
 
-  # A user_data change replaces the instance. Without this, terraform updates
-  # the attribute in place, nothing re-runs, and the apply reports success
-  # while deploying nothing. The data volume survives; the containers do not.
-  #
-  # The image pins are part of user_data, so bumping one here is an instance
-  # replacement — minutes of downtime in production. Releases swap images on
-  # the running host over SSM instead; the pin here is what a rebuild lands on.
+  # user_data is ignored after creation (lifecycle below), so this setting
+  # only decides what an explicit `-replace` does with it: render it fresh.
   user_data_replace_on_change = true
 
   user_data = local.user_data
@@ -160,10 +163,11 @@ resource "aws_instance" "this" {
     http_tokens = "required" # IMDSv2 only
   }
 
-  # Project and Environment are what the GitHub deploy roles match on
-  # (ssm:resourceTag in deploy/aws/shared/github-oidc). They are repeated here
-  # rather than left to the root's default_tags so that a caller with
-  # different default tags cannot silently lock its own deploys out.
+  # Name and Project are what the GitHub deploy roles match on
+  # (ssm:resourceTag in deploy/aws/shared/github-oidc), and Name is how the
+  # release pipeline finds the instance. They are set here rather than left
+  # to the root's default_tags so that a caller with different default tags
+  # cannot silently lock its own deploys out.
   tags = {
     Name        = var.name
     Project     = "unify-compute"
@@ -171,6 +175,27 @@ resource "aws_instance" "this" {
   }
 
   lifecycle {
+    # user_data is a first-boot script, and the image pins are in it. Neither
+    # way of letting Terraform act on a change is acceptable for production:
+    # - replace_on_change = true makes every pin bump a new instance;
+    # - replace_on_change = false still makes EC2 stop and start the instance
+    #   to write the attribute (the UnifyAPI console stack found this out):
+    #   minutes of 502s, and nothing re-runs the script anyway.
+    # So pins here are only the rebuild baseline. Releases swap images on the
+    # running host over SSM (scripts/release/host.sh). A deliberate rebuild —
+    # to apply a user-data change, or move the baseline — is:
+    #   1. set the pins here to what is currently released (deploy/releases/);
+    #   2. stop unify-compute.service over SSM (the volume detach can hang on a
+    #      mounted filesystem otherwise);
+    #   3. terraform apply -replace='module.stack.aws_instance.this'
+    # and in production only after the same replace has been run on staging.
+    ignore_changes = [user_data]
+
+    precondition {
+      condition     = var.name == "unify-compute-${var.environment}"
+      error_message = "name must be unify-compute-<environment>: the deploy roles and the release pipeline find the instance by that Name tag, and the SSM prefix is derived from it."
+    }
+
     precondition {
       condition     = !local.console_enabled || var.console_image != null
       error_message = "console_domain is set, so console_image must be too."
@@ -193,4 +218,21 @@ resource "aws_volume_attachment" "data" {
   device_name = "/dev/sdf"
   volume_id   = aws_ebs_volume.data.id
   instance_id = aws_instance.this.id
+}
+
+# A stable public address. A stop/start (an instance-type change, an AWS
+# maintenance event, a hypervisor retirement) otherwise gives the instance a
+# new auto-assigned IPv4, which breaks anything that allowlists our egress —
+# such as the console bridge's callers, should app.unifyapi.ai ever restrict
+# them. It costs nothing extra: AWS bills every public IPv4 in use the same
+# $0.005/h, and this one replaces the auto-assigned address, so the count in
+# ADR-0009's estimate is unchanged.
+resource "aws_eip" "instance" {
+  domain = "vpc"
+  tags   = { Name = var.name }
+}
+
+resource "aws_eip_association" "instance" {
+  allocation_id = aws_eip.instance.id
+  instance_id   = aws_instance.this.id
 }

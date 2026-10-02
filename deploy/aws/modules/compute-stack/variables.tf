@@ -50,6 +50,12 @@ variable "manage_site_dns" {
   type        = bool
 }
 
+variable "site_aliases" {
+  description = "Extra hostnames routed to the site, always managed here. Production uses site.compute.unifyai.us so the site can be smoke-tested on AWS before compute.unifyai.us moves."
+  type        = list(string)
+  default     = []
+}
+
 variable "console_domain" {
   description = "Public hostname for a console that runs on this instance. Null means no console container, no Redis, and no console routes — production, whose console is app.unifyapi.ai and belongs to the UnifyAPI release owner."
   type        = string
@@ -137,8 +143,8 @@ variable "alb_log_retention_days" {
   type = number
 }
 
-variable "alb_logs_force_destroy" {
-  description = "True lets `terraform destroy` empty the logs bucket. Staging only: production access logs are the record of who called what."
+variable "buckets_force_destroy" {
+  description = "True lets `terraform destroy` empty the ALB-logs and backups buckets. Staging only: production's access logs are the record of who called what, and its dumps are the way back from a bad migration."
   type        = bool
 }
 

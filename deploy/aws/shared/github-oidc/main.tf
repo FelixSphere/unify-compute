@@ -7,8 +7,8 @@
 #   UnifyAPI web deploy; it must not belong to either environment's state;
 # - the role ARN goes into GitHub environment settings once, and should not
 #   change because staging was destroyed and rebuilt.
-# The roles find their instance by tag, which is why they need nothing from
-# the environment states.
+# The roles find their instance by its Name tag (unify-compute-<env>), which
+# is why they need nothing from the environment states.
 
 data "aws_caller_identity" "current" {}
 
@@ -86,16 +86,20 @@ data "aws_iam_policy_document" "deploy" {
     actions   = ["ssm:SendCommand"]
     resources = ["arn:aws:ec2:${var.region}:${local.account_id}:instance/*"]
 
+    # Name is what the release pipeline looks the instance up by
+    # (tag:Name=unify-compute-<env>), and the module sets it from var.name.
+    # Project as well, so a stray instance named the same in another project
+    # does not qualify.
     condition {
       test     = "StringEquals"
-      variable = "ssm:resourceTag/Project"
-      values   = ["unify-compute"]
+      variable = "ssm:resourceTag/Name"
+      values   = ["unify-compute-${each.key}"]
     }
 
     condition {
       test     = "StringEquals"
-      variable = "ssm:resourceTag/Environment"
-      values   = [each.key]
+      variable = "ssm:resourceTag/Project"
+      values   = ["unify-compute"]
     }
   }
 

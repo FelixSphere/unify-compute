@@ -3,6 +3,15 @@ output "urls" {
   value       = { for k, a in local.apps : k => "https://${a.domain}" }
 }
 
+output "api_origin" {
+  value = "https://${var.api_domain}"
+}
+
+output "site_origin" {
+  description = "Where the site answers today: its own name once this stack manages it, otherwise the first alias (production before the cutover)."
+  value       = var.manage_site_dns || length(var.site_aliases) == 0 ? "https://${var.site_domain}" : "https://${var.site_aliases[0]}"
+}
+
 output "instance_id" {
   description = "For `aws ssm send-command --instance-ids <id>`."
   value       = aws_instance.this.id

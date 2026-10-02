@@ -18,7 +18,7 @@ resource "aws_s3_bucket" "alb_logs" {
   # Staging passes true: it is meant to be destroyable and its logs are
   # diagnostic. Production passes false, so a destroy stops at a non-empty
   # bucket instead of deleting the access record with it.
-  force_destroy = var.alb_logs_force_destroy
+  force_destroy = var.buckets_force_destroy
 
   tags = { Name = "${var.name}-alb-logs" }
 }

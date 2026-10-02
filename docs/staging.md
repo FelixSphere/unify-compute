@@ -79,13 +79,16 @@ scripts/tf-backend-bootstrap.sh
 # 3. plan, READ IT, apply
 terraform -chdir=deploy/aws/envs/staging init
 terraform -chdir=deploy/aws/envs/staging plan -out=staging.tfplan
-#    expect exactly 41 to add (a read-only plan on 2026-10-02 showed this):
+#    expect exactly 49 to add (a read-only plan on 2026-10-02 showed this):
 #    1 VPC, 1 IGW, 2 subnets, 1 route table + 2 associations,
 #    2 security groups, 1 ACM cert + 3 validation records + 1 validation,
 #    1 ALB, 3 target groups, 3 attachments, 2 listeners, 3 listener rules,
 #    3 Route53 alias records, 1 IAM role + profile + 2 policies,
 #    1 EBS volume, 1 volume attachment, 1 instance,
 #    1 logs bucket + policy + encryption + lifecycle + public-access-block.
+#    1 Elastic IP + association,
+#    1 backups bucket + encryption + lifecycle + public-access-block +
+#    ownership controls, 1 SSM String parameter (backup_bucket).
 #    Anything destroying module.stack.aws_ebs_volume.data is a stop.
 terraform -chdir=deploy/aws/envs/staging apply staging.tfplan
 

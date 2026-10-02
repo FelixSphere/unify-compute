@@ -22,6 +22,10 @@ module "stack" {
   # covers compute.unifyai.us, so the cutover does not wait on issuance.
   manage_site_dns = var.manage_site_dns
 
+  # Always managed, so production's site can be smoke-tested on AWS before
+  # compute.unifyai.us moves, and is still reachable on AWS after a rollback.
+  site_aliases = ["site.compute.unifyai.us"]
+
   console_url    = "https://app.unifyapi.ai"
   bridge_enabled = false
 
@@ -31,6 +35,6 @@ module "stack" {
 
   alb_deletion_protection = true
   alb_log_retention_days  = 90
-  alb_logs_force_destroy  = false
+  buckets_force_destroy   = false
   snapshot_backups        = true
 }

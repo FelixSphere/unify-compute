@@ -72,3 +72,75 @@ resource "aws_dlm_lifecycle_policy" "data" {
     }
   }
 }
+
+# ---------------------------------------------------------------------------
+# Pre-release dumps.
+#
+# The release pipeline (scripts/release/host.sh) takes a pg_dump of every
+# database immediately before it swaps images, because compute-api migrates
+# at startup and a snapshot cannot be restored per database in seconds; a
+# dump can. It reads the bucket name from SSM /<name>/backup_bucket, refuses
+# to release without it, and writes s3://<bucket>/<env>/releases/<stamp>/.
+#
+# These dumps are a release's undo, not the backup schedule: 30 days, no
+# versioning, and the instance can only add objects (instance.tf).
+# ---------------------------------------------------------------------------
+
+resource "aws_s3_bucket" "backups" {
+  bucket        = "${var.name}-backups-${data.aws_caller_identity.current.account_id}"
+  force_destroy = var.buckets_force_destroy
+  tags          = { Name = "${var.name}-backups" }
+}
+
+resource "aws_s3_bucket_public_access_block" "backups" {
+  bucket                  = aws_s3_bucket.backups.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_ownership_controls" "backups" {
+  bucket = aws_s3_bucket.backups.id
+  rule {
+    object_ownership = "BucketOwnerEnforced"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "backups" {
+  bucket = aws_s3_bucket.backups.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+    bucket_key_enabled = true
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "backups" {
+  bucket = aws_s3_bucket.backups.id
+
+  rule {
+    id     = "expire"
+    status = "Enabled"
+    filter {}
+
+    expiration {
+      days = 30
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+}
+
+# A bucket name is not a secret, so unlike the passwords this is a Terraform
+# resource: its value in state is harmless, and the name stays in step with
+# the bucket.
+resource "aws_ssm_parameter" "backup_bucket" {
+  name  = "${local.ssm_prefix}/backup_bucket"
+  type  = "String"
+  value = aws_s3_bucket.backups.id
+}

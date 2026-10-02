@@ -97,7 +97,7 @@ resource "aws_lb_listener_rule" "app" {
 
   condition {
     host_header {
-      values = [each.value.domain]
+      values = concat([each.value.domain], each.value.aliases)
     }
   }
 }
