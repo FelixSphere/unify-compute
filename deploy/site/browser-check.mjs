@@ -62,11 +62,14 @@ const ok = (msg) => console.log(`ok   ${msg}`);
 const check = (cond, good, bad) => (cond ? ok(good) : fail(bad));
 
 const exited = new Promise((resolve) => chrome.once('exit', resolve));
-// Chrome keeps writing its profile until it has exited.
 const cleanup = async () => {
   chrome.kill();
   await exited;
-  rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
+  // Chrome's helper processes can still be writing the profile after the
+  // browser process exits. It is a temp dir; leaving it must not fail the run.
+  try {
+    rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  } catch {}
 };
 const watchdog = setTimeout(async () => {
   console.log('FAIL timed out after 90s');
