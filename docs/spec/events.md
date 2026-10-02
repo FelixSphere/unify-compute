@@ -201,8 +201,11 @@ not by arrival.
 
 `compute-api/internal/store/migrations/0003_events.sql`:
 
-- `job_events` — `id`, `seq` (identity, the order key), `job_id` →
-  `jobs` (cascade), `type`, `data`, `created_at`; `UPDATE` refused by trigger.
+- `job_events` — `id`, `seq` (identity, the order key), `job_id`, `type`,
+  `data`, `created_at`; `UPDATE` refused by trigger. `job_id` has no foreign
+  key: `AppendEvent` checks the job in the same statement, and the existing
+  `TestMigrateConcurrent` drops and recreates `jobs`, which a referencing
+  table would block. The migration is re-runnable for the same reason.
 - `webhooks` — `id`, `owner`, `token_id` (null = owner-wide), `url`,
   `secret`, `event_types`, `created_at`.
 - `webhook_deliveries` — one row per (event, webhook): `status`
