@@ -328,15 +328,30 @@ type launchResult struct {
 
 func (b *Backend) stepUp(ctx context.Context, a *attempt) error {
 	now := b.now()
-	if deadline := a.upAt.Add(time.Duration(a.job.Spec.MaxRuntimeSeconds) * time.Second); !now.Before(deadline) {
-		// B16: billed to exactly max_runtime_seconds, however late the poll.
-		b.end(ctx, a, EndMaxRuntime, deadline, store.StatusFailed,
-			&Failure{Code: CodeMaxRuntimeExceeded, Message: fmt.Sprintf("the job ran for its max_runtime_seconds (%d)", a.job.Spec.MaxRuntimeSeconds)})
-		return nil
+	deadline := a.upAt.Add(time.Duration(a.job.Spec.MaxRuntimeSeconds) * time.Second)
+	// finish ends the attempt at `at`, unless the cap came first: then it is
+	// max_runtime at exactly the cap (B16), however late this observation.
+	// The cap is checked against when things happened, not when we looked,
+	// so a job that exited before its cap but was observed after it still
+	// succeeds.
+	finish := func(reason EndReason, at time.Time, status store.Status, f *Failure) {
+		if at.After(deadline) {
+			reason, at, status = EndMaxRuntime, deadline, store.StatusFailed
+			f = &Failure{Code: CodeMaxRuntimeExceeded, Message: fmt.Sprintf("the job ran for its max_runtime_seconds (%d)", a.job.Spec.MaxRuntimeSeconds)}
+		}
+		b.end(ctx, a, reason, at, status, f)
 	}
+	pastCap := func(err error) error {
+		if !now.Before(deadline) {
+			finish(EndMaxRuntime, now, store.StatusFailed, nil)
+			return nil
+		}
+		return err
+	}
+
 	rec, present, err := b.cluster(ctx, a)
 	if err != nil {
-		return err
+		return pastCap(err)
 	}
 	if !present || rec.Status != ClusterUp {
 		// metering.md end rule 4 / I3: the end is the last observation of
@@ -346,7 +361,7 @@ func (b *Backend) stepUp(ctx context.Context, a *attempt) error {
 		if a.job.SKU.Interruptible {
 			reason, code, msg = EndPreempted, CodePreempted, "the spot instance was preempted"
 		}
-		b.end(ctx, a, reason, a.lastUpAt, store.StatusInterrupted, &Failure{Code: code, Message: msg, Retryable: true})
+		finish(reason, a.lastUpAt, store.StatusInterrupted, &Failure{Code: code, Message: msg, Retryable: true})
 		return nil
 	}
 	a.lastUpAt = now
@@ -354,14 +369,14 @@ func (b *Backend) stepUp(ctx context.Context, a *attempt) error {
 	if !a.launchDone {
 		ri, err := b.api.RequestState(ctx, a.launchReq)
 		if err != nil {
-			return err
+			return pastCap(err)
 		}
 		a.launchFinished = ri.Status.Finished()
 		switch ri.Status {
 		case RequestSucceeded:
 			var lr launchResult
 			if err := b.api.Get(ctx, a.launchReq, &lr); err != nil {
-				return err
+				return pastCap(err)
 			}
 			a.skyJobID, a.launchDone = lr.JobID, true
 		case RequestFailed, RequestCancelled:
@@ -369,33 +384,35 @@ func (b *Backend) stepUp(ctx context.Context, a *attempt) error {
 			// (a customer bucket we cannot read) or runtime setup. The
 			// GPU was the customer's from UP, so this is billed (B7).
 			f := classifyLaunchError(b.api.Get(ctx, a.launchReq, nil), a.job.SKU.Interruptible)
-			b.end(ctx, a, EndExited, now, store.StatusFailed, f)
+			finish(EndExited, now, store.StatusFailed, f)
 			return nil
 		}
 	}
 
 	jobs, err := b.api.Queue(ctx, a.cluster)
 	if err != nil {
-		return err
+		return pastCap(err)
 	}
-	j, ok := pickJob(jobs, a.skyJobID)
-	if !ok {
-		return nil
-	}
-	if !a.started && j.StartAt != nil {
-		a.started = true
-		a.push(Event{Kind: EventJobStarted, At: unixFloat(*j.StartAt), ObservedAt: now}, nil)
-	}
-	if j.Status.Terminal() {
-		reason, status, f := jobOutcome(j.Status)
-		at := now
-		if j.EndAt != nil {
-			at = unixFloat(*j.EndAt)
+	if j, ok := pickJob(jobs, a.skyJobID); ok {
+		if !a.started && j.StartAt != nil {
+			a.started = true
+			a.push(Event{Kind: EventJobStarted, At: unixFloat(*j.StartAt), ObservedAt: now}, nil)
 		}
-		if at.Before(a.upAt) {
-			at = a.upAt
+		if j.Status.Terminal() {
+			reason, status, f := jobOutcome(j.Status)
+			at := now
+			if j.EndAt != nil {
+				at = unixFloat(*j.EndAt)
+			}
+			if at.Before(a.upAt) {
+				at = a.upAt
+			}
+			finish(reason, at, status, f)
+			return nil
 		}
-		b.end(ctx, a, reason, at, status, f)
+	}
+	if !now.Before(deadline) {
+		finish(EndMaxRuntime, now, store.StatusFailed, nil)
 	}
 	return nil
 }
@@ -426,6 +443,13 @@ func pickJob(jobs []ClusterJob, id *int) (ClusterJob, bool) {
 func (b *Backend) end(ctx context.Context, a *attempt, reason EndReason, at time.Time, status store.Status, f *Failure) {
 	if a.ended != nil {
 		return
+	}
+	if a.launchReq == "" {
+		// The /launch answer was never seen. If the POST did reach the
+		// server, that launch is running unowned; find it so it is stopped.
+		if info, found, err := b.api.LaunchRequestFor(ctx, a.cluster); err == nil && found && !info.Status.Finished() {
+			a.launchReq = info.ID
+		}
 	}
 	if a.launchReq != "" && !a.launchFinished {
 		// Still provisioning or setting up: stop it before tearing down,
@@ -556,7 +580,15 @@ func (b *Backend) Status(jobID string) (Snapshot, error) {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	s := Snapshot{JobID: a.job.ID, Attempt: a.job.Attempt, Cluster: a.cluster, Phase: phaseNames[a.phase], Placement: a.placement, Ended: a.ended, Pending: len(a.outbox)}
+	s := Snapshot{JobID: a.job.ID, Attempt: a.job.Attempt, Cluster: a.cluster, Phase: phaseNames[a.phase], Pending: len(a.outbox)}
+	if a.placement != nil {
+		p := *a.placement
+		s.Placement = &p
+	}
+	if a.ended != nil {
+		e := *a.ended
+		s.Ended = &e
+	}
 	if !a.upAt.IsZero() {
 		up := a.upAt
 		s.UpAt = &up

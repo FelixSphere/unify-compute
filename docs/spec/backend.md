@@ -210,8 +210,11 @@ replaces it. A terminal job refuses it (`store.ErrTerminal`).
 ## Max runtime
 
 compute-api enforces it: on the first step at or after
-`UpAt + max_runtime_seconds` the attempt ends (billed to exactly the cap) and
-is torn down. The task carries no in-cluster timeout, because a `timeout`
+`UpAt + max_runtime_seconds` the attempt ends, billed to exactly the cap, and
+is torn down. The cap is judged on when things *happened*, not when they were
+observed. A job that exited before its cap but was seen after it still
+succeeds. An exit, preemption or failure whose time falls after the cap
+becomes `max_runtime` at the cap. The task carries no in-cluster timeout, because a `timeout`
 wrapper would depend on coreutils being in the customer's image. Open
 question 3 covers the case where compute-api is not running.
 

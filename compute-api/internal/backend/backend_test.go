@@ -615,3 +615,78 @@ func TestRunStepsUntilCancelled(t *testing.T) {
 	<-done
 	h.wantStatus(store.StatusFailed, CodeCapacityExhausted)
 }
+
+// A job that exited before its cap but was observed after it (compute-api
+// was down, or the poll was late) succeeded; the cap is judged on when
+// things happened.
+func TestExitBeforeCapObservedAfterCapStillSucceeds(t *testing.T) {
+	h := newHarness(t, func(j *Job) { j.Spec.MaxRuntimeSeconds = 600 })
+	h.launch()
+	upAt := h.up()
+	exit := upAt.Add(9 * time.Minute)
+	h.fake.SetJob(h.name, "SUCCEEDED", &upAt, &exit)
+	h.clock.advance(20 * time.Minute)
+	h.step()
+	h.wantStatus(store.StatusSucceeded, "")
+	if end, _ := h.sink.last(EventEnded); end.Reason != EndExited || !end.At.Equal(exit) {
+		t.Fatalf("%+v", end)
+	}
+}
+
+func TestExitAfterCapIsBilledToTheCap(t *testing.T) {
+	h := newHarness(t, func(j *Job) { j.Spec.MaxRuntimeSeconds = 600 })
+	h.launch()
+	upAt := h.up()
+	exit := upAt.Add(11 * time.Minute)
+	h.fake.SetJob(h.name, "SUCCEEDED", &upAt, &exit)
+	h.clock.advance(20 * time.Minute)
+	h.step()
+	h.wantStatus(store.StatusFailed, CodeMaxRuntimeExceeded)
+	if end, _ := h.sink.last(EventEnded); end.Reason != EndMaxRuntime || !end.At.Equal(upAt.Add(600*time.Second)) {
+		t.Fatalf("%+v", end)
+	}
+}
+
+func TestPreemptionAfterCapIsMaxRuntime(t *testing.T) {
+	h := newHarness(t, func(j *Job) {
+		j.SKU.Interruptible = true
+		j.Spec.MaxRuntimeSeconds = 60
+	})
+	h.launch()
+	upAt := h.up()
+	h.fake.SetJob(h.name, "RUNNING", nil, nil)
+	h.clock.advance(2 * time.Minute)
+	h.fake.Vanish(h.name)
+	h.step()
+	// Last observed UP was at upAt (< cap), so the preemption came first.
+	h.wantStatus(store.StatusInterrupted, CodePreempted)
+	if end, _ := h.sink.last(EventEnded); !end.At.Equal(upAt) {
+		t.Fatalf("%+v", end)
+	}
+}
+
+// If the /launch POST reached the server but its answer was lost, and the
+// adopt lookup failed too, a cancel must still find and stop that launch.
+func TestCancelStopsALaunchWhoseAnswerWasLost(t *testing.T) {
+	h := newHarness(t)
+	task, _ := TaskFor(h.job, TaskOptions{})
+	c := &Client{BaseURL: h.fake.URL, Token: "sky_test_token", UserHash: "unifycmp"}
+	if _, err := c.Launch(context.Background(), h.name, task); err != nil {
+		t.Fatal(err)
+	}
+	h.fake.FailNext("/api/status", http.StatusBadGateway)
+	h.launch() // adopt lookup fails: attempt stays in submit, launch unknown
+	if s, _ := h.b.Status(h.job.ID); s.Phase != "submit" {
+		t.Fatalf("phase %s", s.Phase)
+	}
+	if err := h.b.Cancel(context.Background(), h.job.ID, h.clock.now()); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.fake.LaunchStatus(h.name); got != "CANCELLED" {
+		t.Fatalf("unowned launch left %s", got)
+	}
+	if n := len(h.fake.Launches()); n != 1 {
+		t.Fatalf("%d launches", n)
+	}
+	h.wantStatus(store.StatusCancelled, "")
+}
