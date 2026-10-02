@@ -82,6 +82,10 @@ job state, idempotency, metering and the SkyPilot integration do not.
 - Metering: per-job GPU seconds from SkyPilot's cluster lifecycle events,
   written to an append-only usage ledger before being settled to the console.
 - Talking to SkyPilot: launch, status, logs, down.
+- The upstream registry: which clouds this deployment may launch into, and
+  the SKU → provider placement that turns a job into a SkyPilot `resources`
+  block ([ADR-0006](adr/0006-upstreams-are-skypilot-clouds.md),
+  [`spec/upstreams.md`](spec/upstreams.md)).
 
 ## What compute-api does not own
 
@@ -152,6 +156,8 @@ incident, it is a production one.
    daily per account.
 3. **First SKU and first provider.** One GPU type on one cloud, per the
    research note's suggestion. Which one decides the first SkyPilot config.
+   Answered by [ADR-0006](adr/0006-upstreams-are-skypilot-clouds.md):
+   `a10g-24gb-x1` on AWS; a neocloud second, for the price delta.
 4. **Where job results live.** Object storage in our account with signed URLs,
    or the customer's bucket. Affects egress cost and data-residency story.
    ADR-0005 (Proposed, in the finetune worktree, not on `main`) proposes our
