@@ -32,7 +32,7 @@ account. Two consequences:
   released with compute-api through `release.yml`. Until production exists
   and `compute.unifyai.us` is cut over, Sites is what customers see, and
   content changes ship through the Sites project.
-- **Staging:** defined in `deploy/aws/staging/`, target hostnames
+- **Staging:** defined in `deploy/aws/envs/staging/` (module `deploy/aws/modules/compute-stack/`; production in `deploy/aws/envs/production/`, deploy roles in `deploy/aws/shared/github-oidc/`), target hostnames
   `staging.compute.unifyai.us` (compute-api) and
   `console.staging.compute.unifyai.us` (a staging console with its own empty
   database). **Not applied yet.** No instance, no DNS, no certificate exist.
@@ -48,7 +48,7 @@ account. Two consequences:
   (`CONSOLE_IMAGE` in `deploy/compose/.env.example`), with a separate database.
   Never point staging compute at the production console.
 - **State:** Terraform state for staging lives in S3 with native locking
-  (`deploy/aws/staging/backend.tf`), key `unify-compute/staging/terraform.tfstate`.
+  (`deploy/aws/envs/staging/backend.tf`), key `unify-compute/staging/terraform.tfstate`.
   The bucket is **not bootstrapped yet** — run `scripts/tf-backend-bootstrap.sh`
   before the first `terraform init`, or `init` fails. `use_lockfile` needs
   Terraform >= 1.10. State must still never be committed; `ci.yml` rejects
@@ -68,7 +68,7 @@ account. Two consequences:
    it. The script generates hex and verifies what it wrote; user-data now
    rejects a non-URL-safe value at boot. The console bridge secret must be the
    same value on the console side and the compute-api side.
-3. `terraform init && terraform plan` in `deploy/aws/staging/`. Read the plan.
+3. `terraform init && terraform plan` in `deploy/aws/envs/staging/` (after `deploy/aws/shared/github-oidc/`). Read the plan.
    Expect: one VPC, two subnets, one ALB with two listener rules, one ACM
    certificate, three Route53 records, one t4g.small, one EBS data volume.
 4. `terraform apply`. Then `make smoke BASE_URL=https://staging.compute.unifyai.us`

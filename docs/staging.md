@@ -292,7 +292,7 @@ Assumptions this pipeline makes; a mismatch is a variable at the top of
 | Where | What |
 |---|---|
 | GitHub environments `staging`, `production` | secret `AWS_DEPLOY_ROLE_ARN`; variables `PUBLIC_ORIGIN` (the origin smoke probes), `AWS_REGION` (default `us-east-1`); production also `DNS_CUTOVER` (`done` after the cutover) and optionally `ALB_DNS_NAME`. Production restricted to `main` with required reviewers |
-| Deploy role | trusts `token.actions.githubusercontent.com` with `sub` = `repo:FelixSphere/unify-compute:environment:<env>`; may `ec2:DescribeInstances`, `ssm:SendCommand` on `AWS-RunShellScript` and on instances tagged for its env only, `ssm:GetCommandInvocation` |
+| Deploy role | trusts `token.actions.githubusercontent.com` with `sub` = `repo:FelixSphere@164092079/unify-compute@1364156790:environment:<env>` (this repo issues immutable OIDC subjects; see ADR-0009); may `ec2:DescribeInstances`, `ssm:SendCommand` on `AWS-RunShellScript` and on instances tagged for its env only, `ssm:GetCommandInvocation` |
 | Instance | tag `Name=unify-compute-<env>`; SSM agent; `docker compose`, `flock`, `aws`, `curl` |
 | Compose | `/opt/unify-compute/compose/docker-compose.yml` and `.env`, with the systemd unit's `WorkingDirectory` set to that directory; services `compute-api` (port 8080 on the host), `site`, `postgres` (user `unify`); the image keys `COMPUTE_API_IMAGE` and `SITE_IMAGE` |
 | Data volume | mounted at `/data`; `/data/releases` and `/data/backups` are created on first use |
