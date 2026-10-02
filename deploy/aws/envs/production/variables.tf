@@ -23,12 +23,12 @@ variable "manage_site_dns" {
 
 variable "compute_api_image" {
   type    = string
-  default = "871376691052.dkr.ecr.us-east-1.amazonaws.com/unify-compute-api@sha256:10cf58392547078e2134f5ff0e1a0c9b0416ca7e186746f07e243697ed58ce4a"
+  default = "871376691052.dkr.ecr.us-east-1.amazonaws.com/unify-compute-api@sha256:ec4bd964372acf9724365273204c556414a3090ee68035037b0c41b21e7d9902"
 }
 
 variable "site_image" {
   type    = string
-  default = "871376691052.dkr.ecr.us-east-1.amazonaws.com/unify-compute-site@sha256:a918fe89b1cc2227ad486ef9391526529c90aa770fb0d2b4f0526ed5d6b84c0a"
+  default = "871376691052.dkr.ecr.us-east-1.amazonaws.com/unify-compute-site@sha256:cd7077d3462abe68b17d33b39437e34121f3a2d7333aee04b9844f854f9bd018"
 }
 
 variable "ami_id" {

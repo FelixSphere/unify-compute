@@ -1,8 +1,7 @@
 # Release records
 
 One file per release, rollback or failed attempt that touched a host, named
-`YYYY-MM-DD-<name>.md` (lowercase, digits, hyphens). **No release has happened
-yet; this directory holds only this README.**
+`YYYY-MM-DD-<name>.md` (lowercase, digits, hyphens).
 
 A pushed commit is not a release, and neither is a green run until someone
 has written down what it shipped and what was checked. The procedure that
