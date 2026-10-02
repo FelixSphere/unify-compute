@@ -1,5 +1,5 @@
 /* UnifyAI · canonical design tokens · v1.1 (2026-10-01) · v1.1 adds --u-muted-on-dark
- * ONE file for all five products (UnifyAPI, Unify Gateway, unify-compute, UnifyData, UnifySelfAI).
+ * ONE file for all five products (UnifyAI API, Gateway, Compute, Data, SelfAI).
  * Copy it verbatim into your repo. Do not edit values locally; changes go through ~/unifyai-brand-kit.
  * Derived from the logo package's design-tokens.css, with two accessibility fixes:
  *   - --button-fg is INK (white on amber fails contrast, ~2:1)
