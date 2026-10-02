@@ -1,0 +1,62 @@
+/* UnifyAI · canonical design tokens · v1 (2026-10-01)
+ * ONE file for all five products (UnifyAPI, Unify Gateway, unify-compute, UnifyData, UnifySelfAI).
+ * Copy it verbatim into your repo. Do not edit values locally; changes go through ~/unifyai-brand-kit.
+ * Derived from the logo package's design-tokens.css, with two accessibility fixes:
+ *   - --button-fg is INK (white on amber fails contrast, ~2:1)
+ *   - muted TEXT is #6B6B66 (Stone #8B8B86 is 3.3:1 on Paper, so it is used only for rules/disabled)
+ */
+:root {
+  /* 1. Primitive */
+  --u-paper: #FAFAF7;
+  --u-white: #FFFFFF;
+  --u-ink: #0E0E0E;
+  --u-ink-2: #3A3A37;          /* secondary text */
+  --u-muted: #6B6B66;          /* muted text, captions, table headers */
+  --u-stone: #8B8B86;          /* rules on dark, disabled, NEVER body text on paper */
+  --u-slate: #2E3440;          /* heavy surfaces: sidebars on dark, hero panels, secondary buttons */
+  --u-amber-500: #F5A623;      /* the one accent */
+  --u-amber-600: #E5930A;
+  --u-amber-700: #BE7A09;
+  --u-amber-100: #FFF1D6;
+  --u-success: #1E9E63;
+  --u-warning: #E0A100;
+  --u-danger:  #D92D20;
+  --u-info:    #2B4BFF;
+
+  --u-font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;  /* 700 for headings, 500 for product descriptor */
+  --u-font-body: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif;  /* 400 / 500 / 600 */
+  --u-font-mono: 'IBM Plex Mono', ui-monospace, Menlo, Consolas, monospace; /* 400 / 500 */
+
+  --u-radius: 6px;             /* everything: buttons, inputs, cards, tables, code */
+  --u-radius-pill: 999px;      /* filter chips and avatars only */
+  --u-rule: 1px solid color-mix(in srgb, var(--u-ink) 12%, transparent);
+  --u-space: 4px;              /* spacing scale = multiples of 4: 4 8 12 16 20 24 32 40 48 64 */
+
+  /* type scale (px / line-height) */
+  --u-text-xs: 12px;  --u-text-sm: 14px;  --u-text-md: 16px;  --u-text-lg: 18px;
+  --u-h3: 18px; --u-h2: 24px; --u-h1: 40px; --u-display: 56px; --u-metric: 64px;
+
+  /* 2. Semantic */
+  --u-bg: var(--u-paper);
+  --u-surface: var(--u-white);
+  --u-text: var(--u-ink);
+  --u-text-2: var(--u-ink-2);
+  --u-text-muted: var(--u-muted);
+  --u-border: color-mix(in srgb, var(--u-ink) 12%, transparent);
+  --u-accent: var(--u-amber-500);
+  --u-accent-hover: var(--u-amber-600);
+  --u-accent-active: var(--u-amber-700);
+  --u-accent-tint: var(--u-amber-100);
+  --u-focus: 0 0 0 2px var(--u-paper), 0 0 0 4px var(--u-amber-500); /* focus ring, the only "shadow" allowed */
+
+  /* 3. Component */
+  --u-btn-primary-bg: var(--u-accent);      --u-btn-primary-fg: var(--u-ink);
+  --u-btn-secondary-bg: var(--u-slate);     --u-btn-secondary-fg: var(--u-paper);
+  --u-btn-ghost-bg: var(--u-white);         --u-btn-ghost-fg: var(--u-ink);  --u-btn-ghost-border: color-mix(in srgb, var(--u-ink) 20%, transparent);
+  --u-btn-height: 44px;
+  --u-input-bg: var(--u-white); --u-input-border: var(--u-border); --u-input-border-focus: var(--u-accent);
+  --u-nav-active-bg: var(--u-ink); --u-nav-active-fg: var(--u-paper);
+  --u-badge-bg: var(--u-accent-tint); --u-badge-fg: #8A5806;
+  --u-code-bg: var(--u-ink); --u-code-fg: #F2F2F0;
+  --u-header-height: 64px; --u-sidebar-width: 216px;
+}

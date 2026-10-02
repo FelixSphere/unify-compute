@@ -1,26 +1,15 @@
 import type { Metadata } from 'next';
-import { IBM_Plex_Mono, Instrument_Sans, Space_Grotesk } from 'next/font/google';
+import '@fontsource/space-grotesk/500.css';
+import '@fontsource/space-grotesk/700.css';
+import '@fontsource/instrument-sans/400.css';
+import '@fontsource/instrument-sans/500.css';
+import '@fontsource/instrument-sans/600.css';
+import '@fontsource/ibm-plex-mono/400.css';
+import '@fontsource/ibm-plex-mono/500.css';
 import { CookieNotice } from './cookie-notice';
 import './globals.css';
 
 const HUBSPOT_PORTAL_ID = '46127314';
-
-const spaceGrotesk = Space_Grotesk({
-  variable: '--font-space-grotesk',
-  weight: '700',
-  subsets: ['latin'],
-});
-
-const instrumentSans = Instrument_Sans({
-  variable: '--font-instrument-sans',
-  subsets: ['latin'],
-});
-
-const plexMono = IBM_Plex_Mono({
-  variable: '--font-plex-mono',
-  weight: ['400', '500'],
-  subsets: ['latin'],
-});
 
 const title = 'unifyAI — On-demand inference & GPU compute';
 const description =
@@ -41,6 +30,7 @@ export const metadata: Metadata = {
     shortcut: '/favicon.ico?v=3',
     apple: [{ url: '/apple-touch-icon.png?v=3', sizes: '180x180', type: 'image/png' }],
   },
+  manifest: '/manifest-v3.webmanifest',
   title,
   description,
   openGraph: { title, description, url: '/', type: 'website', images: [ogImage] },
@@ -54,9 +44,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body
-        className={`${spaceGrotesk.variable} ${instrumentSans.variable} ${plexMono.variable} antialiased`}
-      >
+      <body className="antialiased">
         {children}
         <CookieNotice />
         <script

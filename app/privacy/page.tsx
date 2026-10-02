@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { BrandLockup } from '../brand-lockup';
+import { BrandLockup, CompanyLine } from '../brand';
 
 export const metadata: Metadata = {
   title: 'Privacy Policy — unifyAI',
@@ -17,9 +17,13 @@ export default function PrivacyPolicy() {
         Skip to content
       </a>
       <header className="nav wrap">
-        <Link href="/" className="brand" aria-label="UnifyAI home">
-          <BrandLockup />
-        </Link>
+        <div className="brand-group">
+          <Link href="/" className="brand" aria-label="UnifyAI home">
+            <BrandLockup />
+          </Link>
+          <span className="product-divider" aria-hidden="true" />
+          <span className="product-name">Compute</span>
+        </div>
       </header>
       <article className="legal wrap" id="policy">
         <h1>Privacy Policy</h1>
@@ -839,7 +843,7 @@ export default function PrivacyPolicy() {
         <Link href="/privacy" className="footer-privacy" aria-current="page">
           Privacy
         </Link>
-        <span className="copyright">© {new Date().getFullYear()} unifyAI</span>
+        <CompanyLine />
       </footer>
     </main>
   );

@@ -84,9 +84,9 @@ export function CookieNotice() {
       // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role
       role="dialog"
       aria-label="Cookie notice"
-      className="fixed bottom-24 left-4 right-4 z-50 max-w-[480px] rounded-lg bg-secondary p-5 text-secondary-foreground sm:bottom-6 sm:left-6 sm:right-auto"
+      className="fixed bottom-24 left-4 right-4 z-50 max-w-[480px] rounded-lg bg-(--u-btn-secondary-bg) p-5 text-(--u-btn-secondary-fg) sm:bottom-6 sm:left-6 sm:right-auto"
     >
-      <p className="m-0 font-mono text-[11px] uppercase tracking-[0.14em] text-(--panel-muted)">
+      <p className="m-0 font-mono text-[11px] uppercase tracking-[0.14em] text-(--u-btn-secondary-fg)">
         Cookie notice
       </p>
       <p className="m-0 mt-3 text-[14px] leading-[1.55]">
@@ -101,17 +101,18 @@ export function CookieNotice() {
         .
       </p>
       <div className="mt-4 flex gap-2">
+        {/* Equal weight on purpose: rejecting must be as easy as accepting, and UI-STANDARD allows one primary per view (the page has it). */}
         <button
           type="button"
           onClick={reject}
-          className="h-9 flex-1 cursor-pointer rounded-lg border border-(--panel-rule) bg-transparent text-[14px] font-medium text-inherit hover:bg-foreground"
+          className="h-(--u-btn-height) flex-1 cursor-pointer rounded-lg border border-(--u-btn-ghost-border) bg-(--u-btn-ghost-bg) text-[15px] font-semibold text-(--u-btn-ghost-fg) hover:bg-(--u-paper)"
         >
           Reject cookies
         </button>
         <button
           type="button"
           onClick={accept}
-          className="h-9 flex-1 cursor-pointer rounded-lg border-0 bg-primary text-[14px] font-semibold text-primary-foreground hover:bg-(--button-bg-hover)"
+          className="h-(--u-btn-height) flex-1 cursor-pointer rounded-lg border border-(--u-btn-ghost-border) bg-(--u-btn-ghost-bg) text-[15px] font-semibold text-(--u-btn-ghost-fg) hover:bg-(--u-paper)"
         >
           Accept all
         </button>
