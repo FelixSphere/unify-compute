@@ -23,7 +23,7 @@ This repository holds three things, and they have different rules:
 
 | Path | What it is | Rules |
 |---|---|---|
-| `app/`, `components/`, `public/` | Marketing site at **compute.unifyai.us** (vinext static export; still served by OpenAI Sites via `.openai/hosting.json` until the DNS cutover to the `deploy/site/` container on AWS) | Site conventions below |
+| `app/`, `components/`, `public/` | Marketing site at **compute.unifyai.us** (vinext static export, served by the `deploy/site/` container on AWS production since 2026-10-02; `.openai/hosting.json` stays as the DNS rollback target) | Site conventions below |
 | `compute-api/` | The compute service: authenticated job API in front of SkyPilot, billed through UnifyAPI | Go, stdlib-only so far, permissive licences only |
 | `deploy/`, `docs/` | Compose profile, AWS staging stack, ADRs and specs | Terraform validated in CI, never applied by CI |
 
@@ -48,8 +48,8 @@ This repository holds three things, and they have different rules:
 
 Current status (say what exists rather than describing targets as shipped):
 
-- The marketing site is live on OpenAI Sites. Staging exists on AWS but
-  **does not serve yet** (see below). Production is not applied.
+- The marketing site is live at https://compute.unifyai.us on AWS
+  production. Staging and production both run (see below).
 - `compute-api/` is a skeleton: health, SKU catalogue, and the job API routes
   with the contract from `docs/spec/job-api.md`. Job submission returns
   `501 not_implemented` until the SkyPilot backend and the console bridge land.
@@ -61,16 +61,16 @@ Current status (say what exists rather than describing targets as shipped):
   registry (ECR) in `deploy/aws/shared/ecr/`. Moving the site and
   everything else onto it is
   [ADR-0009](docs/adr/0009-host-everything-on-aws.md), **Proposed**.
-  Applied on 2026-10-02: the OIDC roles, and staging (49 resources; instance
-  `i-0780af3b0bfdc3383`, records `staging`, `site.staging`, `console.staging`
-  `.compute.unifyai.us`). Staging's first boot **could not pull our images**
-  (private GHCR, `unauthorized`), so every staging hostname answers 502. The
-  code now has hosts pull from ECR with their instance role, `release.yml`
-  copying each digest GHCR → ECR first (ADR-0009, "Runtime registry: ECR").
-  That takes effect only once `shared/ecr`, the OIDC roles and the staging
-  module are applied and a staging release has run; until then staging is
-  still down. Production is not applied, and `compute.unifyai.us` is still
-  OpenAI Sites.
+  Applied on 2026-10-02: `shared/ecr`, `shared/github-oidc`, staging (VPC
+  10.72/16, instance `i-06125c23285803d7a`) and production (VPC 10.71/16,
+  instance `i-07dd2f6d313a0dafd`). Both run compute-api and the site at
+  `ec4bd964…`/`cd7077d3…` (built from a8562dd; records in
+  `deploy/releases/`). Staging also runs its own console. Production's
+  compute-api is dark: no bridge secret and no `CONSOLE_URL`, and job
+  submission returns 501 there as everywhere. `compute.unifyai.us` was cut over
+  from OpenAI Sites to production's ALB on 2026-10-02 (Route53 change
+  `C07235422LT740FCOOAEW`). The Sites project and its two TXT records remain
+  as the rollback path.
 
 ## Licence boundary — the expensive mistake
 

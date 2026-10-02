@@ -4,18 +4,18 @@ On-demand inference and GPU compute for everything beyond chat: batch
 processing, embeddings, document pipelines, fine-tuning. Consumption billing,
 through the customer's existing UnifyAPI account.
 
-> **Status:** the marketing site at https://compute.unifyai.us is live. The
-> compute service is a skeleton, the console bridge is a spec, and the staging
-> stack is defined but not applied. `docs/architecture.md` says what exists.
+> **Status:** the marketing site at https://compute.unifyai.us is live on AWS
+> (production, since 2026-10-02). The compute service is a skeleton, and it
+> runs on staging and, dark, on production. The console bridge is a spec. `docs/architecture.md` says what exists.
 
 ## What is here
 
 | Path | |
 |---|---|
-| `app/` | Marketing site (vinext static export). Live on OpenAI Sites until the DNS cutover; the AWS `site` image is `deploy/site/` |
+| `app/` | Marketing site (vinext static export). Served on AWS by the `site` image in `deploy/site/` (OpenAI Sites kept as the DNS rollback target) |
 | `compute-api/` | The compute service: job API in front of SkyPilot, billed through UnifyAPI (Go) |
 | `deploy/compose/` | compute-api + site + Postgres; `docker-compose.console.yml` adds console + Redis for staging and local |
-| `deploy/aws/` | Terraform: `modules/compute-stack`, `envs/staging`, `envs/production`, `shared/github-oidc` — not applied ([ADR-0009](docs/adr/0009-host-everything-on-aws.md), proposed) |
+| `deploy/aws/` | Terraform: `modules/compute-stack`, `envs/staging`, `envs/production`, `shared/github-oidc`, `shared/ecr`. All applied 2026-10-02 ([ADR-0009](docs/adr/0009-host-everything-on-aws.md), proposed) |
 | `docs/architecture.md` | One account plane (UnifyAPI), two execution planes (tokens, compute) |
 | `docs/adr/` | Decisions: reuse UnifyAPI accounts, separate proprietary service, SkyPilot, staging shape, upstreams |
 | `docs/spec/job-api.md` | The customer-facing job API contract |
