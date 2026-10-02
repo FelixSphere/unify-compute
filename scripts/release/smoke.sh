@@ -2,7 +2,13 @@
 # Probes one environment from OUTSIDE after a cutover, the way a customer
 # reaches it. Exit status is the verdict.
 #
-#   ORIGIN=https://staging.compute.unifyai.us scripts/release/smoke.sh
+#   API_ORIGIN=https://staging.compute.unifyai.us \
+#   ORIGIN=https://site.staging.compute.unifyai.us scripts/release/smoke.sh
+#
+# Two origins because the ALB routes by Host: the API name reaches only
+# compute-api, the site names reach only the site container (whose /healthz is
+# Caddy's own "ok"). Probing both apps on one origin fails half the probes on
+# either name. API_ORIGIN defaults to ORIGIN for a host that serves both.
 #
 # Optional:
 #   EXPECT_BUILD=<commit>   /healthz must report this build. This is what
@@ -19,8 +25,10 @@
 # lesson). Read-only throughout: nothing here creates a job.
 set -euo pipefail
 
-ORIGIN="${ORIGIN:?set ORIGIN, e.g. https://staging.compute.unifyai.us}"
+ORIGIN="${ORIGIN:?set ORIGIN (the site), e.g. https://site.staging.compute.unifyai.us}"
 ORIGIN="${ORIGIN%/}"
+API_ORIGIN="${API_ORIGIN:-$ORIGIN}"
+API_ORIGIN="${API_ORIGIN%/}"
 EXPECT_BUILD="${EXPECT_BUILD:-}"
 WAIT_SECONDS="${WAIT_SECONDS:-150}"
 ICON_PATH="${ICON_PATH:-/icon-v3.svg}"
@@ -33,7 +41,7 @@ body="$(mktemp)"; headers="$(mktemp)"
 trap 'rm -f "$body" "$headers"' EXIT
 
 ok()  { printf 'ok   %s\n' "$*"; }
-bad() { printf 'FAIL %s\n' "$*"; echo "::error::smoke $ORIGIN: $*"; fail=1; }
+bad() { printf 'FAIL %s\n' "$*"; echo "::error::smoke $API_ORIGIN $ORIGIN: $*"; fail=1; }
 
 # Fetch into $body / $headers; print the status code.
 get() {
@@ -52,21 +60,21 @@ expect_body() {
 
 header() { grep -i "^$1:" "$headers" | tail -n 1 | cut -d: -f2- | tr -d '\r' | sed 's/^ *//'; }
 
-echo "--- waiting up to ${WAIT_SECONDS}s for $ORIGIN/healthz"
+echo "--- waiting up to ${WAIT_SECONDS}s for $API_ORIGIN/healthz and $ORIGIN/healthz"
 deadline=$(( $(date +%s) + WAIT_SECONDS ))
-until [ "$(get "$ORIGIN/healthz")" = 200 ]; do
+until [ "$(get "$API_ORIGIN/healthz")" = 200 ] && [ "$(get "$ORIGIN/healthz")" = 200 ]; do
   [ "$(date +%s)" -lt "$deadline" ] || break
   sleep 5
 done
 
-echo "--- compute-api"
-expect_code "GET /healthz" 200 "$(get "$ORIGIN/healthz")"
+echo "--- compute-api at $API_ORIGIN"
+expect_code "GET /healthz" 200 "$(get "$API_ORIGIN/healthz")"
 expect_body "healthz names compute-api" '"service":"compute-api"'
 if [ -n "$EXPECT_BUILD" ]; then
   expect_body "healthz reports build $EXPECT_BUILD" "\"build\":\"$EXPECT_BUILD\""
 fi
 
-expect_code "GET /compute/v1/skus" 200 "$(get "$ORIGIN/compute/v1/skus")"
+expect_code "GET /compute/v1/skus" 200 "$(get "$API_ORIGIN/compute/v1/skus")"
 ctype="$(header content-type)"
 case "$ctype" in
   application/json*) ok "skus is JSON ($ctype)" ;;
@@ -75,12 +83,12 @@ esac
 if jq -e '.data | length > 0' "$body" >/dev/null 2>&1; then ok "skus lists at least one SKU"; else bad "skus has no .data entries"; fi
 expect_body "skus carry a price" '"price_usd_per_hour"'
 
-expect_code "GET /compute/v1/jobs without a key" 401 "$(get "$ORIGIN/compute/v1/jobs")"
+expect_code "GET /compute/v1/jobs without a key" 401 "$(get "$API_ORIGIN/compute/v1/jobs")"
 # The code proves the 401 came from compute-api's own auth, not from a proxy
 # or a default page that happens to say 401.
 expect_body "401 is compute-api's missing_key" '"code":"missing_key"'
 
-echo "--- site"
+echo "--- site at $ORIGIN"
 expect_code "GET /" 200 "$(get "$ORIGIN/")"
 expect_body "/ is the Unify Compute site" '<title>Unify Compute'
 
