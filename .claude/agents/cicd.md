@@ -39,22 +39,30 @@ account. Two consequences:
 - **Staging:** defined in `deploy/aws/envs/staging/` (module `deploy/aws/modules/compute-stack/`; production in `deploy/aws/envs/production/`, deploy roles in `deploy/aws/shared/github-oidc/`), target hostnames
   `staging.compute.unifyai.us` (compute-api) and
   `console.staging.compute.unifyai.us` (a staging console with its own empty
-  database). **Not applied yet.** No instance, no DNS, no certificate exist.
-  First apply is a deliberate act: see "Applying staging for the first time".
+  database), plus `site.staging.compute.unifyai.us`. **Applied 2026-10-02**
+  from main a8562dd: 49 resources, VPC 10.72.0.0/16, instance
+  `i-0780af3b0bfdc3383` (AMI `ami-065b1b834d2a83a7a`, pinned in #29), data
+  volume `vol-05c4fb3b4ce0077fe`, ALB
+  `unify-compute-staging-347679141.us-east-1.elb.amazonaws.com`. **Not
+  serving:** the first `compose up` got `unauthorized` from GHCR (private
+  packages, no pull token in SSM). Edge verified: 301 to https, HSTS once,
+  404 for other hosts, certificate covers all three names.
 - **Production compute API:** does not exist. There is no production stack in
   this repository yet.
 - **Release pipeline:** `.github/workflows/release.yml`, dispatch only.
-  **Written, never run**: no environment exists for it to release to. The
-  first staging release is also its first test; read every step's output.
-  No release records exist yet (`deploy/releases/`).
+  GitHub environments `staging` and `production` exist, both main-only
+  (required reviewers refused on this plan). `mode=status` on staging has run
+  once (run 37050107408: OIDC role, instance lookup, SSM all worked). **No
+  release has run yet**; no release records exist (`deploy/releases/`).
 - **Console:** production `app.unifyapi.ai` belongs to the UnifyAPI CI/CD agent.
   Staging runs its own console container from the same pinned image
   (`CONSOLE_IMAGE` in `deploy/compose/.env.example`), with a separate database.
   Never point staging compute at the production console.
 - **State:** Terraform state for staging lives in S3 with native locking
   (`deploy/aws/envs/staging/backend.tf`), key `unify-compute/staging/terraform.tfstate`.
-  The bucket is **not bootstrapped yet** — run `scripts/tf-backend-bootstrap.sh`
-  before the first `terraform init`, or `init` fails. `use_lockfile` needs
+  The bucket is bootstrapped (2026-10-02) and holds the staging and
+  shared/github-oidc states; `scripts/tf-backend-bootstrap.sh` stays
+  idempotent. `use_lockfile` needs
   Terraform >= 1.10. State must still never be committed; `ci.yml` rejects
   `*.tfstate` files.
 
