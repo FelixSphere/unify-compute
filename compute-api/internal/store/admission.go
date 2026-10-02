@@ -30,9 +30,9 @@ const activeUsageSQL = `
 	GROUP BY sku
 	ORDER BY sku`
 
-// ActiveUsage returns owner's active jobs per SKU. The status predicate
-// matches jobs_active_idx, so the scan is over active jobs only, which the
-// quotas themselves keep small.
+// ActiveUsage returns owner's active jobs per SKU. The status predicate is
+// jobs_active_idx's, so the planner can scan active jobs only, a set the
+// quotas themselves keep small, instead of the owner's whole history.
 func (s *Store) ActiveUsage(ctx context.Context, owner string) ([]SKUUsage, error) {
 	return activeUsage(ctx, s.pool, owner)
 }

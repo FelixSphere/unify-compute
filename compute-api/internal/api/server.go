@@ -4,15 +4,19 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/FelixSphere/unify-compute/compute-api/internal/quota"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/ratelimit"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/sku"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/upstream"
 )
@@ -28,20 +32,36 @@ type Server struct {
 	Catalogue *sku.Catalogue
 	Upstreams *upstream.Registry
 	Log       *slog.Logger
-	mux       *http.ServeMux
+	// Quota, when set, refuses an over-quota submit before anything is held
+	// (docs/spec/quotas.md). It needs the caller's owner, which only the
+	// console bridge's verify can supply, so it stays nil until auth does.
+	Quota *quota.Enforcer
+	mux   *http.ServeMux
+
+	submits *ratelimit.Limiter
+	reads   *ratelimit.Limiter
 }
 
+// Per-key budgets from docs/spec/job-api.md, "Rate limits".
+const (
+	submitBurst  = 60
+	submitWindow = time.Hour
+	readBurst    = 600
+	readWindow   = time.Minute
+)
+
 func New(build string, cat *sku.Catalogue, reg *upstream.Registry, log *slog.Logger) *Server {
-	s := &Server{Build: build, Catalogue: cat, Upstreams: reg, Log: log, mux: http.NewServeMux()}
+	s := &Server{Build: build, Catalogue: cat, Upstreams: reg, Log: log, mux: http.NewServeMux(),
+		submits: ratelimit.New(submitBurst, submitWindow), reads: ratelimit.New(readBurst, readWindow)}
 	s.mux.HandleFunc("GET /healthz", s.health)
 	s.mux.HandleFunc("GET /compute/v1/skus", s.listSKUs)
 	s.mux.HandleFunc("GET /compute/v1/upstreams", s.listUpstreams)
-	s.mux.Handle("POST /compute/v1/jobs", s.auth(http.HandlerFunc(s.submitJob)))
-	s.mux.Handle("GET /compute/v1/jobs", s.auth(s.notImplemented("job listing")))
-	s.mux.Handle("GET /compute/v1/jobs/{id}", s.auth(s.notImplemented("job lookup")))
+	s.mux.Handle("POST /compute/v1/jobs", s.auth(s.limit(s.submits, http.HandlerFunc(s.submitJob))))
+	s.mux.Handle("GET /compute/v1/jobs", s.auth(s.limit(s.reads, s.notImplemented("job listing"))))
+	s.mux.Handle("GET /compute/v1/jobs/{id}", s.auth(s.limit(s.reads, s.notImplemented("job lookup"))))
 	s.mux.Handle("POST /compute/v1/jobs/{id}/cancel", s.auth(s.notImplemented("job cancel")))
-	s.mux.Handle("GET /compute/v1/jobs/{id}/logs", s.auth(s.notImplemented("job logs")))
-	s.mux.Handle("GET /compute/v1/jobs/{id}/artifacts", s.auth(s.notImplemented("job artifacts")))
+	s.mux.Handle("GET /compute/v1/jobs/{id}/logs", s.auth(s.limit(s.reads, s.notImplemented("job logs"))))
+	s.mux.Handle("GET /compute/v1/jobs/{id}/artifacts", s.auth(s.limit(s.reads, s.notImplemented("job artifacts"))))
 	return s
 }
 
@@ -67,6 +87,9 @@ type apiError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 	Param   string `json:"param,omitempty"`
+	// Quotas lists every limit a quota_exceeded submit would exceed, with
+	// usage and headroom, so a client never has to parse the message.
+	Quotas []quota.Violation `json:"quotas,omitempty"`
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -118,11 +141,11 @@ type submitRequest struct {
 	} `json:"spec"`
 }
 
-// submitJob validates everything the catalogue and registry can decide
-// without persistence: the SKU, the customer's provider restriction, the
-// runtime ceiling, and whether this deployment can launch it at all. What
-// survives is what the backend will receive; until it exists the answer is
-// still 501.
+// submitJob validates everything the catalogue and registry can decide: the
+// SKU, the customer's provider restriction, the runtime ceiling, and whether
+// this deployment can launch it at all; then, with Quota set, whether the
+// owner has room for it. What survives is what the backend will receive;
+// until it exists the answer is still 501.
 func (s *Server) submitJob(w http.ResponseWriter, r *http.Request) {
 	var req submitRequest
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody))
@@ -163,16 +186,83 @@ func (s *Server) submitJob(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if s.Quota != nil && !s.checkQuota(w, r, item) {
+		return
+	}
 	s.notImplemented("job submission").ServeHTTP(w, r)
+}
+
+// checkQuota answers 403, not 429, for a submit over quota. 429 means "the
+// same request will succeed if you wait", always comes with Retry-After, and
+// is retried automatically by the OpenAI SDKs our customers already use.
+// None of that holds here: a job larger than the limit never fits, and when
+// a slot frees depends on another job's runtime, which nobody can put in
+// Retry-After. The refusal is a policy decision on the account, which is
+// what 403 says; 429 stays reserved for the per-key rate limits.
+func (s *Server) checkQuota(w http.ResponseWriter, r *http.Request, item sku.SKU) bool {
+	owner := ownerFrom(r.Context())
+	if owner == "" {
+		writeError(w, http.StatusInternalServerError, apiError{Type: "internal_error", Code: "owner_unresolved",
+			Message: "quota enforcement is enabled but the key was not resolved to an account"})
+		return false
+	}
+	err := s.Quota.Check(r.Context(), owner, item)
+	var ex *quota.ExceededError
+	switch {
+	case err == nil:
+		return true
+	case errors.As(err, &ex):
+		writeError(w, http.StatusForbidden, apiError{Type: "quota_exceeded", Code: "quota_exceeded",
+			Message: ex.Error(), Param: "sku", Quotas: ex.Violations})
+	default:
+		s.Log.Error("quota check", "owner", owner, "err", err)
+		writeError(w, http.StatusInternalServerError, apiError{Type: "internal_error", Code: "quota_check_failed",
+			Message: "the quota check could not be completed; nothing was submitted"})
+	}
+	return false
+}
+
+type ctxKey int
+
+const ownerKey ctxKey = 0
+
+// withOwner records the billing identity the caller's key resolved to. Auth
+// sets it once it verifies keys through the console bridge.
+func withOwner(ctx context.Context, owner string) context.Context {
+	return context.WithValue(ctx, ownerKey, owner)
+}
+
+func ownerFrom(ctx context.Context) string {
+	o, _ := ctx.Value(ownerKey).(string)
+	return o
+}
+
+// limit applies a per-key budget after auth, so an anonymous caller gets 401
+// rather than spending anyone's budget.
+func (s *Server) limit(l *ratelimit.Limiter, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key, _ := bearer(r)
+		if ok, wait := l.Allow(key); !ok {
+			secs := int64((wait + time.Second - 1) / time.Second)
+			w.Header().Set("Retry-After", strconv.FormatInt(max(secs, 1), 10))
+			writeError(w, http.StatusTooManyRequests, apiError{Type: "rate_limited", Code: "rate_limited",
+				Message: fmt.Sprintf("Per-key rate limit reached; retry after %d s. See docs/spec/job-api.md, Rate limits.", max(secs, 1))})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func bearer(r *http.Request) (string, bool) {
+	key, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	return strings.TrimSpace(key), ok
 }
 
 // auth only checks the credential's shape for now. Verification against the
 // console bridge replaces the body of this function; the 401 contract stays.
 func (s *Server) auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h := r.Header.Get("Authorization")
-		key, ok := strings.CutPrefix(h, "Bearer ")
-		key = strings.TrimSpace(key)
+		key, ok := bearer(r)
 		if !ok || !strings.HasPrefix(key, "sk-") || len(key) < 8 {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="compute"`)
 			writeError(w, http.StatusUnauthorized, apiError{

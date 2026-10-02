@@ -31,9 +31,10 @@ OpenAI-style envelope so existing client error handling carries over:
 | 400 | `invalid_request` | Malformed body, unknown SKU, runtime over the ceiling |
 | 401 | `authentication_error` | Missing, malformed, revoked, or expired key |
 | 402 | `insufficient_balance` | Hold refused: balance below the estimate |
+| 403 | `quota_exceeded` | Submit would exceed an account quota; `error.quotas` lists each limit with usage and headroom ([`quotas.md`](quotas.md)). Never a partial grant, no `Retry-After` |
 | 404 | `not_found` | Job id unknown *for this key* (no existence leak across users) |
 | 409 | `conflict` | Idempotency-Key reused with a different body; cancel on a terminal job |
-| 429 | `rate_limited` | Per-key submit rate exceeded |
+| 429 | `rate_limited` | Per-key submit or read rate exceeded; always with `Retry-After` |
 | 501 | `not_implemented` | Route exists, backend not built (current state) |
 | 503 | `console_unavailable` | Key could not be verified or hold could not be placed |
 | 503 | `upstream_unavailable` | The SKU is sound but no provider it offers is enabled in this deployment |
@@ -161,8 +162,11 @@ Validated before anything is held or persisted, in this order: body parses
 (`malformed_body`), `sku` present (`missing_sku`) and offered (`unknown_sku`)
 and sold (`sku_unavailable`), `spec.max_runtime_seconds` positive
 (`missing_max_runtime`) and at most 86400 (`runtime_over_ceiling`), every
-entry of `providers` offered by the SKU (`provider_not_offered`), and at
-least one candidate enabled in this deployment (`503 upstream_unavailable`).
+entry of `providers` offered by the SKU (`provider_not_offered`), at
+least one candidate enabled in this deployment (`503 upstream_unavailable`),
+and, last, the account's quotas (`403 quota_exceeded`, [`quotas.md`](quotas.md);
+the check exists in the handler but is not enabled in a deployment until key
+verification and the job store are wired).
 
 Flow (*planned*): verify key → price estimate = `max_runtime_seconds × sku rate`
 → `hold` on the console for `sku rate × min(max_runtime_seconds, 7200)`
@@ -229,8 +233,14 @@ settlement cadence, interruption and retry — are in
 
 ## Rate limits
 
-Per key: 60 submits/hour, 600 reads/minute. Returned as `429` with
-`Retry-After`. (*planned; the skeleton enforces none.*)
+Per key: 60 submits/hour, 600 reads/minute (`GET` on `/jobs`, `/jobs/{id}`,
+`/logs`, `/artifacts`). Returned as `429` with `Retry-After` in seconds.
+Enforced per process, in memory; details and limits of that in
+[`quotas.md`](quotas.md#per-key-rate-limits). Cancel is not limited yet.
+
+Account quotas (concurrent jobs and GPUs per tier) are a separate mechanism,
+per billing entity rather than per key, and refuse with `403`; see
+[`quotas.md`](quotas.md).
 
 ## Not in v1
 
