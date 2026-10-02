@@ -40,13 +40,15 @@ deploy/aws/modules/compute-stack/   VPC, ALB, cert, DNS, instance, data volume, 
 deploy/aws/envs/staging/            caller: own console, bridge readable
 deploy/aws/envs/production/         caller: no console, bridge dark
 deploy/aws/shared/github-oidc/      GitHub Actions deploy role per environment
+deploy/aws/shared/ecr/              runtime image registry (amendment below)
 ```
 
 Each root has its own state in the existing bucket
 (`unifyai-tfstate-871376691052`, native S3 locking):
 `unify-compute/staging/terraform.tfstate` (unchanged from the old root),
 `unify-compute/production/terraform.tfstate`,
-`unify-compute/shared/github-oidc/terraform.tfstate`.
+`unify-compute/shared/github-oidc/terraform.tfstate`,
+`unify-compute/shared/ecr/terraform.tfstate`.
 
 The bucket was empty on 2026-10-02, so moving the staging resources into a
 module needed no `moved {}` blocks: nothing had an address yet. Had anyone
@@ -116,9 +118,9 @@ working directory, which is where the release pipeline
   are embedded and staging renders at about 13 KB.
 - A precondition that `name` is `unify-compute-<environment>`: the deploy
   roles and the release pipeline find the instance by that `Name` tag.
-- If `/unify-compute-<env>/ghcr_pull_user` and `ghcr_pull_token` both exist
-  and are non-empty, the boot logs in to GHCR before the first pull, the same
-  rule the release pipeline applies.
+- The boot logs in to the runtime registry (ECR) with the instance role
+  before the first pull, as the release pipeline does before every pull.
+  This replaced an optional GHCR login from SSM parameters; see the amendment.
 - An Elastic IP, so egress keeps one address across a stop/start (an
   instance-type change, an AWS maintenance event). It adds no cost: AWS bills
   every in-use public IPv4 at the same $0.005/h, and the EIP takes the place of
@@ -339,20 +341,12 @@ staging would then be a production outage.
   | `DNS_CUTOVER` | variable | — | unset until the cutover; `done` after step 3 below |
   | `ALB_DNS_NAME` | variable, optional | `github_environment` output | `github_environment` output |
 
-- **GHCR pull credentials are not Terraform resources.** If the packages are
-  private, create both parameters by hand:
-  `aws ssm put-parameter --type String --name /unify-compute-<env>/ghcr_pull_user`
-  and `--type SecureString --name …/ghcr_pull_token`, the token being a
-  `read:packages` PAT. The instance role's prefix scope already covers them.
-  Placeholders were asked for, and were not created, for two reasons:
-  - `aws_ssm_parameter` writes the decrypted value into state on every
-    refresh, and `ignore_changes` does not prevent that. Keeping secrets out
-    of state is why no other secret here is a resource.
-  - SSM rejects empty values. A placeholder therefore looks "set" to the
-    pipeline's `[ -n "$user" ] && [ -n "$token" ]` check, which then tries to
-    log in with it, fails under `set -e`, and aborts every release.
-
-  An absent parameter is what means "public packages". That is the default.
+- **No registry credential is stored anywhere.** An earlier draft had hosts
+  log in to GHCR from `/unify-compute-<env>/ghcr_pull_user` and
+  `ghcr_pull_token`, a `read:packages` PAT created by hand. The packages are
+  private, so that PAT would have been needed on every host; the amendment
+  below replaced it with ECR and the instance role. Those parameters are no
+  longer read by anything; if either was created, delete it.
 - Once accepted, these need updating to say the site is on AWS: ADR-0004's
   status line ("partly superseded by ADR-0009"), `README.md` ("hosted on OpenAI
   Sites"), `AGENTS.md` (the "Where you are" table and Current status),
@@ -364,3 +358,101 @@ staging would then be a production outage.
 - ADR-0005's artifacts bucket (in review on another branch) was written
   against `deploy/aws/staging/`; it now belongs in the module, behind a
   variable if production should not have it yet.
+
+## Amendment (2026-10-02): Runtime registry: ECR
+
+### Context
+
+Staging was applied on 2026-10-02 and its first `compose up` failed:
+`ghcr.io/felixsphere/unify-compute-{api,site}` are private packages, the
+host had no GHCR credential, and GHCR answered `unauthorized`. Every staging
+hostname has served 502 since. Production would have failed the same way.
+
+The fix this ADR originally allowed — a `read:packages` PAT in SSM on every
+host — means a long-lived personal token, tied to one person's GitHub
+account, readable by every instance, rotated by hand, and broken the day that
+person leaves the organisation. The operator approved the alternative on
+2026-10-02.
+
+### Decision
+
+**GHCR stays the build and provenance registry. ECR is the runtime
+registry.**
+
+- `deploy/aws/shared/ecr/` (own state, `unify-compute/shared/ecr/terraform.tfstate`)
+  creates `unify-compute-api` and `unify-compute-site` in 871376691052,
+  us-east-1, one pair for both environments: production only runs digests
+  staging ran, so it pulls the copy staging's release made. Tags immutable,
+  scan on push, AES256, no repository policy (IAM in this account only, no
+  public access), `prevent_destroy`, and a lifecycle rule that keeps the last
+  30 tagged copies. It is its own stack rather than part of `github-oidc`
+  because these repositories are what every host boots from, and their
+  lifetime should not be tied to a stack whose trust policies get reworked.
+  The other stacks build the repository ARNs from the names; none reads
+  another's state.
+- `publish-image.yml` is unchanged and pushes to GHCR. `release.yml`'s `plan`
+  is unchanged: provenance (arm64, `sha-<commit>`, on main with green CI) is
+  read from GHCR, and a release is still named by, gated by (staging first)
+  and recorded by its GHCR refs.
+- `release.yml`'s `deploy` copies each digest GHCR → ECR **before** the host is
+  touched, with `crane copy` (go-containerregistry v0.22.1, pinned by
+  checksum), GHCR authenticated by the job's `GITHUB_TOKEN`
+  (`packages: read`) and ECR by the environment's OIDC deploy role. crane
+  copies manifests byte for byte, so the multi-arch index keeps its digest;
+  `docker buildx imagetools create` re-serialises the index and was not used.
+  The copy is tagged `sha256-<digest>`, so an immutable tag can only ever name
+  the digest it came from, and a digest already in ECR is not copied again.
+  Then it is proved from what ECR serves: the index bytes hash to the digest,
+  the tag and ECR's `DescribeImages` both resolve to it, it carries
+  linux/arm64, and every platform manifest it lists is present and hashes to
+  its own digest. Any mismatch fails the release with the old images still
+  running.
+- The host is given the ECR ref of the same digest
+  (`871376691052.dkr.ecr.us-east-1.amazonaws.com/unify-compute-X@sha256:D`).
+  `scripts/release/host.sh` reads the account from STS, accepts exactly that
+  registry and those two repositories, and logs in with
+  `aws ecr get-login-password` (the AL2023 AMI ships AWS CLI v2; the boot
+  already used it for SSM) before pulling. User data does the same at first
+  boot. The deploy roles got push and read on the two repositories
+  (`GetAuthorizationToken` on `*`); the instance role got pull on them. The
+  ECR token lasts 12 hours and is re-fetched on every release.
+- The Terraform baseline pins in `envs/*/variables.tf` are ECR refs with the
+  same digests; a module precondition refuses anything else. CI's
+  `pinned-images` has no AWS credentials and must not get any, so for an ECR
+  pin it checks that the same digest exists, with arm64, in the GHCR
+  repository of the same name, which is what the release copies from. Whether
+  a digest has been copied yet is a release-time fact: **a fresh instance can
+  boot from its pins only if some release has already copied those digests
+  into ECR.**
+- The console (public on GHCR), Postgres and Redis (Docker Hub) are public
+  and are still pulled from where they are published.
+- The GHCR login path is removed from user data and `host.sh`. Nothing reads
+  `ghcr_pull_user` / `ghcr_pull_token`.
+
+**First start.** Staging's instance wrote its `.env` and systemd unit, then
+failed the pull; no container ever ran and no database exists. `host.sh`
+used to refuse any host without running containers. It now accepts exactly
+that case — no containers, no release history on `/data`, an empty Postgres
+data directory, and the unit's `WorkingDirectory` equal to the compose
+directory — as a first start: there is nothing to dump, so it skips the
+`pg_dump` (the `BACKUP` line says `none-first-start`), starts the stack
+through `unify-compute.service`, verifies it like any release, and writes no
+`PREVIOUS_RELEASE`, so a rollback refuses rather than going to refs that
+never ran. Any other host with nothing running is still refused. user_data is
+in `ignore_changes`, so the new pins do not touch the running instance; the
+next staging release is what brings it up.
+
+### Consequences
+
+- Apply order: `shared/ecr`, then `shared/github-oidc` (deploy-role ECR
+  permissions), then `envs/staging` (the instance role's pull permissions, one
+  in-place policy update; the instance is not replaced or stopped), then a
+  staging release, then production. Production's first apply comes after a
+  staging release has put its pinned digests in ECR.
+- The lifecycle rule keeps the last 30 tagged copies per repository. A rebuild
+  whose pins are older than that boots into a failed pull; the rebuild
+  procedure above already requires moving the pins to what is released now.
+  Untagged platform images of expired indexes are left behind (MBs, a cost).
+- ECR storage is $0.10/GB-month, layers shared between copies are stored
+  once, and pulls within the region are free. Not measured yet; expect
+  cents to a few dollars a month at 30 copies.

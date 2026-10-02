@@ -36,7 +36,7 @@ account. Two consequences:
   released with compute-api through `release.yml`. Until production exists
   and `compute.unifyai.us` is cut over, Sites is what customers see, and
   content changes ship through the Sites project.
-- **Staging:** defined in `deploy/aws/envs/staging/` (module `deploy/aws/modules/compute-stack/`; production in `deploy/aws/envs/production/`, deploy roles in `deploy/aws/shared/github-oidc/`), target hostnames
+- **Staging:** defined in `deploy/aws/envs/staging/` (module `deploy/aws/modules/compute-stack/`; production in `deploy/aws/envs/production/`, deploy roles in `deploy/aws/shared/github-oidc/`, runtime image registry in `deploy/aws/shared/ecr/`), target hostnames
   `staging.compute.unifyai.us` (compute-api) and
   `console.staging.compute.unifyai.us` (a staging console with its own empty
   database), plus `site.staging.compute.unifyai.us`. **Applied 2026-10-02**
@@ -45,7 +45,15 @@ account. Two consequences:
   volume `vol-05c4fb3b4ce0077fe`, ALB
   `unify-compute-staging-347679141.us-east-1.elb.amazonaws.com`. **Not
   serving:** the first `compose up` got `unauthorized` from GHCR (private
-  packages, no pull token in SSM). Edge verified: 301 to https, HSTS once,
+  packages); no container has ever run there. The fix is merged code, not yet
+  applied: hosts pull our images from ECR with the instance role, and
+  `release.yml` copies each digest GHCR → ECR before the cutover (ADR-0009,
+  "Runtime registry: ECR"). Do **not** create a GHCR PAT for hosts. To bring
+  staging up: apply `shared/ecr`, then `shared/github-oidc`, then
+  `envs/staging` (one in-place instance-role policy update; read the plan,
+  the instance must not be replaced or stopped), then release to staging;
+  `host.sh` treats this host as a "first start" (no containers, no history,
+  no database) and skips the dump. Edge verified: 301 to https, HSTS once,
   404 for other hosts, certificate covers all three names.
 - **Production compute API:** does not exist. There is no production stack in
   this repository yet.
@@ -80,7 +88,7 @@ account. Two consequences:
    it. The script generates hex and verifies what it wrote; user-data now
    rejects a non-URL-safe value at boot. The console bridge secret must be the
    same value on the console side and the compute-api side.
-3. `terraform init && terraform plan` in `deploy/aws/envs/staging/` (after `deploy/aws/shared/github-oidc/`). Read the plan.
+3. `terraform init && terraform plan` in `deploy/aws/envs/staging/` (after `deploy/aws/shared/ecr/` and `deploy/aws/shared/github-oidc/`). Read the plan.
    Expect: one VPC, two subnets, one ALB with two listener rules, one ACM
    certificate, three Route53 records, one t4g.small, one EBS data volume.
 4. `terraform apply`. Then `make smoke BASE_URL=https://staging.compute.unifyai.us`
@@ -90,7 +98,9 @@ account. Two consequences:
 
 ## Before you ship anything
 
-1. **Know what you are shipping.** A release is two digests. Find the commit
+1. **Know what you are shipping.** A release is two digests, named by their
+   GHCR refs (inputs, manifests, records); the run copies them to ECR, the
+   hosts' registry, and gives the host the ECR ref of the same digest. Find the commit
    each was built from (its `sha-<commit>` tag), then
    `git log <previous build>..<new build> --oneline` for each. The previous
    builds are in the last record in `deploy/releases/`, and on the host

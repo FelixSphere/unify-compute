@@ -2,9 +2,13 @@
 
 **Status: applied 2026-10-02, not serving.** The stack exists (instance
 `i-0780af3b0bfdc3383`, AMI pinned), but its first `compose up` failed: the
-GHCR packages are private and `/unify-compute-staging/ghcr_pull_user` /
-`ghcr_pull_token` do not exist yet. Every hostname answers 502 until they do.
-No release has run (`mode=status` has, once, successfully). This page is the
+GHCR packages are private and the host had no credential (`unauthorized`).
+No container has ever run on it. Hosts now pull our images from ECR with the
+instance role instead ([ADR-0009](adr/0009-host-everything-on-aws.md),
+"Runtime registry: ECR"); staging comes up on the first release after
+`shared/ecr`, `shared/github-oidc` and this stack are applied with that
+change. Every hostname answers 502 until then. No release has run
+(`mode=status` has, once, successfully). This page is the
 procedure and the acceptance criteria (`.claude/agents/cicd.md`).
 
 Staging is `deploy/aws/envs/staging/`, a caller of the module in
@@ -31,8 +35,9 @@ certificate covers all three names. Any other Host gets a fixed `404`.
 (`COMPOSE_FILE` in the instance's `.env`, which is rendered from SSM at boot),
 the same pair the local profile uses:
 
-- `compute-api` — `COMPUTE_API_IMAGE`, published from this repository.
-- `site` — `SITE_IMAGE`, the marketing site container.
+- `compute-api` — `COMPUTE_API_IMAGE`, published from this repository to
+  GHCR and pulled from its ECR copy.
+- `site` — `SITE_IMAGE`, the marketing site container, likewise.
 - `postgres` — default database `compute`; the console overlay creates
   `console` on first boot.
 - `console`, `redis` — the console overlay. Own database, own admin, own
@@ -40,7 +45,10 @@ the same pair the local profile uses:
 - `skypilot` — compose profile, off by default until the backend exists.
 
 All images are pinned by digest in `deploy/aws/envs/staging/variables.tf`
-(ours and the console) or in the compose files (Postgres, Redis).
+(ours and the console) or in the compose files (Postgres, Redis). Ours are
+pinned as ECR refs (`871376691052.dkr.ecr.us-east-1.amazonaws.com/unify-compute-{api,site}@sha256:…`)
+with the GHCR build's digest; the console is public on GHCR and Postgres and
+Redis are public on Docker Hub.
 
 ## First-time apply
 
@@ -64,7 +72,13 @@ gh run watch --repo FelixSphere/unify-compute
 #    deploy/aws/envs/staging/variables.tf. The site image (agent M1) needs the
 #    same: publish, then pin site_image by digest. CI's `pinned-images` job
 #    asserts digest + exists + arm64 for every pin on every push, and is red
-#    until both are done.
+#    until both are done. Pin the digest under the ECR repository of the same
+#    name (871376691052.dkr.ecr.us-east-1.amazonaws.com/unify-compute-api@…):
+#    that is what the host pulls, and the module refuses a GHCR pin. Apply
+#    deploy/aws/shared/ecr and shared/github-oidc before this stack. A fresh
+#    instance's boot pull succeeds only if a release has already copied those
+#    digests into ECR; if none has, the boot fails its pull and the first
+#    release over SSM brings the stack up (host.sh's "first start").
 
 # 1. secrets. Use the script, not `aws ssm put-parameter` by hand.
 #    The old runbook said `openssl rand -base64 32`; base64 contains "/",
@@ -157,14 +171,16 @@ Only the CI/CD agent dispatches it (`.claude/agents/cicd.md`). Merging to
 
 A set of two image digests, one per deployable:
 
-| Env key on the host | Image | Published by |
-|---|---|---|
-| `COMPUTE_API_IMAGE` | `ghcr.io/felixsphere/unify-compute-api@sha256:…` | `publish-image.yml` |
-| `SITE_IMAGE` | `ghcr.io/felixsphere/unify-compute-site@sha256:…` | the site publish workflow |
+| Env key on the host | Named, gated and recorded as | Pulled by the host from | Published by |
+|---|---|---|---|
+| `COMPUTE_API_IMAGE` | `ghcr.io/felixsphere/unify-compute-api@sha256:D` | `871376691052.dkr.ecr.us-east-1.amazonaws.com/unify-compute-api@sha256:D` | `publish-image.yml` |
+| `SITE_IMAGE` | `ghcr.io/felixsphere/unify-compute-site@sha256:D` | `871376691052.dkr.ecr.us-east-1.amazonaws.com/unify-compute-site@sha256:D` | `publish-image.yml` (`publish-site`) |
 
 Both are always named, even when only one changed, so every release record
 and every staging-first comparison is of a complete set. Tags are refused: a
-tag can be repointed, a digest cannot.
+tag can be repointed, a digest cannot. The dispatch inputs, the manifest
+artifact and the release record use the GHCR refs; only the host's `.env`
+holds the ECR refs. Same digest either way.
 
 ### Release, in order
 
@@ -203,6 +219,7 @@ OIDC, only inside the GitHub environment named by `environment`):
 | `plan`: inputs | a digest is not `<its repository>@sha256:<64 hex>` |
 | `plan`: provenance (`scripts/release/provenance.sh`) | the digest has no linux/arm64; no `sha-<commit>` tag points at it; that commit is not on main; CI did not pass on it |
 | `plan`: staging first (`scripts/release/staging-first.sh`), production only | no successful staging run of `release.yml` uploaded a manifest with exactly these digests |
+| `deploy`: copy to ECR (release only) | `crane copy` GHCR → ECR fails, or what ECR then serves for the digest does not hash to it, its `sha256-<digest>` tag or ECR's `DescribeImages` names another digest, it lacks linux/arm64, or a platform manifest is missing. A digest already in ECR is verified, not copied again |
 | `deploy`: find the instance | not exactly one running instance tagged `Name=unify-compute-<env>` |
 | `deploy`: `status` | — (records the before state) |
 | `deploy`: cutover on the host (`scripts/release/host.sh` via `scripts/ssm-run.sh`) | see below |
@@ -212,9 +229,16 @@ OIDC, only inside the GitHub environment named by `environment`):
 
 On the host, under the operations lock `/run/lock/unify-compute-ops.lock`:
 
-1. read the current digests from the compose env file; if they already equal
-   the target, verify health and stop (`NOOP`);
-2. `docker pull` the target digests, before anything is touched;
+1. read the current digests from the compose env file; refuse a target that
+   is not this account's ECR registry and our two repositories; if the
+   target equals what runs, verify health and stop (`NOOP`). The unit's
+   `WorkingDirectory` must be the compose directory. No containers at all is
+   refused, except a **first start** (no release history, empty Postgres
+   data directory: the stack never ran, as on staging after its failed
+   boot), which skips the dump in step 3, starts the stack through
+   `unify-compute.service`, and leaves no `PREVIOUS_RELEASE`;
+2. log in to ECR with the instance role, `docker pull` the target digests,
+   before anything is touched;
 3. back up: every Postgres database with `pg_dump -Fc`, each read back with
    `pg_restore -l`, plus `PREVIOUS_RELEASE` and the env file, to
    `/data/backups/<stamp>-<run_id>/`; everything but the env file (it holds
@@ -296,10 +320,11 @@ Assumptions this pipeline makes; a mismatch is a variable at the top of
 | Where | What |
 |---|---|
 | GitHub environments `staging`, `production` | secret `AWS_DEPLOY_ROLE_ARN`; variables `PUBLIC_ORIGIN` (the site origin smoke probes), `API_ORIGIN` (compute-api's origin), `AWS_REGION` (default `us-east-1`); production also `DNS_CUTOVER` (`done` after the cutover) and optionally `ALB_DNS_NAME`. Both restricted to `main`. Required reviewers were wanted on production; GitHub refused them on this repository's plan (HTTP 422, 2026-10-02), so the release owner rule is the only gate |
-| Deploy role | trusts `token.actions.githubusercontent.com` with `sub` = `repo:FelixSphere@164092079/unify-compute@1364156790:environment:<env>` (this repo issues immutable OIDC subjects; see ADR-0009); may `ec2:DescribeInstances`, `ssm:SendCommand` on `AWS-RunShellScript` and on instances tagged for its env only, `ssm:GetCommandInvocation` |
+| Deploy role | trusts `token.actions.githubusercontent.com` with `sub` = `repo:FelixSphere@164092079/unify-compute@1364156790:environment:<env>` (this repo issues immutable OIDC subjects; see ADR-0009); may `ec2:DescribeInstances`, `ssm:SendCommand` on `AWS-RunShellScript` and on instances tagged for its env only, `ssm:GetCommandInvocation`; ECR push and read on `unify-compute-api` and `unify-compute-site` (the copy from GHCR) |
 | Instance | tag `Name=unify-compute-<env>`; SSM agent; `docker compose`, `flock`, `aws`, `curl` |
 | Compose | `/opt/unify-compute/compose/docker-compose.yml` and `.env`, with the systemd unit's `WorkingDirectory` set to that directory; services `compute-api` (port 8080 on the host), `site`, `postgres` (user `unify`); the image keys `COMPUTE_API_IMAGE` and `SITE_IMAGE` |
 | Data volume | mounted at `/data`; `/data/releases` and `/data/backups` are created on first use |
-| SSM | `/unify-compute-<env>/backup_bucket` (bucket name); optionally `ghcr_pull_user` and `ghcr_pull_token` if the packages are private |
-| Instance role | `s3:PutObject` on the backup bucket under `<env>/releases/` |
+| SSM | `/unify-compute-<env>/backup_bucket` (bucket name). No registry credential: nothing reads `ghcr_pull_user` / `ghcr_pull_token` any more |
+| Instance role | `s3:PutObject` on the backup bucket under `<env>/releases/`; ECR pull (`GetAuthorizationToken`, `BatchGetImage`, `GetDownloadUrlForLayer`, `BatchCheckLayerAvailability`) on `unify-compute-api` and `unify-compute-site` |
+| ECR (`deploy/aws/shared/ecr`) | repositories `unify-compute-api`, `unify-compute-site`; the deploy role may push to and read them |
 | Site image | published with a `sha-<commit>` tag, like compute-api, or provenance cannot place it |
