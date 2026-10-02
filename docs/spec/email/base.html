@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="{{lang}}" dir="{{dir}}" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>{{subject}}</title>
+<!--[if !mso]><!-->
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@700&family=Instrument+Sans:wght@400;600&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<!--<![endif]-->
+<style>
+  body { margin: 0; padding: 0; background: #FAFAF7; }
+  a { color: #0E0E0E; }
+  @media (max-width: 620px) {
+    .u-card { width: 100% !important; }
+    .u-pad { padding-left: 24px !important; padding-right: 24px !important; }
+    .u-h1 { font-size: 24px !important; line-height: 30px !important; }
+  }
+</style>
+</head>
+<body style="margin:0; padding:0; background:#FAFAF7;">
+<!-- Inbox preview text: one sentence, never repeats the subject -->
+<div style="display:none; max-height:0; overflow:hidden; mso-hide:all;">{{preheader}}&#8199;&#65279;&#847;&#8199;&#65279;&#847;&#8199;&#65279;&#847;</div>
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FAFAF7;">
+<tr><td align="center" style="padding:32px 12px;">
+
+  <table role="presentation" class="u-card" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px; max-width:600px; background:#FFFFFF; border:1px solid #E3E3DE; border-radius:6px;">
+
+    <!-- Header: fixed lockup + product descriptor (current product name, unchanged) -->
+    <tr><td class="u-pad" style="padding:28px 40px 24px; border-bottom:1px solid #E3E3DE;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td style="vertical-align:middle;"><img src="{{asset_base}}/unifyai-lockup-black@2x.png" width="132" height="40" alt="UnifyAI" style="display:block; border:0; width:132px; height:40px;"></td>
+        <!-- Omit the next two cells when the product IS "UnifyAI" (UnifySelfAI) -->
+        <td style="vertical-align:middle; padding:0 14px;"><div style="width:1px; height:22px; background:#CFCFC9;"></div></td>
+        <td style="vertical-align:middle; font-family:'Space Grotesk',Helvetica,Arial,sans-serif; font-weight:700; font-size:16px; color:#0E0E0E; white-space:nowrap;">{{product_name}}</td>
+      </tr></table>
+    </td></tr>
+
+    <!-- Body -->
+    <tr><td class="u-pad" style="padding:36px 40px 8px;">
+      <div style="font-family:'IBM Plex Mono',Menlo,Consolas,monospace; font-size:12px; letter-spacing:1.6px; text-transform:uppercase; color:#6B6B66;">{{eyebrow}}</div>
+      <h1 class="u-h1" style="margin:10px 0 0; font-family:'Space Grotesk',Helvetica,Arial,sans-serif; font-weight:700; font-size:28px; line-height:34px; letter-spacing:-0.4px; color:#0E0E0E;">{{headline}}</h1>
+      <p style="margin:16px 0 0; font-family:'Instrument Sans',Helvetica,Arial,sans-serif; font-size:16px; line-height:26px; color:#3A3A37;">{{intro}}</p>
+    </td></tr>
+
+    <!-- ONE focal element. Use exactly one of: CTA button | code block -->
+    <!-- (a) CTA button: amber, INK text (white on amber fails contrast) -->
+    <tr><td class="u-pad" style="padding:28px 40px 4px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td style="border-radius:6px; background:#F5A623;">
+          <!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="{{cta_url}}" style="height:48px;v-text-anchor:middle;width:240px;" arcsize="12%" stroke="f" fillcolor="#F5A623"><center style="color:#0E0E0E;font-family:Arial,sans-serif;font-size:16px;font-weight:bold;">{{cta_label}}</center></v:roundrect><![endif]-->
+          <!--[if !mso]><!--><a href="{{cta_url}}" style="display:inline-block; padding:14px 26px; font-family:'Instrument Sans',Helvetica,Arial,sans-serif; font-weight:600; font-size:16px; line-height:20px; color:#0E0E0E; text-decoration:none; border-radius:6px;">{{cta_label}}</a><!--<![endif]-->
+        </td>
+      </tr></table>
+      <p style="margin:14px 0 0; font-family:'Instrument Sans',Helvetica,Arial,sans-serif; font-size:13px; line-height:20px; color:#6B6B66;">Button not working? Paste this link into your browser:<br><a href="{{cta_url}}" style="color:#0E0E0E; word-break:break-all;">{{cta_url}}</a></p>
+    </td></tr>
+    <!-- (b) Code block alternative:
+    <tr><td class="u-pad" style="padding:28px 40px 4px;">
+      <div style="background:#0E0E0E; border-radius:6px; padding:20px 24px; font-family:'IBM Plex Mono',Menlo,Consolas,monospace; font-weight:500; font-size:32px; letter-spacing:8px; color:#FAFAF7; text-align:center;">{{code}}</div>
+    </td></tr>
+    -->
+
+    <!-- Optional details: key/value rows, mono values -->
+    <tr><td class="u-pad" style="padding:28px 40px 0;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #E3E3DE;">
+        <!-- repeat per row -->
+        <tr>
+          <td style="padding:10px 0; border-bottom:1px solid #E3E3DE; font-family:'Instrument Sans',Helvetica,Arial,sans-serif; font-size:14px; color:#6B6B66;">{{detail_label}}</td>
+          <td align="right" style="padding:10px 0; border-bottom:1px solid #E3E3DE; font-family:'IBM Plex Mono',Menlo,Consolas,monospace; font-size:14px; color:#0E0E0E;">{{detail_value}}</td>
+        </tr>
+      </table>
+    </td></tr>
+
+    <!-- Safety line: why this arrived / what to do if unexpected -->
+    <tr><td class="u-pad" style="padding:24px 40px 36px;">
+      <p style="margin:0; font-family:'Instrument Sans',Helvetica,Arial,sans-serif; font-size:13px; line-height:20px; color:#6B6B66;">{{safety_note}}</p>
+    </td></tr>
+
+  </table>
+
+  <!-- Footer, outside the card -->
+  <table role="presentation" class="u-card" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px; max-width:600px;">
+    <tr><td class="u-pad" style="padding:24px 40px; font-family:'Instrument Sans',Helvetica,Arial,sans-serif; font-size:12px; line-height:19px; color:#6B6B66;">
+      <img src="{{asset_base}}/unifyai-mark-black@2x.png" width="24" height="24" alt="" style="display:block; border:0; width:24px; height:24px; margin-bottom:10px;">
+      {{product_name}} · <a href="{{product_url}}" style="color:#6B6B66;">{{product_domain}}</a><br>
+      {{footer_reason}}<br>
+      UnifyAI · Lebuh Bandar Utama PJU 6, 47800 Petaling Jaya, Selangor, Malaysia
+      <!-- Marketing mail only: add an unsubscribe link here. Transactional mail (verify, reset, receipts) has none. -->
+    </td></tr>
+  </table>
+
+</td></tr>
+</table>
+</body>
+</html>
