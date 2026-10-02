@@ -14,8 +14,8 @@ through the customer's existing UnifyAPI account.
 |---|---|
 | `app/` | Marketing site (vinext), hosted on OpenAI Sites |
 | `compute-api/` | The compute service: job API in front of SkyPilot, billed through UnifyAPI (Go) |
-| `deploy/compose/` | Local and staging profile: console + compute-api + Postgres + Redis |
-| `deploy/aws/staging/` | Terraform for `staging.compute.unifyai.us` |
+| `deploy/compose/` | compute-api + site + Postgres; `docker-compose.console.yml` adds console + Redis for staging and local |
+| `deploy/aws/` | Terraform: `modules/compute-stack`, `envs/staging`, `envs/production`, `shared/github-oidc` — not applied ([ADR-0009](docs/adr/0009-host-everything-on-aws.md), proposed) |
 | `docs/architecture.md` | One account plane (UnifyAPI), two execution planes (tokens, compute) |
 | `docs/adr/` | Decisions: reuse UnifyAPI accounts, separate proprietary service, SkyPilot, staging shape, upstreams |
 | `docs/spec/job-api.md` | The customer-facing job API contract |

@@ -54,8 +54,13 @@ Current status (say what exists rather than describing targets as shipped):
   `501 not_implemented` until the SkyPilot backend and the console bridge land.
 - The console bridge in `docs/spec/console-billing-bridge.md` is a spec. The
   console fork does not implement it yet.
-- The staging Terraform under `deploy/aws/staging/` validates in CI and has
-  **not been applied**. No DNS record for `staging.compute.unifyai.us` exists.
+- The AWS Terraform — one module (`deploy/aws/modules/compute-stack/`) with
+  staging and production callers under `deploy/aws/envs/`, plus GitHub OIDC
+  deploy roles in `deploy/aws/shared/github-oidc/` — validates in CI and has
+  **not been applied**. Moving the site and everything else onto it is
+  [ADR-0009](docs/adr/0009-host-everything-on-aws.md), **Proposed**. No DNS
+  record for any `*.compute.unifyai.us` stack hostname exists, and
+  `compute.unifyai.us` is still OpenAI Sites.
 
 ## Licence boundary — the expensive mistake
 
@@ -131,7 +136,7 @@ significant ones. Adopted 16 Sep 2026, after twelve consecutive console releases
 went straight to production unverified.
 
 For unify-compute the rule is not yet load-bearing: the staging stack under
-`deploy/aws/staging/` is **defined and CI-validated but has never been applied**,
+`deploy/aws/envs/staging/` is **defined and CI-validated but has never been applied**,
 and nothing is in production either. When that changes, staging comes first —
 do not let the first production deployment also be the first time the stack runs.
 
