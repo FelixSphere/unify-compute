@@ -1,6 +1,8 @@
 # The machine checks for this repository. There are no credentials here and no
-# deploy job: releases are the CI/CD agent's (.claude/agents/cicd.md), and the
-# marketing site ships through OpenAI Sites, not from this workflow.
+# deploy job: releases are the CI/CD agent's (.claude/agents/cicd.md). The
+# marketing site is moving from OpenAI Sites to the `site` container
+# (deploy/site/); this workflow builds and exercises that image but never
+# pushes it — publish-image.yml does.
 name: CI
 
 on:
@@ -50,6 +52,55 @@ jobs:
       # AGENTS.md. Formatting is not checked yet: app/ predates .oxfmtrc.json.
       - run: npx oxlint app lib
       - run: npm run build
+
+  # The site container, run for real: every route the export must answer, the
+  # content types browsers enforce under nosniff, and the cache headers a
+  # release depends on. One arch is enough here; publish-image.yml builds and
+  # asserts arm64.
+  site-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/site/Dockerfile
+          load: true
+          push: false
+          provenance: false
+          build-args: SITE_BUILD_ID=${{ github.sha }}
+          tags: unify-compute-site:ci
+          cache-from: type=gha,scope=site
+          cache-to: type=gha,scope=site,mode=max
+      - name: Run
+        run: |
+          docker run -d --name site -p 8080:8080 unify-compute-site:ci
+          for _ in $(seq 1 30); do
+            curl -fs http://127.0.0.1:8080/healthz >/dev/null && exit 0
+            sleep 1
+          done
+          docker logs site; exit 1
+      - name: Runs unprivileged
+        run: test "$(docker exec site id -u)" = 65534
+      # The image's HEALTHCHECK (and compose's, which reuses it) shells out to
+      # busybox wget. Prove the binary is there and the check goes healthy,
+      # rather than learning it from an instance that never turns healthy.
+      - name: Docker healthcheck goes healthy
+        run: |
+          docker exec site wget -q -O /dev/null http://127.0.0.1:8080/healthz
+          # First probe runs one --interval (30s) after start.
+          for _ in $(seq 1 30); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' site)
+            [ "$status" = healthy ] && exit 0
+            sleep 2
+          done
+          echo "health status: $status"; docker inspect -f '{{json .State.Health}}' site; exit 1
+      - run: deploy/site/smoke.sh http://127.0.0.1:8080 "${{ github.sha }}"
+      - if: failure()
+        run: docker logs site
 
   compute-api:
     runs-on: ubuntu-latest
@@ -121,7 +172,7 @@ jobs:
       - name: shellcheck
         run: |
           sudo apt-get update -q && sudo apt-get install -y -q shellcheck
-          shellcheck scripts/*.sh
+          shellcheck scripts/*.sh deploy/site/*.sh
 
   # Every image this repository pins must exist in the registry AND carry a
   # linux/arm64 manifest. Both staging and UnifyAPI production are Graviton

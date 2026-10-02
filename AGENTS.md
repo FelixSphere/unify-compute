@@ -23,7 +23,7 @@ This repository holds three things, and they have different rules:
 
 | Path | What it is | Rules |
 |---|---|---|
-| `app/`, `components/`, `public/` | Marketing site at **compute.unifyai.us** (vinext, hosted on OpenAI Sites via `.openai/hosting.json`) | Site conventions below |
+| `app/`, `components/`, `public/` | Marketing site at **compute.unifyai.us** (vinext static export; still served by OpenAI Sites via `.openai/hosting.json` until the DNS cutover to the `deploy/site/` container on AWS) | Site conventions below |
 | `compute-api/` | The compute service: authenticated job API in front of SkyPilot, billed through UnifyAPI | Go, stdlib-only so far, permissive licences only |
 | `deploy/`, `docs/` | Compose profile, AWS staging stack, ADRs and specs | Terraform validated in CI, never applied by CI |
 
