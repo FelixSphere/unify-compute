@@ -138,7 +138,7 @@ jobs:
             echo "| commit | \`${{ github.sha }}\` |"
             echo "| reason | ${{ inputs.reason || 'tag push' }} |"
             echo
-            echo "Pin the **digest** in \`deploy/aws/staging/variables.tf\`:"
+            echo "Pin the **digest** in \`deploy/aws/envs/staging/variables.tf\` (and production's once staging has run it):"
             echo
             echo "\`\`\`hcl"
             echo "compute_api_image = \"${{ env.IMAGE }}@${{ steps.build.outputs.digest }}\""

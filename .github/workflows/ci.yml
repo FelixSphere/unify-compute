@@ -1,8 +1,8 @@
 # The machine checks for this repository. There are no credentials here and no
 # deploy job: releases are the CI/CD agent's (.claude/agents/cicd.md). The
 # marketing site is moving from OpenAI Sites to the `site` container
-# (deploy/site/); this workflow builds and exercises that image but never
-# pushes it — publish-image.yml does.
+# (deploy/site/, ADR-0009); this workflow builds and exercises that image but
+# never pushes it — publish-image.yml does, and release.yml deploys it.
 name: CI
 
 on:
@@ -174,15 +174,22 @@ jobs:
           sudo apt-get update -q && sudo apt-get install -y -q shellcheck
           shellcheck scripts/*.sh deploy/site/*.sh
 
-  # Every image this repository pins must exist in the registry AND carry a
-  # linux/arm64 manifest. Both staging and UnifyAPI production are Graviton
-  # (t4g.small); an amd64-only image fails as a container that never starts,
-  # long after `terraform apply` has reported success.
+  # Every image this repository pins must be pinned BY DIGEST, exist in the
+  # registry, AND carry a linux/arm64 manifest. Every hosted environment is
+  # Graviton (t4g.small); an amd64-only image fails as a container that never
+  # starts, long after `terraform apply` has reported success. A tag is not a
+  # pin: it can move under a running environment, and the instance re-pulls on
+  # every rebuild.
   #
   # This job exists because on 11 Sep 2026 the pinned
   # ghcr.io/felixsphere/unify-compute-api did not exist in the registry at all
-  # (NAME_UNKNOWN) while variables.tf pinned it as the default. A first apply
-  # would have booted a host that could never pull.
+  # (NAME_UNKNOWN) while the staging stack pinned it as the default. A first
+  # apply would have booted a host that could never pull.
+  #
+  # It is expected to be RED until compute-api and the site image are
+  # published and their digests pinned in deploy/aws/envs/*/variables.tf.
+  # That is the truthful state — neither environment can boot yet — and
+  # weakening the check to make it green would hide exactly that.
   pinned-images:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -198,19 +205,32 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Every pinned image exists and runs on arm64
+      - name: Every pinned image is a digest, exists, and runs on arm64
         run: |
           set -euo pipefail
-          # Defaults declared in the staging stack. Pins live in exactly one
-          # place; if that stops being true this grep is the thing to update.
-          images=$(grep -oE 'ghcr\.io/[a-z0-9._/-]+[:@][A-Za-z0-9._:-]+' \
-            deploy/aws/staging/variables.tf | sort -u)
+          # Pins live in two places: the environment roots' variable defaults
+          # (our images and the console), and literal image lines in the
+          # compose files (Postgres, Redis). `${...}` lines in compose are
+          # filled from the former. If pins move, this is what to update.
+          images=$( {
+            grep -hoE 'ghcr\.io/[a-z0-9._/-]+(:[A-Za-z0-9._-]+)?(@sha256:[0-9a-f]{64})?' \
+              deploy/aws/envs/*/variables.tf
+            grep -hE '^[[:space:]]*image:[[:space:]]*[^$[:space:]]' deploy/compose/docker-compose*.yml \
+              | sed -E 's/^[[:space:]]*image:[[:space:]]*//'
+          } | sort -u)
           [ -n "$images" ] || { echo "::error::found no pinned images to check"; exit 1; }
 
           fail=0
           for ref in $images; do
             echo "--- $ref"
-            if ! docker buildx imagetools inspect "$ref" --raw > m.json 2>err.txt; then
+            case "$ref" in
+              *@sha256:*) ;;
+              *) echo "::error::$ref is not pinned by digest (expected name[:tag]@sha256:<64 hex>)"; fail=1 ;;
+            esac
+            # name:tag@digest is valid for docker pull (the tag is ignored); the
+            # inspection uses the digest alone so it checks exactly that.
+            inspect_ref=$(printf '%s' "$ref" | sed -E 's/:[A-Za-z0-9._-]+@/@/')
+            if ! docker buildx imagetools inspect "$inspect_ref" --raw > m.json 2>err.txt; then
               echo "::error::$ref is not pullable: $(head -c 300 err.txt)"
               fail=1; continue
             fi
@@ -218,7 +238,7 @@ jobs:
               arches=$(jq -r '[.manifests[] | select(.platform.os=="linux") | .platform.architecture] | sort | join(",")' m.json)
             else
               # Single-platform image: read the config's architecture.
-              arches=$(docker buildx imagetools inspect "$ref" --format '{{.Image.Architecture}}' 2>/dev/null || echo unknown)
+              arches=$(docker buildx imagetools inspect "$inspect_ref" --format '{{.Image.Architecture}}' 2>/dev/null || echo unknown)
             fi
             echo "    linux arches: $arches"
             case ",$arches," in
