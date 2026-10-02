@@ -1,0 +1,53 @@
+# The UnifyAPI console and its Redis, for environments that run their own
+# console: staging (ADR-0004) and local development. Never production.
+#
+#     docker compose -f docker-compose.yml -f docker-compose.console.yml up
+#
+# or COMPOSE_FILE=docker-compose.yml:docker-compose.console.yml in .env.
+
+services:
+  console:
+    # Pinned by digest; keep the release in step with the UnifyAPI production
+    # pin unless testing a console change.
+    image: ${CONSOLE_IMAGE:?set CONSOLE_IMAGE}
+    restart: unless-stopped
+    command: --log-dir /app/logs
+    ports:
+      - "${CONSOLE_BIND:-127.0.0.1}:3000:3000"
+    volumes:
+      - ${DATA_DIR:-./data}/console:/data
+      - ${DATA_DIR:-./data}/console-logs:/app/logs
+    environment:
+      SQL_DSN: postgresql://unify:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/console
+      REDIS_CONN_STRING: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD}@redis:6379
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET}
+      # Secure cookies need the exact HTTPS origin list; locally over plain
+      # HTTP both stay unset so the console's OriginGuard is off.
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      SESSION_COOKIE_TRUSTED_URL: ${SESSION_COOKIE_TRUSTED_URL:-}
+      # Dark until the console ships the bridge routes; then the same value as
+      # compute-api's COMPUTE_BRIDGE_SECRET. Never the production value.
+      COMPUTE_BRIDGE_SECRET: ${COMPUTE_BRIDGE_SECRET:-}
+      NODE_NAME: unify-compute-${ENVIRONMENT:-local}
+      TZ: UTC
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:3000/api/status | grep -q '\"success\":true' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  redis:
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD}"]
+
+  postgres:
+    volumes:
+      # Creates the console's database on first boot only (empty data dir).
+      - ./postgres-init-console.sql:/docker-entrypoint-initdb.d/10-console.sql:ro

@@ -32,8 +32,16 @@ our build graph. The `cmd/compute-api` binary links them once it imports
 ## Marketing site
 
 npm dependencies in `package.json` are MIT-licensed shadcn/Radix/Vite ecosystem
-packages plus vinext and the OpenAI Sites plugin; the site is a static export
-and none of them ship in `compute-api`.
+packages plus vinext (MIT); the site is a static export and none of them ship
+in `compute-api`. The OpenAI Sites plugin, wrangler and the Cloudflare Vite
+plugin were removed when the build became a static export.
+
+### Site container (`deploy/site/`)
+
+| Component | Licence | Relationship |
+|---|---|---|
+| [Caddy](https://github.com/caddyserver/caddy) 2.11.4, official `caddy:2.11.4-alpine` image, pinned by digest | Apache-2.0 | Runtime base of the `site` image: serves the static export. Unmodified; no NOTICE file in the upstream repository. |
+| Node.js 22, official `node:22.23.3-alpine` image, pinned by digest | MIT | Build stage only. Nothing from it is in the published image. |
 
 ### Fonts (self-hosted, shipped to every visitor)
 

@@ -1,0 +1,189 @@
+#!/bin/bash
+# Bootstraps a unify-compute host (${environment}): Docker, the data volume,
+# secrets from SSM, and the compose stack from the repository. Rendered by
+# instance.tf. Runs once, at first boot: Terraform ignores later changes to
+# it (see instance.tf), so an edit here reaches a host only through a
+# deliberate `terraform apply -replace`.
+set -euo pipefail
+exec > >(tee -a /var/log/unify-compute-bootstrap.log) 2>&1
+
+dnf update -y
+dnf install -y docker
+
+# Pinned with its checksum. "latest" meant every boot could get a different
+# compose, and a replacement instance could behave unlike the one it replaced.
+COMPOSE_VERSION=v5.6.0
+COMPOSE_SHA256=733ec76717ceb59052a9609b9dadfb523b2df8eab57a54212872d10a58078ea2
+COMPOSE_DIR=/usr/local/lib/docker/cli-plugins
+mkdir -p "$COMPOSE_DIR"
+curl -fsSL "https://github.com/docker/compose/releases/download/$COMPOSE_VERSION/docker-compose-linux-aarch64" \
+  -o "$COMPOSE_DIR/docker-compose"
+echo "$COMPOSE_SHA256  $COMPOSE_DIR/docker-compose" | sha256sum -c -
+chmod +x "$COMPOSE_DIR/docker-compose"
+
+# ---------------------------------------------------------------------------
+# Data volume. Nitro ignores the requested /dev/sdf; the by-id link is named
+# after the volume id. Wait for it, format only if empty, mount at /data.
+# ---------------------------------------------------------------------------
+DEV="/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_$(echo "${volume_id}" | tr -d '-')"
+for _ in $(seq 1 60); do
+  [ -b "$DEV" ] && break
+  sleep 2
+done
+[ -b "$DEV" ] || { echo "data volume ${volume_id} never appeared at $DEV"; lsblk; exit 1; }
+if ! blkid "$DEV" >/dev/null 2>&1; then
+  mkfs -t xfs -L unifydata "$DEV"
+fi
+mkdir -p /data
+grep -q 'LABEL=unifydata' /etc/fstab || echo "LABEL=unifydata /data xfs defaults,nofail 0 2" >>/etc/fstab
+mount -a
+mountpoint -q /data || { echo "/data is not a mount point after mount -a"; exit 1; }
+mkdir -p /data/postgres /data/skypilot
+%{ if console_enabled ~}
+mkdir -p /data/console /data/console-logs
+%{ endif ~}
+
+# The fstab entry is nofail, so on a reboot where the volume is slow to attach
+# the boot carries on without it. Docker restarts containers itself
+# (restart: unless-stopped), and Postgres given an empty /data/postgres on the
+# root disk initialises a fresh, empty cluster that compute-api then writes to.
+# Docker must not start until /data is the volume.
+mkdir -p /etc/systemd/system/docker.service.d
+cat >/etc/systemd/system/docker.service.d/10-data-volume.conf <<'UNIT'
+[Unit]
+RequiresMountsFor=/data
+UNIT
+systemctl daemon-reload
+systemctl enable --now docker
+
+# ---------------------------------------------------------------------------
+# Secrets from SSM. Never in user_data itself: instance metadata is readable
+# by any process on the box.
+# ---------------------------------------------------------------------------
+get_param() {
+  aws ssm get-parameter --with-decryption --region '${region}' \
+    --name "$1" --query 'Parameter.Value' --output text
+}
+
+# Read every parameter into a variable first. A $(...) inside the heredoc
+# below would swallow a failure under set -e and leave an empty value that
+# only surfaces later in `journalctl -u unify-compute`. Missing or unreadable
+# (AccessDenied) parameters must stop the bootstrap here, in this log.
+require_param() {
+  local value
+  if ! value=$(get_param "$1"); then
+    echo "required SSM parameter $1 is missing or unreadable" >&2; exit 1
+  fi
+  [ -n "$value" ] || { echo "required SSM parameter $1 is empty" >&2; exit 1; }
+  printf '%s' "$value"
+}
+# Interpolated raw into connection URLs in the compose files
+# (postgresql://unify:PASS@postgres:5432/compute, redis://:PASS@redis:6379).
+# A "/" in the value ends the URL authority and the DSN silently becomes
+# nonsense. scripts/staging-secrets.sh generates hex for exactly this reason;
+# assert it here so a hand-made parameter fails in this log instead of later.
+require_url_safe_param() {
+  local value
+  value=$(require_param "$1")
+  case "$value" in
+    *[!0-9A-Za-z._~-]*)
+      echo "SSM parameter $1 contains a character that changes the meaning of a connection URL (expected unreserved characters only; use: openssl rand -hex 32)" >&2
+      exit 1
+      ;;
+  esac
+  printf '%s' "$value"
+}
+
+POSTGRES_PASSWORD=$(require_url_safe_param '${ssm_postgres_password}')
+%{ if console_enabled ~}
+REDIS_PASSWORD=$(require_url_safe_param '${ssm_redis_password}')
+SESSION_SECRET=$(require_param '${ssm_session_secret}')
+%{ endif ~}
+%{ if bridge_enabled ~}
+# Optional until the console ships the bridge routes.
+COMPUTE_BRIDGE_SECRET=$(get_param '${ssm_bridge_secret}' 2>/dev/null || true)
+%{ else ~}
+# bridge_enabled = false: the bridge stays dark whatever exists in SSM.
+COMPUTE_BRIDGE_SECRET=
+%{ endif ~}
+
+# Private GHCR packages: log in only if both parameters exist and are
+# non-empty, the same rule scripts/release/host.sh applies before a release.
+# Without this a private image would make the first `compose up` fail to pull.
+GHCR_USER=$(get_param '${ssm_prefix}/ghcr_pull_user' 2>/dev/null || true)
+GHCR_TOKEN=$(get_param '${ssm_prefix}/ghcr_pull_token' 2>/dev/null || true)
+if [ -n "$GHCR_USER" ] && [ -n "$GHCR_TOKEN" ]; then
+  printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+fi
+unset GHCR_TOKEN
+
+# /opt/unify-compute/compose is the contract with the release pipeline
+# (scripts/release/host.sh, COMPOSE_DIR): it runs `docker compose` there with
+# this .env, and must address the same project the systemd unit started.
+APP_DIR=/opt/unify-compute/compose
+install -d -m 0700 "$APP_DIR"
+
+# COMPOSE_FILE in .env is read by every `docker compose` run from $APP_DIR —
+# the systemd unit and release commands over SSM alike — so nobody has to
+# remember which files make up this environment.
+cat >"$APP_DIR/.env" <<ENV
+ENVIRONMENT=${environment}
+%{ if console_enabled ~}
+COMPOSE_FILE=docker-compose.yml:docker-compose.console.yml
+%{ else ~}
+COMPOSE_FILE=docker-compose.yml
+%{ endif ~}
+COMPUTE_API_IMAGE=${compute_api_image}
+SITE_IMAGE=${site_image}
+POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+COMPUTE_BRIDGE_SECRET=$COMPUTE_BRIDGE_SECRET
+CONSOLE_URL=${console_url}
+COMPUTE_API_BIND=0.0.0.0
+SITE_BIND=0.0.0.0
+DATA_DIR=/data
+%{ if console_enabled ~}
+CONSOLE_IMAGE=${console_image}
+REDIS_PASSWORD=$REDIS_PASSWORD
+SESSION_SECRET=$SESSION_SECRET
+CONSOLE_BIND=0.0.0.0
+SESSION_COOKIE_SECURE=true
+SESSION_COOKIE_TRUSTED_URL=https://${console_domain}
+%{ endif ~}
+ENV
+chmod 0600 "$APP_DIR/.env"
+
+cat >"$APP_DIR/docker-compose.yml" <<'COMPOSE'
+${compose_file}
+COMPOSE
+
+%{ if console_enabled ~}
+cat >"$APP_DIR/docker-compose.console.yml" <<'COMPOSE'
+${compose_console_file}
+COMPOSE
+
+cat >"$APP_DIR/postgres-init-console.sql" <<'SQL'
+${postgres_init_console}
+SQL
+%{ endif ~}
+
+cat >/etc/systemd/system/unify-compute.service <<'UNIT'
+[Unit]
+Description=unify-compute ${environment} stack
+Requires=docker.service
+After=docker.service
+RequiresMountsFor=/data
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/unify-compute/compose
+ExecStart=/usr/bin/docker compose --env-file /opt/unify-compute/compose/.env up -d --remove-orphans
+ExecStop=/usr/bin/docker compose --env-file /opt/unify-compute/compose/.env down
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable --now unify-compute.service
+echo "${name} bootstrap complete"
