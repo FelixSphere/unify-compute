@@ -13,11 +13,18 @@ const crockford = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 // time to the millisecond; within one millisecond their order is arbitrary,
 // which is why listing orders by created_at and uses the id only as a
 // tie-break.
-func NewJobID(now time.Time) string {
+func NewJobID(now time.Time) string { return newID("job_", now) }
+
+// NewEventID and NewWebhookID use the same encoding as job ids, so every id
+// the API hands out has one shape and one sort rule.
+func NewEventID(now time.Time) string   { return newID("evt_", now) }
+func NewWebhookID(now time.Time) string { return newID("wh_", now) }
+
+func newID(prefix string, now time.Time) string {
 	var b [16]byte
 	binary.BigEndian.PutUint64(b[:8], uint64(now.UnixMilli())<<16)
 	_, _ = rand.Read(b[6:])
-	return "job_" + encodeULID(b)
+	return prefix + encodeULID(b)
 }
 
 func encodeULID(b [16]byte) string {
