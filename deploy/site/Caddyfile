@@ -40,9 +40,6 @@
 	# No Strict-Transport-Security here: the ALB sets it (see ADR-0009). TLS
 	# and HSTS belong to the layer that terminates TLS, and setting it here
 	# too would send the header twice.
-	# HTML and the RSC payload share a URL; only the RSC header tells them
-	# apart. `+` keeps encode's Vary: Accept-Encoding.
-	+Vary RSC
 	import csp
 }
 
@@ -62,22 +59,14 @@
 		import security_headers
 	}
 
-	# Client-side navigation. vinext's router fetches the target page with
-	# `RSC: 1` and expects the prerendered flight payload (privacy.rsc,
-	# index.rsc), not the HTML. It only accepts the payload when the
-	# compatibility id matches the one baked into the bundle at build time —
-	# next.config.ts sets that from SITE_BUILD_ID, and so does this. On any
-	# mismatch the router falls back to a full page load, which is still
-	# correct, only slower.
-	@rsc header RSC 1
-	handle @rsc {
-		header Content-Type text/x-component
-		header X-Vinext-RSC-Compatibility-Id {$SITE_BUILD_ID}
-		header Cache-Control no-cache
-		rewrite / /index.rsc
-		rewrite * {path}.rsc
-		file_server
-	}
+	# Client-side navigation needs nothing special. vinext >= 1.0.0-beta.9
+	# writes each page's flight payload next to its HTML (privacy.txt,
+	# index.txt) and the router fetches that file by name, so the plain file
+	# server below answers it as text/plain, which the router accepts for a
+	# static export. The router still sends `RSC: 1`; do not rewrite on it —
+	# an RSC-header rewrite here is what broke navigation after the upgrade.
+	# A tab left open across a release notices the new build from a version
+	# id inside the payload and falls back to a full page load.
 
 	# The export writes /privacy as privacy.html. A trailing slash has no file
 	# behind it; redirect rather than serve the 404 for a URL people type.
@@ -95,8 +84,6 @@
 	header @woff2 Content-Type font/woff2
 	@woff path *.woff
 	header @woff Content-Type font/woff
-	@rscfile path *.rsc
-	header @rscfile Content-Type text/x-component
 
 	# Content-hashed by Vite: a new build is a new file name.
 	@hashed path /_next/static/*
