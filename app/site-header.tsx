@@ -64,7 +64,7 @@ export function SiteHeader({ homeHref = '/' }: { homeHref?: string }) {
   return (
     <header className="nav wrap">
       <div className="brand-group">
-        <Link href={homeHref} className="brand" aria-label="UnifyAI Compute home">
+        <Link href={homeHref} className="brand" aria-label="Unify Compute home">
           <BrandLockup decorative eager />
           {/* 1474×1461 artwork: at 42px wide the mark itself is 32px tall. */}
           <Image unoptimized loading="eager" src="/brand/unifyai-mark-black.svg" alt="" width={42} height={41.6} className="brand-mark" />
