@@ -43,6 +43,12 @@ hotfix: false                   # true needs a "## What was skipped" section
 For a failed attempt, the image fields are what was **attempted**, and
 `outcome: rolled-back` means the host restored the previous images itself.
 
+Images are recorded by their GHCR refs even though the hosts pull the ECR
+copy of the same digest (ADR-0009, "Runtime registry: ECR"); the run summary
+already prints them that way. On a host's first start (staging's first
+release), the `previous_*` refs are what its boot wrote but never ran; say so
+in the prose.
+
 ## What the prose should say
 
 The field block is for the machine. The prose is for the person deciding

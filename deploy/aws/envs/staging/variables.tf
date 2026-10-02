@@ -7,20 +7,26 @@ variable "region" {
 # live; CI's pinned-images job reads them and requires each to be a digest
 # that exists in the registry with a linux/arm64 manifest.
 #
+# Ours point at the runtime registry (ECR, deploy/aws/shared/ecr), which is
+# what the instance can pull from. The digest is the GHCR build's, unchanged:
+# release.yml copies it across before any cutover, and CI checks it in the
+# GHCR repository of the same name. A fresh instance can boot from a pin only
+# once some release has copied that digest into ECR.
+#
 # A pin that is not a digest yet (":dev", ":unpublished") keeps that job red
 # on purpose: it is the truthful state of "this stack cannot boot yet", and
 # the job going green is the signal that it can.
 
 variable "compute_api_image" {
-  description = "Publish with .github/workflows/publish-image.yml, then pin the digest it prints."
+  description = "Publish with .github/workflows/publish-image.yml; pin the digest it prints, under the ECR repository of the same name."
   type        = string
-  default     = "ghcr.io/felixsphere/unify-compute-api@sha256:10cf58392547078e2134f5ff0e1a0c9b0416ca7e186746f07e243697ed58ce4a"
+  default     = "871376691052.dkr.ecr.us-east-1.amazonaws.com/unify-compute-api@sha256:10cf58392547078e2134f5ff0e1a0c9b0416ca7e186746f07e243697ed58ce4a"
 }
 
 variable "site_image" {
   description = "Marketing site image, by digest. Rebuild baseline only; releases swap it on the host."
   type        = string
-  default     = "ghcr.io/felixsphere/unify-compute-site@sha256:a918fe89b1cc2227ad486ef9391526529c90aa770fb0d2b4f0526ed5d6b84c0a"
+  default     = "871376691052.dkr.ecr.us-east-1.amazonaws.com/unify-compute-site@sha256:a918fe89b1cc2227ad486ef9391526529c90aa770fb0d2b4f0526ed5d6b84c0a"
 }
 
 variable "console_image" {

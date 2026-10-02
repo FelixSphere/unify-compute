@@ -220,6 +220,17 @@ jobs:
   # published and their digests pinned in deploy/aws/envs/*/variables.tf.
   # That is the truthful state — neither environment can boot yet — and
   # weakening the check to make it green would hide exactly that.
+  #
+  # Our own pins are ECR refs (<acct>.dkr.ecr.<region>.amazonaws.com/
+  # unify-compute-{api,site}@sha256:D), the hosts' runtime registry. CI has no
+  # AWS credentials and must keep it that way, so it cannot read ECR. What it
+  # checks instead is the source of that copy: the same digest D at
+  # ghcr.io/felixsphere/<same repository>, where publish-image.yml pushed it
+  # and from which release.yml copies it into ECR, unchanged and verified,
+  # before any host is cut over. A digest is the content, so "D exists on
+  # GHCR with arm64" is the property the ECR copy inherits. Whether a given
+  # digest has been copied yet is a release-time fact (release.yml), not a
+  # repository one.
   pinned-images:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -245,6 +256,8 @@ jobs:
           images=$( {
             grep -hoE 'ghcr\.io/[a-z0-9._/-]+(:[A-Za-z0-9._-]+)?(@sha256:[0-9a-f]{64})?' \
               deploy/aws/envs/*/variables.tf
+            grep -hoE '[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/[a-z0-9._/-]+(:[A-Za-z0-9._-]+)?(@sha256:[0-9a-f]{64})?' \
+              deploy/aws/envs/*/variables.tf
             grep -hE '^[[:space:]]*image:[[:space:]]*[^$[:space:]]' deploy/compose/docker-compose*.yml \
               | sed -E 's/^[[:space:]]*image:[[:space:]]*//'
           } | sort -u)
@@ -260,6 +273,16 @@ jobs:
             # name:tag@digest is valid for docker pull (the tag is ignored); the
             # inspection uses the digest alone so it checks exactly that.
             inspect_ref=$(printf '%s' "$ref" | sed -E 's/:[A-Za-z0-9._-]+@/@/')
+            case "$inspect_ref" in
+              *.dkr.ecr.*)
+                if [[ ! "$inspect_ref" =~ ^871376691052\.dkr\.ecr\.us-east-1\.amazonaws\.com/(unify-compute-(api|site))@sha256:[0-9a-f]{64}$ ]]; then
+                  echo "::error::$ref is not one of our ECR repositories (871376691052.dkr.ecr.us-east-1.amazonaws.com/unify-compute-{api,site}@sha256:<digest>)"
+                  fail=1; continue
+                fi
+                inspect_ref="ghcr.io/felixsphere/${BASH_REMATCH[1]}@${inspect_ref#*@}"
+                echo "    ECR pin; checking its source $inspect_ref"
+                ;;
+            esac
             if ! docker buildx imagetools inspect "$inspect_ref" --raw > m.json 2>err.txt; then
               echo "::error::$ref is not pullable: $(head -c 300 err.txt)"
               fail=1; continue

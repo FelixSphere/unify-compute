@@ -29,6 +29,12 @@ our build graph. The `cmd/compute-api` binary links them once it imports
 | PostgreSQL | PostgreSQL Licence | Container in `deploy/compose`. |
 | Redis 7 | BSD-3-Clause | Container in `deploy/compose`. Pinned to the 7.x line, which predates the licence change. |
 
+## Release tooling (runs in CI, never shipped)
+
+| Component | Licence | Relationship |
+|---|---|---|
+| [crane](https://github.com/google/go-containerregistry) v0.22.1 (go-containerregistry), release binary `go-containerregistry_Linux_x86_64.tar.gz`, pinned by SHA-256 | Apache-2.0 | `.github/workflows/release.yml` downloads it to copy released image digests from GHCR to ECR unchanged (ADR-0009, "Runtime registry: ECR"). Run, not linked or redistributed; the upstream repository has no NOTICE file. |
+
 ## Marketing site
 
 npm dependencies in `package.json` are MIT-licensed shadcn/Radix/Vite ecosystem

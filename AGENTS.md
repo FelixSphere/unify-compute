@@ -57,15 +57,20 @@ Current status (say what exists rather than describing targets as shipped):
   console fork does not implement it yet.
 - The AWS Terraform — one module (`deploy/aws/modules/compute-stack/`) with
   staging and production callers under `deploy/aws/envs/`, plus GitHub OIDC
-  deploy roles in `deploy/aws/shared/github-oidc/`. Moving the site and
+  deploy roles in `deploy/aws/shared/github-oidc/` and the runtime image
+  registry (ECR) in `deploy/aws/shared/ecr/`. Moving the site and
   everything else onto it is
   [ADR-0009](docs/adr/0009-host-everything-on-aws.md), **Proposed**.
   Applied on 2026-10-02: the OIDC roles, and staging (49 resources; instance
   `i-0780af3b0bfdc3383`, records `staging`, `site.staging`, `console.staging`
-  `.compute.unifyai.us`). Staging's host **cannot pull our images**: the GHCR
-  packages are private and no read-only pull token is in SSM yet, so every
-  staging hostname answers 502. Production is not applied, and
-  `compute.unifyai.us` is still OpenAI Sites.
+  `.compute.unifyai.us`). Staging's first boot **could not pull our images**
+  (private GHCR, `unauthorized`), so every staging hostname answers 502. The
+  code now has hosts pull from ECR with their instance role, `release.yml`
+  copying each digest GHCR → ECR first (ADR-0009, "Runtime registry: ECR").
+  That takes effect only once `shared/ecr`, the OIDC roles and the staging
+  module are applied and a staging release has run; until then staging is
+  still down. Production is not applied, and `compute.unifyai.us` is still
+  OpenAI Sites.
 
 ## Licence boundary — the expensive mistake
 

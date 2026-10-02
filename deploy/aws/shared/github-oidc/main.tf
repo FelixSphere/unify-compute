@@ -37,6 +37,8 @@ resource "aws_iam_openid_connect_provider" "github" {
 locals {
   oidc_provider_arn = var.create_oidc_provider ? aws_iam_openid_connect_provider.github[0].arn : data.aws_iam_openid_connect_provider.github[0].arn
   account_id        = data.aws_caller_identity.current.account_id
+  # Created by deploy/aws/shared/ecr; named, not read from its state.
+  ecr_repositories = ["unify-compute-api", "unify-compute-site"]
 }
 
 data "aws_iam_policy_document" "trust" {
@@ -120,6 +122,30 @@ data "aws_iam_policy_document" "deploy" {
       "ec2:DescribeInstances",
     ]
     resources = ["*"]
+  }
+
+  # release.yml copies the released digests from GHCR into the runtime
+  # registry (deploy/aws/shared/ecr) before the cutover, then reads them back
+  # to prove the digest survived. Push and read on these two repositories
+  # only; no delete, no policy or lifecycle changes.
+  statement {
+    sid       = "EcrLogin"
+    actions   = ["ecr:GetAuthorizationToken"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid = "PushReleasedImagesToTheRuntimeRegistry"
+    actions = [
+      "ecr:BatchCheckLayerAvailability",
+      "ecr:InitiateLayerUpload",
+      "ecr:UploadLayerPart",
+      "ecr:CompleteLayerUpload",
+      "ecr:PutImage",
+      "ecr:BatchGetImage",
+      "ecr:DescribeImages",
+    ]
+    resources = [for r in local.ecr_repositories : "arn:aws:ecr:${var.region}:${local.account_id}:repository/${r}"]
   }
 }
 

@@ -15,6 +15,13 @@
 # rather than assumed. Production additionally refuses digests that staging
 # has not run successfully, unless `reason` starts with HOTFIX.
 #
+# Two registries (ADR-0009, "Runtime registry: ECR"). GHCR is where images are
+# built and where provenance is read; a release is named, gated and recorded
+# by its GHCR refs. ECR in the AWS account is where the hosts pull from, with
+# their instance role, so no host needs a GHCR token. `deploy` copies each
+# digest GHCR -> ECR unchanged and proves it, before the host is touched; the
+# host is only ever given the ECR ref of the same digest.
+#
 # Modes:
 #   release   cut the environment over to the two digests given
 #   rollback  cut back to the host's PREVIOUS_RELEASE (no digests needed)
@@ -158,6 +165,7 @@ jobs:
     permissions:
       id-token: write   # OIDC: no long-lived AWS keys exist for this repo
       contents: read
+      packages: read    # the GHCR side of the copy to ECR
     env:
       ENVIRONMENT: ${{ inputs.environment }}
       MODE: ${{ inputs.mode }}
@@ -184,6 +192,81 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+
+      # crane (go-containerregistry, Apache-2.0) copies manifests byte for
+      # byte, so an index keeps its digest. `docker buildx imagetools create`
+      # re-serialises the index and may not. Pinned by version and checksum
+      # (the release's checksums.txt, which matches its SLSA attestation).
+      - name: Install crane
+        if: inputs.mode == 'release'
+        env:
+          CRANE_VERSION: v0.22.1
+          CRANE_SHA256: 0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0
+        run: |
+          set -euo pipefail
+          curl -fsSLo "$RUNNER_TEMP/crane.tar.gz" \
+            "https://github.com/google/go-containerregistry/releases/download/$CRANE_VERSION/go-containerregistry_Linux_x86_64.tar.gz"
+          echo "$CRANE_SHA256  $RUNNER_TEMP/crane.tar.gz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar -xzf "$RUNNER_TEMP/crane.tar.gz" -C "$RUNNER_TEMP/bin" crane
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      # Before anything touches the host: a digest that cannot be copied, or
+      # that comes out different, fails here with the old release still up.
+      - name: Copy the exact digests from GHCR to ECR, and prove they are unchanged
+        id: ecr
+        if: inputs.mode == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          account=$(aws sts get-caller-identity --query Account --output text)
+          registry="$account.dkr.ecr.$AWS_REGION.amazonaws.com"
+          # crane's credentials only, for this job only.
+          export DOCKER_CONFIG="$RUNNER_TEMP/crane-auth"
+          printf '%s' "$GH_TOKEN" | crane auth login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          aws ecr get-login-password --region "$AWS_REGION" | crane auth login "$registry" -u AWS --password-stdin
+
+          for pair in "api=$API" "site=$SITE"; do
+            key=${pair%%=*}; src=${pair#*=}
+            repo=${src%@*}; repo=${repo##*/}
+            digest=${src#*@}
+            dst="$registry/$repo"
+            tag="sha256-${digest#sha256:}"   # derived from the digest, so an immutable tag can never need to move
+
+            [ "$(crane digest "$src")" = "$digest" ] || { echo "::error::GHCR does not serve $digest for $src"; exit 1; }
+
+            if out=$(aws ecr describe-images --repository-name "$repo" --image-ids imageDigest="$digest" \
+                       --query 'imageDetails[0].imageDigest' --output text 2>&1); then
+              echo "$repo: $digest is already in ECR (an earlier release copied it)"
+            elif grep -q ImageNotFoundException <<<"$out"; then
+              crane copy "$src" "$dst:$tag"
+            else
+              echo "::error::describe-images $repo: $out"; exit 1
+            fi
+
+            # Proved from what ECR serves, not from crane's report: the bytes
+            # behind the digest hash to it, the tag resolves to it, ECR's own
+            # record names it, and every platform manifest is there with
+            # linux/arm64 among them.
+            crane manifest "$dst@$digest" > index.json
+            [ "sha256:$(sha256sum < index.json | cut -d' ' -f1)" = "$digest" ] \
+              || { echo "::error::ECR's manifest for $dst@$digest does not hash to $digest"; exit 1; }
+            [ "$(crane digest "$dst:$tag")" = "$digest" ] \
+              || { echo "::error::$dst:$tag does not resolve to $digest"; exit 1; }
+            [ "$(aws ecr describe-images --repository-name "$repo" --image-ids imageTag="$tag" --query 'imageDetails[0].imageDigest' --output text)" = "$digest" ] \
+              || { echo "::error::ECR records a different digest for $repo:$tag"; exit 1; }
+            jq -e '.manifests[]? | select(.platform.os == "linux" and .platform.architecture == "arm64")' index.json >/dev/null \
+              || { echo "::error::$dst@$digest has no linux/arm64 manifest"; exit 1; }
+            for child in $(jq -r '.manifests[].digest' index.json); do
+              [ "sha256:$(crane manifest "$dst@$child" | sha256sum | cut -d' ' -f1)" = "$child" ] \
+                || { echo "::error::$dst@$child is missing or altered in ECR"; exit 1; }
+            done
+
+            echo "ok   $src -> $dst@$digest"
+            echo "- ECR: \`$dst@$digest\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "$key=$dst@$digest" >> "$GITHUB_OUTPUT"
+          done
 
       - name: Find the instance
         id: instance
@@ -218,10 +301,15 @@ jobs:
         if: inputs.mode != 'status'
         env:
           INSTANCE: ${{ steps.instance.outputs.id }}
+          HOST_API: ${{ steps.ecr.outputs.api }}
+          HOST_SITE: ${{ steps.ecr.outputs.site }}
         run: |
           set -euo pipefail
           target=""
-          if [ "$MODE" = release ]; then target="COMPUTE_API_IMAGE=$API SITE_IMAGE=$SITE"; fi
+          if [ "$MODE" = release ]; then
+            [ -n "$HOST_API" ] && [ -n "$HOST_SITE" ] || { echo "::error::no ECR refs from the copy step"; exit 1; }
+            target="COMPUTE_API_IMAGE=$HOST_API SITE_IMAGE=$HOST_SITE"
+          fi
           # Values were validated in `plan` (digest refs, a run id, a fixed
           # choice), so single quotes are sufficient. The free-text reason is
           # deliberately absent.
@@ -235,22 +323,33 @@ jobs:
           } > cutover.sh
           scripts/ssm-run.sh "$INSTANCE" cutover.sh "$MODE $ENVIRONMENT $GITHUB_RUN_ID" 1500
 
+      # The host speaks ECR refs. Everything after this step (the manifest
+      # the staging-first gate reads, the record CI checks) speaks GHCR refs,
+      # which name the same digest and are what provenance was proved for.
       - name: Read what was released
         id: released
         if: inputs.mode != 'status'
+        env:
+          HOST_API: ${{ steps.ecr.outputs.api }}
+          HOST_SITE: ${{ steps.ecr.outputs.site }}
         run: |
           set -euo pipefail
           api=$(sed -n 's/^RELEASED COMPUTE_API_IMAGE=//p' cutover.sh.out)
           site=$(sed -n 's/^RELEASED SITE_IMAGE=//p' cutover.sh.out)
           [ -n "$api" ] && [ -n "$site" ] || { echo "::error::the host did not report what it released"; exit 1; }
-          if [ "$MODE" = release ] && { [ "$api" != "$API" ] || [ "$site" != "$SITE" ]; }; then
+          if [ "$MODE" = release ] && { [ "$api" != "$HOST_API" ] || [ "$site" != "$HOST_SITE" ]; }; then
             echo "::error::the host released $api / $site, not what was asked"; exit 1
+          fi
+          as_ghcr() { sed -E 's#^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/(unify-compute-(api|site))@#ghcr.io/felixsphere/\1@#' <<<"$1"; }
+          api=$(as_ghcr "$api"); site=$(as_ghcr "$site")
+          if [ "$MODE" = release ] && { [ "$api" != "$API" ] || [ "$site" != "$SITE" ]; }; then
+            echo "::error::$api / $site do not map back to the GHCR refs asked for"; exit 1
           fi
           {
             echo "compute_api_image=$api"
             echo "site_image=$site"
-            echo "previous_compute_api_image=$(sed -n 's/^CURRENT COMPUTE_API_IMAGE=//p' cutover.sh.out)"
-            echo "previous_site_image=$(sed -n 's/^CURRENT SITE_IMAGE=//p' cutover.sh.out)"
+            echo "previous_compute_api_image=$(as_ghcr "$(sed -n 's/^CURRENT COMPUTE_API_IMAGE=//p' cutover.sh.out)")"
+            echo "previous_site_image=$(as_ghcr "$(sed -n 's/^CURRENT SITE_IMAGE=//p' cutover.sh.out)")"
             echo "backup=$(sed -n 's/^BACKUP [^ ]* //p' cutover.sh.out)"
             if grep -qx NOOP cutover.sh.out; then echo "noop=true"; else echo "noop=false"; fi
           } >> "$GITHUB_OUTPUT"

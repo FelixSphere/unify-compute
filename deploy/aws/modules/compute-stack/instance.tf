@@ -38,6 +38,13 @@ locals {
   ssm_bridge_secret     = coalesce(var.ssm_bridge_secret, "${local.ssm_prefix}/bridge_secret")
 
   compose_dir = "${path.module}/../../../compose"
+
+  # The runtime registry (deploy/aws/shared/ecr). Our images are pulled from
+  # here with this instance's role, so no host holds a registry credential
+  # that outlives the 12-hour ECR token. The console, Postgres and Redis are
+  # public images and are pulled from where they are published.
+  ecr_registry     = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.region}.amazonaws.com"
+  ecr_repositories = ["unify-compute-api", "unify-compute-site"]
 }
 
 data "aws_iam_policy_document" "assume" {
@@ -71,6 +78,20 @@ data "aws_iam_policy_document" "secrets" {
   statement {
     actions   = ["s3:PutObject"]
     resources = ["${aws_s3_bucket.backups.arn}/*"]
+  }
+
+  statement {
+    actions   = ["ecr:GetAuthorizationToken"]
+    resources = ["*"]
+  }
+
+  statement {
+    actions = [
+      "ecr:BatchGetImage",
+      "ecr:GetDownloadUrlForLayer",
+      "ecr:BatchCheckLayerAvailability",
+    ]
+    resources = [for r in local.ecr_repositories : "arn:aws:ecr:${var.region}:${data.aws_caller_identity.current.account_id}:repository/${r}"]
   }
 
   statement {
@@ -119,7 +140,6 @@ resource "aws_ebs_volume" "data" {
 locals {
   user_data = templatefile("${path.module}/user-data.sh.tftpl", {
     name                  = var.name
-    ssm_prefix            = local.ssm_prefix
     region                = var.region
     environment           = var.environment
     volume_id             = aws_ebs_volume.data.id
@@ -131,6 +151,7 @@ locals {
     console_image         = local.console_enabled ? var.console_image : ""
     console_domain        = local.console_enabled ? var.console_domain : ""
     console_url           = var.console_url
+    ecr_registry          = local.ecr_registry
     compute_api_image     = var.compute_api_image
     site_image            = var.site_image
     ssm_postgres_password = local.ssm_postgres_password
@@ -194,6 +215,17 @@ resource "aws_instance" "this" {
     precondition {
       condition     = var.name == "unify-compute-${var.environment}"
       error_message = "name must be unify-compute-<environment>: the deploy roles and the release pipeline find the instance by that Name tag, and the SSM prefix is derived from it."
+    }
+
+    # The instance can pull our images only from the runtime registry; a GHCR
+    # pin would boot a host that fails its first pull with `unauthorized`,
+    # which is how staging's first boot ended on 2026-10-02.
+    precondition {
+      condition = alltrue([
+        startswith(var.compute_api_image, "${local.ecr_registry}/unify-compute-api@sha256:"),
+        startswith(var.site_image, "${local.ecr_registry}/unify-compute-site@sha256:"),
+      ])
+      error_message = "compute_api_image and site_image must be ${local.ecr_registry}/unify-compute-{api,site}@sha256:<digest>: the runtime registry, by digest."
     }
 
     precondition {
