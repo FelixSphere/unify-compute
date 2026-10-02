@@ -31,7 +31,7 @@ esac
 
 token="$(curl -fsS -u "$ACTOR:$GH_TOKEN" \
   "https://ghcr.io/token?service=ghcr.io&scope=repository:${path}:pull" | jq -r .token)"
-[ -n "$token" ] && [ "$token" != null ] || { echo "::error::no registry token for $path"; exit 1; }
+if [ -z "$token" ] || [ "$token" = null ]; then echo "::error::no registry token for $path"; exit 1; fi
 auth=(-H "Authorization: Bearer $token")
 accept='application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json'
 

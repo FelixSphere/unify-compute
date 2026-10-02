@@ -199,7 +199,9 @@ backup() {
   if ! bucket=$(aws ssm get-parameter --region "$REGION" --name "$BACKUP_BUCKET_PARAM" --query Parameter.Value --output text); then
     die "backup bucket parameter $BACKUP_BUCKET_PARAM is missing or unreadable; no cutover without an off-host backup"
   fi
-  [ -n "$bucket" ] && [ "$bucket" != None ] || die "backup bucket parameter $BACKUP_BUCKET_PARAM is empty"
+  if [ -z "$bucket" ] || [ "$bucket" = None ]; then
+    die "backup bucket parameter $BACKUP_BUCKET_PARAM is empty"
+  fi
 
   dbs=$(compose exec -T "$PG_SERVICE" psql -U "$PG_USER" -d postgres -Atc \
         "select datname from pg_database where not datistemplate and datname <> 'postgres' order by 1")
