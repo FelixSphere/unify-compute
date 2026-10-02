@@ -1,12 +1,15 @@
 # Staging
 
-**Status: defined, not applied.** Nothing below is running. This page is the
-procedure and the acceptance criteria; the first apply is the CI/CD agent's
-call (`.claude/agents/cicd.md`).
+**Status: applied 2026-10-02, not serving.** The stack exists (instance
+`i-0780af3b0bfdc3383`, AMI pinned), but its first `compose up` failed: the
+GHCR packages are private and `/unify-compute-staging/ghcr_pull_user` /
+`ghcr_pull_token` do not exist yet. Every hostname answers 502 until they do.
+No release has run (`mode=status` has, once, successfully). This page is the
+procedure and the acceptance criteria (`.claude/agents/cicd.md`).
 
 Staging is `deploy/aws/envs/staging/`, a caller of the module in
 `deploy/aws/modules/compute-stack/` that production
-(`deploy/aws/envs/production/`, also not applied) shares — see
+(`deploy/aws/envs/production/`, not applied) shares — see
 [ADR-0009](adr/0009-host-everything-on-aws.md), Proposed. Staging is applied
 first, always.
 

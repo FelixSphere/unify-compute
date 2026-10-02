@@ -48,7 +48,8 @@ This repository holds three things, and they have different rules:
 
 Current status (say what exists rather than describing targets as shipped):
 
-- The marketing site is live. Nothing else is deployed yet.
+- The marketing site is live on OpenAI Sites. Staging exists on AWS but
+  **does not serve yet** (see below). Production is not applied.
 - `compute-api/` is a skeleton: health, SKU catalogue, and the job API routes
   with the contract from `docs/spec/job-api.md`. Job submission returns
   `501 not_implemented` until the SkyPilot backend and the console bridge land.
@@ -56,10 +57,14 @@ Current status (say what exists rather than describing targets as shipped):
   console fork does not implement it yet.
 - The AWS Terraform — one module (`deploy/aws/modules/compute-stack/`) with
   staging and production callers under `deploy/aws/envs/`, plus GitHub OIDC
-  deploy roles in `deploy/aws/shared/github-oidc/` — validates in CI and has
-  **not been applied**. Moving the site and everything else onto it is
-  [ADR-0009](docs/adr/0009-host-everything-on-aws.md), **Proposed**. No DNS
-  record for any `*.compute.unifyai.us` stack hostname exists, and
+  deploy roles in `deploy/aws/shared/github-oidc/`. Moving the site and
+  everything else onto it is
+  [ADR-0009](docs/adr/0009-host-everything-on-aws.md), **Proposed**.
+  Applied on 2026-10-02: the OIDC roles, and staging (49 resources; instance
+  `i-0780af3b0bfdc3383`, records `staging`, `site.staging`, `console.staging`
+  `.compute.unifyai.us`). Staging's host **cannot pull our images**: the GHCR
+  packages are private and no read-only pull token is in SSM yet, so every
+  staging hostname answers 502. Production is not applied, and
   `compute.unifyai.us` is still OpenAI Sites.
 
 ## Licence boundary — the expensive mistake
