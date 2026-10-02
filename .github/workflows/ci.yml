@@ -85,6 +85,19 @@ jobs:
           docker logs site; exit 1
       - name: Runs unprivileged
         run: test "$(docker exec site id -u)" = 65534
+      # The image's HEALTHCHECK (and compose's, which reuses it) shells out to
+      # busybox wget. Prove the binary is there and the check goes healthy,
+      # rather than learning it from an instance that never turns healthy.
+      - name: Docker healthcheck goes healthy
+        run: |
+          docker exec site wget -q -O /dev/null http://127.0.0.1:8080/healthz
+          # First probe runs one --interval (30s) after start.
+          for _ in $(seq 1 30); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' site)
+            [ "$status" = healthy ] && exit 0
+            sleep 2
+          done
+          echo "health status: $status"; docker inspect -f '{{json .State.Health}}' site; exit 1
       - run: deploy/site/smoke.sh http://127.0.0.1:8080 "${{ github.sha }}"
       - if: failure()
         run: docker logs site
