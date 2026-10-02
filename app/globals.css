@@ -221,6 +221,6 @@ footer > .copyright { width: 100%; font-size: var(--u-text-xs); padding-bottom: 
 /* Below 581px the header shows the mark alone at 32px (artwork height). */
 @media (max-width: 580px) {
   .nav .brand-lockup { display: none; }
-  .nav .brand-mark { display: block; width: 42px; height: 42px; margin-right: 4px; }
+  .nav .brand-mark { display: block; width: 42px; height: auto; margin-right: 4px; }
 }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { transition: none !important; } }
