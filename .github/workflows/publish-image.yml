@@ -1,4 +1,4 @@
-# Publishes compute-api to GHCR.
+# Publishes compute-api, or the marketing site's `site` image, to GHCR.
 #
 # This exists because `ci.yml` builds the container and throws it away, while
 # `deploy/aws/staging` pins `ghcr.io/felixsphere/unify-compute-api`. On
@@ -11,15 +11,28 @@
 # Graviton (`t4g.small`). An amd64-only image will not run there, and that
 # failure appears as a container that never starts rather than as a pull
 # error. The arm64 assertion below is the gate.
+#
+# The site image (deploy/site/) is published the same way by the
+# `publish-site` job: a `site-v*` tag, or a dispatch with image=site. The
+# workflow name is kept as it was so anything that refers to it by name still
+# matches; run-name says which image a run published.
 name: Publish compute-api image
+run-name: >-
+  Publish ${{ github.event_name == 'push' && (startsWith(github.ref_name, 'site-v') && 'site' || 'compute-api') || inputs.image }}
+  ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
 
 on:
   push:
-    tags: ["compute-api-v*"]
+    tags: ["compute-api-v*", "site-v*"]
   workflow_dispatch:
     inputs:
+      image:
+        description: "Which image to publish"
+        type: choice
+        options: [compute-api, site]
+        default: compute-api
       tag:
-        description: "Image tag to publish (e.g. dev, or compute-api-v0.1.0)"
+        description: "Image tag to publish (e.g. dev, compute-api-v0.1.0, site-v0.1.0)"
         required: true
         default: dev
       reason:
@@ -36,9 +49,13 @@ permissions:
 
 env:
   IMAGE: ghcr.io/felixsphere/unify-compute-api
+  SITE_IMAGE: ghcr.io/felixsphere/unify-compute-site
 
 jobs:
   publish:
+    if: >-
+      (github.event_name == 'push' && startsWith(github.ref_name, 'compute-api-v')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.image == 'compute-api')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
@@ -125,5 +142,117 @@ jobs:
             echo
             echo "\`\`\`hcl"
             echo "compute_api_image = \"${{ env.IMAGE }}@${{ steps.build.outputs.digest }}\""
+            echo "\`\`\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish-site:
+    if: >-
+      (github.event_name == 'push' && startsWith(github.ref_name, 'site-v')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.image == 'site')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve the tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "value=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Lint before publishing
+        run: |
+          npm ci
+          npx oxlint app lib
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      # Same image, same smoke as ci.yml, on amd64 before anything is pushed.
+      # The multi-arch build below reuses these layers from the cache.
+      - name: Build for the smoke test
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/site/Dockerfile
+          platforms: linux/amd64
+          load: true
+          push: false
+          provenance: false
+          build-args: SITE_BUILD_ID=${{ github.sha }}
+          tags: unify-compute-site:smoke
+          cache-from: type=gha,scope=site
+          cache-to: type=gha,scope=site,mode=max
+      - name: Smoke before publishing
+        run: |
+          docker run -d --name site -p 8080:8080 unify-compute-site:smoke
+          for _ in $(seq 1 30); do
+            curl -fs http://127.0.0.1:8080/healthz >/dev/null && break
+            sleep 1
+          done
+          deploy/site/smoke.sh http://127.0.0.1:8080 "${{ github.sha }}" || { docker logs site; exit 1; }
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push (amd64 + arm64)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/site/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: false
+          build-args: SITE_BUILD_ID=${{ github.sha }}
+          tags: |
+            ${{ env.SITE_IMAGE }}:${{ steps.tag.outputs.value }}
+            ${{ env.SITE_IMAGE }}:sha-${{ github.sha }}
+          cache-from: type=gha,scope=site
+          cache-to: type=gha,scope=site,mode=max
+
+      # As for compute-api: read the published manifest from the registry, not
+      # from the build's own report.
+      - name: Assert the published manifest carries arm64
+        run: |
+          REF="${{ env.SITE_IMAGE }}@${{ steps.build.outputs.digest }}"
+          docker buildx imagetools inspect "$REF" --raw > manifest.json
+          cat manifest.json
+          if ! jq -e '.manifests[]? | select(.platform.architecture == "arm64" and .platform.os == "linux")' manifest.json >/dev/null; then
+            echo "::error::published manifest has no linux/arm64 — staging and production are t4g (Graviton) and cannot run this image"
+            exit 1
+          fi
+          jq -e '.manifests[]? | select(.platform.architecture == "amd64" and .platform.os == "linux")' manifest.json >/dev/null \
+            || { echo "::error::published manifest has no linux/amd64"; exit 1; }
+
+      - name: Record what to pin
+        run: |
+          echo "digest: ${{ steps.build.outputs.digest }}"
+          {
+            echo "### site published"
+            echo
+            echo "| field | value |"
+            echo "|---|---|"
+            echo "| tag | \`${{ env.SITE_IMAGE }}:${{ steps.tag.outputs.value }}\` |"
+            echo "| digest | \`${{ steps.build.outputs.digest }}\` |"
+            echo "| commit | \`${{ github.sha }}\` |"
+            echo "| reason | ${{ inputs.reason || 'tag push' }} |"
+            echo
+            echo "Pin the **digest**, never the tag:"
+            echo
+            echo "\`\`\`"
+            echo "${{ env.SITE_IMAGE }}@${{ steps.build.outputs.digest }}"
             echo "\`\`\`"
           } >> "$GITHUB_STEP_SUMMARY"
