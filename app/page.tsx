@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { BrandLockup, CompanyLine } from './brand';
+import { SiteHeader } from './site-header';
 import { ArrowUpRight, ArrowRight, Layers3, ScanText, SlidersHorizontal, Binary, Zap } from 'lucide-react';
 
 const workloads = [
@@ -13,10 +14,7 @@ export default function Home() {
   return (
     <main id="top">
       <a className="skip-link" href="#workloads">Skip to content</a>
-      <header className="nav wrap">
-        <div className="brand-group"><a href="#top" className="brand" aria-label="UnifyAI home"><BrandLockup/></a><span className="product-divider" aria-hidden="true"/><span className="product-name">Compute</span></div>
-        <nav aria-label="Main navigation"><a href="#workloads">Workloads</a><a href="#how-it-works">How it works</a><a href="#consumption">Consumption</a></nav>
-      </header>
+      <SiteHeader homeHref="#top" />
 
       <section className="hero wrap">
         <div className="hero-copy">
@@ -44,7 +42,7 @@ export default function Home() {
       <section className="process-section" id="how-it-works"><div className="wrap section"><div className="section-heading"><div><p className="eyebrow">02 / THE COMPUTE MODEL</p><h2>From workload to output.<br/>Without the capacity planning.</h2></div><span className="subtle-label">DESIGNED TO KEEP YOU BUILDING</span></div><div className="steps"><article><span className="step-number">01</span><h3>Define the work</h3><p>Choose a model or bring your own job. Specify the data and resources it needs.</p></article><article><span className="step-number">02</span><h3>Run on demand</h3><p>The platform is designed to provision GPU compute for the task and release it when finished.</p></article><article><span className="step-number">03</span><h3>Keep the output</h3><p>Take the results into your application. Track consumption across your jobs.</p></article></div></div></section>
 
       <section className="consumption wrap section" id="consumption"><div><p className="eyebrow">03 / CONSUMPTION, NOT COMMITMENT</p><h2>Your work has a runtime.<br/><span>Your bill should, too.</span></h2><p>Our billing model is built around consumption, so you can match compute spend to actual workloads instead of reserving capacity ahead of time.</p><div className="pricing-note">Rates and availability will be announced at launch.</div></div><div className="billing-card"><div className="billing-title"><Zap size={18}/> THE PRINCIPLE</div><p>Run the job.<br/>Use the compute.<br/><span>Pay for the usage.</span></p><div className="billing-bottom"><span>Consumption-based</span><ArrowUpRight size={22}/></div></div></section>
-      <footer className="wrap"><a href="#top" className="brand" aria-label="UnifyAI home"><BrandLockup/></a><span>Compute beyond chat.</span><Link href="/privacy" className="footer-privacy">Privacy</Link><CompanyLine/></footer>
+      <footer className="wrap"><a href="#top" className="brand" aria-label="UnifyAI Compute home"><BrandLockup decorative/></a><span>Compute beyond chat.</span><Link href="/privacy" className="footer-privacy">Privacy</Link><CompanyLine/></footer>
     </main>
   );
 }

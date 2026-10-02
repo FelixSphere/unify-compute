@@ -9,8 +9,8 @@
   policy, **Proposed**), and the shared UnifyAI email kit
   (`~/unifyai-brand-kit/email/README.md`).
 - Layout: [`email/base.html`](email/base.html), a verbatim copy of the kit's
-  `base.html` taken on 2026-10-01 (the revision without the FelixSphere
-  tagline). Copy it again when the kit changes rather
+  `base.html` taken on 2026-10-01 (the revision with `{{product_short}}` and
+  without the FelixSphere tagline). Copy it again when the kit changes rather
   than editing it here.
 
 ## What exists and what does not
@@ -58,7 +58,8 @@ These values are the same in every message.
 |---|---|
 | `{{lang}}` / `{{dir}}` | `en` / `ltr` (compute has no other locale) |
 | `{{asset_base}}` | `https://compute.unifyai.us/email` |
-| `{{product_name}}` | `Compute`. The product is **UnifyAI Compute** (user decision, 2026-10-01). The header shows the UnifyAI lockup and then this descriptor, so the full name reads once. The same slot fills the footer. |
+| `{{product_name}}` | `UnifyAI Compute`, the full product name (user decision, 2026-10-01). Used in the footer line. |
+| `{{product_short}}` | `Compute`, the header descriptor after the UnifyAI lockup. |
 | `{{product_url}}` / `{{product_domain}}` | `https://compute.unifyai.us` / `compute.unifyai.us` |
 | `{{footer_reason}}` | "You're receiving this because a job you submitted with your UnifyAPI key changed state." |
 | Focal element | Option (a), the CTA button: amber `#F5A623` with **ink `#0E0E0E` text**, exactly as in `base.html`. Never white on amber. Amber appears only on this button. |

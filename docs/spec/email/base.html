@@ -29,13 +29,12 @@
 
   <table role="presentation" class="u-card" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px; max-width:600px; background:#FFFFFF; border:1px solid #E3E3DE; border-radius:6px;">
 
-    <!-- Header: fixed lockup + product descriptor (current product name, unchanged) -->
+    <!-- Header: fixed lockup + product descriptor ({{product_short}} = API | Gateway | Compute | Data | SelfAI) -->
     <tr><td class="u-pad" style="padding:28px 40px 24px; border-bottom:1px solid #E3E3DE;">
       <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
         <td style="vertical-align:middle;"><img src="{{asset_base}}/unifyai-lockup-black@2x.png" width="132" height="40" alt="UnifyAI" style="display:block; border:0; width:132px; height:40px;"></td>
-        <!-- Omit the next two cells when the product IS "UnifyAI" (UnifySelfAI) -->
         <td style="vertical-align:middle; padding:0 14px;"><div style="width:1px; height:22px; background:#CFCFC9;"></div></td>
-        <td style="vertical-align:middle; font-family:'Space Grotesk',Helvetica,Arial,sans-serif; font-weight:700; font-size:16px; color:#0E0E0E; white-space:nowrap;">{{product_name}}</td>
+        <td style="vertical-align:middle; font-family:'Space Grotesk',Helvetica,Arial,sans-serif; font-weight:700; font-size:16px; color:#0E0E0E; white-space:nowrap;">{{product_short}}</td>
       </tr></table>
     </td></tr>
 
