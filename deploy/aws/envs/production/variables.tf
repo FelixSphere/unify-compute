@@ -22,12 +22,12 @@ variable "manage_site_dns" {
 
 variable "compute_api_image" {
   type    = string
-  default = "ghcr.io/felixsphere/unify-compute-api:unpublished"
+  default = "ghcr.io/felixsphere/unify-compute-api@sha256:10cf58392547078e2134f5ff0e1a0c9b0416ca7e186746f07e243697ed58ce4a"
 }
 
 variable "site_image" {
   type    = string
-  default = "ghcr.io/felixsphere/unify-compute-site:unpublished"
+  default = "ghcr.io/felixsphere/unify-compute-site@sha256:a918fe89b1cc2227ad486ef9391526529c90aa770fb0d2b4f0526ed5d6b84c0a"
 }
 
 variable "ami_id" {
