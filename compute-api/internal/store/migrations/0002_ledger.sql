@@ -19,6 +19,9 @@ CREATE TABLE IF NOT EXISTS usage_events (
     -- Sent to the console as settle's event_id, which it dedupes on across
     -- all holds, so it must be globally unique and never reused.
     id                  text        PRIMARY KEY CHECK (id ~ '^ue_[0-9A-HJKMNP-TV-Z]{26}$'),
+    -- Write order. ULIDs order only to the millisecond, and a job's final
+    -- event can share a timestamp with the interval before it.
+    seq                 bigint      GENERATED ALWAYS AS IDENTITY UNIQUE,
     job_id              text        NOT NULL,
     -- gpu_seconds: quantity in seconds. storage_byte_seconds: bytes × seconds
     -- stored. egress_bytes: bytes sent. Only gpu_seconds is written today.
@@ -44,7 +47,7 @@ CREATE TABLE IF NOT EXISTS usage_events (
     CHECK ((meter = 'gpu_seconds') = (cumulative_amount IS NOT NULL AND cumulative_quantity IS NOT NULL AND amount IS NOT NULL))
 );
 
-CREATE INDEX IF NOT EXISTS usage_events_job_idx ON usage_events (job_id, meter, cumulative_quantity);
+CREATE INDEX IF NOT EXISTS usage_events_job_idx ON usage_events (job_id, meter, seq);
 
 CREATE OR REPLACE FUNCTION usage_events_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
@@ -112,6 +115,8 @@ CREATE TABLE IF NOT EXISTS metering_attempts (
     -- cancel.
     cap_at      timestamptz NOT NULL,
     cap_reason  text        NOT NULL,
+    -- When the backend accepted our request to stop the job at cap_at.
+    stop_requested_at timestamptz,
     ended_at    timestamptz,
     end_reason  text,
     PRIMARY KEY (job_id, attempt),
