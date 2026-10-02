@@ -1,20 +1,22 @@
 #!/bin/bash
-# Bootstraps the unify-compute staging host: Docker, the data volume, secrets
-# from SSM, and the compose stack from the repository. Rendered by instance.tf;
-# any edit here replaces the instance.
+# Bootstraps a unify-compute host (${environment}): Docker, the data volume,
+# secrets from SSM, and the compose stack from the repository. Rendered by
+# instance.tf; any edit here replaces the instance.
 set -euo pipefail
 exec > >(tee -a /var/log/unify-compute-bootstrap.log) 2>&1
 
 dnf update -y
 dnf install -y docker
-systemctl enable --now docker
 
+# Pinned with its checksum. "latest" meant every boot could get a different
+# compose, and a replacement instance could behave unlike the one it replaced.
+COMPOSE_VERSION=v5.6.0
+COMPOSE_SHA256=733ec76717ceb59052a9609b9dadfb523b2df8eab57a54212872d10a58078ea2
 COMPOSE_DIR=/usr/local/lib/docker/cli-plugins
 mkdir -p "$COMPOSE_DIR"
-# "latest" is unpinned: every boot may get a different compose. Pin a
-# release here once the first apply has proven the stack.
-curl -fsSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-aarch64" \
+curl -fsSL "https://github.com/docker/compose/releases/download/$COMPOSE_VERSION/docker-compose-linux-aarch64" \
   -o "$COMPOSE_DIR/docker-compose"
+echo "$COMPOSE_SHA256  $COMPOSE_DIR/docker-compose" | sha256sum -c -
 chmod +x "$COMPOSE_DIR/docker-compose"
 
 # ---------------------------------------------------------------------------
@@ -33,7 +35,24 @@ fi
 mkdir -p /data
 grep -q 'LABEL=unifydata' /etc/fstab || echo "LABEL=unifydata /data xfs defaults,nofail 0 2" >>/etc/fstab
 mount -a
-mkdir -p /data/postgres /data/console /data/console-logs /data/skypilot
+mountpoint -q /data || { echo "/data is not a mount point after mount -a"; exit 1; }
+mkdir -p /data/postgres /data/skypilot
+%{ if console_enabled ~}
+mkdir -p /data/console /data/console-logs
+%{ endif ~}
+
+# The fstab entry is nofail, so on a reboot where the volume is slow to attach
+# the boot carries on without it. Docker restarts containers itself
+# (restart: unless-stopped), and Postgres given an empty /data/postgres on the
+# root disk initialises a fresh, empty cluster that compute-api then writes to.
+# Docker must not start until /data is the volume.
+mkdir -p /etc/systemd/system/docker.service.d
+cat >/etc/systemd/system/docker.service.d/10-data-volume.conf <<'UNIT'
+[Unit]
+RequiresMountsFor=/data
+UNIT
+systemctl daemon-reload
+systemctl enable --now docker
 
 # ---------------------------------------------------------------------------
 # Secrets from SSM. Never in user_data itself: instance metadata is readable
@@ -56,12 +75,11 @@ require_param() {
   [ -n "$value" ] || { echo "required SSM parameter $1 is empty" >&2; exit 1; }
   printf '%s' "$value"
 }
-# These two are interpolated raw into connection URLs in the compose file
-# (postgresql://unify:PASS@postgres:5432/console, redis://:PASS@redis:6379).
+# Interpolated raw into connection URLs in the compose files
+# (postgresql://unify:PASS@postgres:5432/compute, redis://:PASS@redis:6379).
 # A "/" in the value ends the URL authority and the DSN silently becomes
-# nonsense, which surfaces as a console that never passes its health check.
-# scripts/staging-secrets.sh generates hex for exactly this reason; assert it
-# here so a hand-made parameter fails in this log instead of in Postgres.
+# nonsense. scripts/staging-secrets.sh generates hex for exactly this reason;
+# assert it here so a hand-made parameter fails in this log instead of later.
 require_url_safe_param() {
   local value
   value=$(require_param "$1")
@@ -75,25 +93,46 @@ require_url_safe_param() {
 }
 
 POSTGRES_PASSWORD=$(require_url_safe_param '${ssm_postgres_password}')
+%{ if console_enabled ~}
 REDIS_PASSWORD=$(require_url_safe_param '${ssm_redis_password}')
 SESSION_SECRET=$(require_param '${ssm_session_secret}')
+%{ endif ~}
+%{ if bridge_enabled ~}
 # Optional until the console ships the bridge routes.
 COMPUTE_BRIDGE_SECRET=$(get_param '${ssm_bridge_secret}' 2>/dev/null || true)
+%{ else ~}
+# bridge_enabled = false: the bridge stays dark whatever exists in SSM.
+COMPUTE_BRIDGE_SECRET=
+%{ endif ~}
 
 install -d -m 0700 /opt/unify-compute
+
+# COMPOSE_FILE in .env is read by every `docker compose` run from
+# /opt/unify-compute — the systemd unit and release commands over SSM alike —
+# so nobody has to remember which files make up this environment.
 cat >/opt/unify-compute/.env <<ENV
 ENVIRONMENT=${environment}
-CONSOLE_IMAGE=${console_image}
+%{ if console_enabled ~}
+COMPOSE_FILE=docker-compose.yml:docker-compose.console.yml
+%{ else ~}
+COMPOSE_FILE=docker-compose.yml
+%{ endif ~}
 COMPUTE_API_IMAGE=${compute_api_image}
+SITE_IMAGE=${site_image}
 POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+COMPUTE_BRIDGE_SECRET=$COMPUTE_BRIDGE_SECRET
+CONSOLE_URL=${console_url}
+COMPUTE_API_BIND=0.0.0.0
+SITE_BIND=0.0.0.0
+DATA_DIR=/data
+%{ if console_enabled ~}
+CONSOLE_IMAGE=${console_image}
 REDIS_PASSWORD=$REDIS_PASSWORD
 SESSION_SECRET=$SESSION_SECRET
-COMPUTE_BRIDGE_SECRET=$COMPUTE_BRIDGE_SECRET
 CONSOLE_BIND=0.0.0.0
-COMPUTE_API_BIND=0.0.0.0
 SESSION_COOKIE_SECURE=true
 SESSION_COOKIE_TRUSTED_URL=https://${console_domain}
-DATA_DIR=/data
+%{ endif ~}
 ENV
 chmod 0600 /opt/unify-compute/.env
 
@@ -101,15 +140,22 @@ cat >/opt/unify-compute/docker-compose.yml <<'COMPOSE'
 ${compose_file}
 COMPOSE
 
-cat >/opt/unify-compute/postgres-init.sql <<'SQL'
-${postgres_init}
+%{ if console_enabled ~}
+cat >/opt/unify-compute/docker-compose.console.yml <<'COMPOSE'
+${compose_console_file}
+COMPOSE
+
+cat >/opt/unify-compute/postgres-init-console.sql <<'SQL'
+${postgres_init_console}
 SQL
+%{ endif ~}
 
 cat >/etc/systemd/system/unify-compute.service <<'UNIT'
 [Unit]
-Description=unify-compute staging stack (console + compute-api)
+Description=unify-compute ${environment} stack
 Requires=docker.service
 After=docker.service
+RequiresMountsFor=/data
 
 [Service]
 Type=oneshot

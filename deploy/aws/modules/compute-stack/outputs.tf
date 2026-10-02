@@ -1,0 +1,27 @@
+output "urls" {
+  description = "Every hostname this stack routes, by app."
+  value       = { for k, a in local.apps : k => "https://${a.domain}" }
+}
+
+output "instance_id" {
+  description = "For `aws ssm send-command --instance-ids <id>`."
+  value       = aws_instance.this.id
+}
+
+output "ami_id_in_use" {
+  description = "Pin this into ami_id after the first apply so a moved 'latest' pointer cannot force a replacement."
+  value       = local.ami_id
+}
+
+output "alb_dns_name" {
+  value = aws_lb.this.dns_name
+}
+
+output "alb_zone_id" {
+  description = "With alb_dns_name, the alias target for the site cutover change batch."
+  value       = aws_lb.this.zone_id
+}
+
+output "data_volume_id" {
+  value = aws_ebs_volume.data.id
+}
