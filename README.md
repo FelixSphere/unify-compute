@@ -12,7 +12,7 @@ through the customer's existing UnifyAPI account.
 
 | Path | |
 |---|---|
-| `app/` | Marketing site (vinext), hosted on OpenAI Sites |
+| `app/` | Marketing site (vinext static export). Live on OpenAI Sites until the DNS cutover; the AWS `site` image is `deploy/site/` |
 | `compute-api/` | The compute service: job API in front of SkyPilot, billed through UnifyAPI (Go) |
 | `deploy/compose/` | compute-api + site + Postgres; `docker-compose.console.yml` adds console + Redis for staging and local |
 | `deploy/aws/` | Terraform: `modules/compute-stack`, `envs/staging`, `envs/production`, `shared/github-oidc` — not applied ([ADR-0009](docs/adr/0009-host-everything-on-aws.md), proposed) |
