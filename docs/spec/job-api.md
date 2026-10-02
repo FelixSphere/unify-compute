@@ -71,8 +71,10 @@ OpenAI-style envelope so existing client error handling carries over:
 }
 ```
 
-`placement` is null until the job is `running` and says where it landed
-(*planned*; the backend fills it from SkyPilot's cluster record).
+`placement` is null until the job is `running` and says where it landed.
+The backend writes it from SkyPilot's cluster record when the cluster is
+first seen `UP`, before the job reads `running` ([`backend.md`](backend.md)).
+It is not served yet, because the backend is not wired to submit.
 
 Money is a decimal string in USD, never a float. Timestamps are Unix seconds.
 
