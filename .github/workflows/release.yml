@@ -1,0 +1,362 @@
+# The ONLY way unify-compute reaches staging or production.
+#
+#   gh workflow run release.yml --ref main -f environment=staging \
+#     -f compute_api_image=ghcr.io/felixsphere/unify-compute-api@sha256:<d> \
+#     -f site_image=ghcr.io/felixsphere/unify-compute-site@sha256:<d> \
+#     -f reason="<release name>"
+#
+# Dispatch only. Merging to main runs ci.yml and stops: merge is not release,
+# and release authority is the CI/CD agent's (.claude/agents/cicd.md).
+#
+# A release is a set of image digests, not a commit: the images are built and
+# tested by the publish workflows, and `plan` re-establishes, per digest, that
+# the bytes came from a commit on main whose CI passed. That is the chain a
+# `needs:` would give if the build lived here; it does not, so it is checked
+# rather than assumed. Production additionally refuses digests that staging
+# has not run successfully, unless `reason` starts with HOTFIX.
+#
+# Modes:
+#   release   cut the environment over to the two digests given
+#   rollback  cut back to the host's PREVIOUS_RELEASE (no digests needed)
+#   status    read-only: what the host runs, what it would roll back to
+name: Release
+run-name: "${{ inputs.mode }} ${{ inputs.environment }}: ${{ inputs.reason }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Where to release"
+        required: true
+        type: choice
+        options: [staging, production]
+      mode:
+        description: "release | rollback (to the host's PREVIOUS_RELEASE) | status (read-only)"
+        required: true
+        type: choice
+        default: release
+        options: [release, rollback, status]
+      compute_api_image:
+        description: "release only: ghcr.io/felixsphere/unify-compute-api@sha256:<digest> (or just sha256:<digest>)"
+        required: false
+        type: string
+      site_image:
+        description: "release only: ghcr.io/felixsphere/unify-compute-site@sha256:<digest> (or just sha256:<digest>)"
+        required: false
+        type: string
+      reason:
+        description: "Why (release name). Starting with HOTFIX skips the staging-first gate and requires a hotfix record"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  # Everything that can refuse a release without touching AWS. No
+  # credentials in this job.
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read      # in-flight runs, staging manifests
+      packages: read     # registry lookups for provenance
+    outputs:
+      compute_api_image: ${{ steps.inputs.outputs.compute_api_image }}
+      site_image: ${{ steps.inputs.outputs.site_image }}
+      build: ${{ steps.provenance.outputs.build }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ENVIRONMENT: ${{ inputs.environment }}
+      MODE: ${{ inputs.mode }}
+      REASON: ${{ inputs.reason }}
+      IN_API: ${{ inputs.compute_api_image }}
+      IN_SITE: ${{ inputs.site_image }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - name: Releases run from main
+        run: |
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::release.yml runs from main only (got $GITHUB_REF). The scripts that touch the host must be the reviewed ones."
+            exit 1
+          fi
+
+      - name: No other release is in flight
+        run: scripts/release/in-flight.sh
+
+      - name: Validate inputs
+        id: inputs
+        run: |
+          set -euo pipefail
+          norm() {  # bare sha256:<d> -> full ref
+            case "$2" in sha256:*) printf '%s@%s' "$1" "$2" ;; *) printf '%s' "$2" ;; esac
+          }
+          if [ "$MODE" = release ]; then
+            api=$(norm ghcr.io/felixsphere/unify-compute-api "$IN_API")
+            site=$(norm ghcr.io/felixsphere/unify-compute-site "$IN_SITE")
+            [[ "$api" =~ ^ghcr\.io/felixsphere/unify-compute-api@sha256:[0-9a-f]{64}$ ]] \
+              || { echo "::error::compute_api_image must be ghcr.io/felixsphere/unify-compute-api@sha256:<64 hex>; a tag can be repointed, a digest cannot"; exit 1; }
+            [[ "$site" =~ ^ghcr\.io/felixsphere/unify-compute-site@sha256:[0-9a-f]{64}$ ]] \
+              || { echo "::error::site_image must be ghcr.io/felixsphere/unify-compute-site@sha256:<64 hex>"; exit 1; }
+            echo "compute_api_image=$api" >> "$GITHUB_OUTPUT"
+            echo "site_image=$site" >> "$GITHUB_OUTPUT"
+          elif [ -n "$IN_API$IN_SITE" ]; then
+            echo "::error::$MODE takes no digests: rollback uses the host's PREVIOUS_RELEASE, status changes nothing"; exit 1
+          fi
+          # The reason is free text; it reaches the summary and the run name,
+          # never the host payload.
+          [ -n "${REASON// /}" ] || { echo "::error::reason is required"; exit 1; }
+
+      - name: Each digest is on main with CI green, and runs on arm64
+        id: provenance
+        if: inputs.mode == 'release'
+        env:
+          API: ${{ steps.inputs.outputs.compute_api_image }}
+          SITE: ${{ steps.inputs.outputs.site_image }}
+        run: |
+          set -euo pipefail
+          scripts/release/provenance.sh "$API" | tee api.txt
+          scripts/release/provenance.sh "$SITE" | tee site.txt
+          # /healthz reports compute-api's build; smoke holds it to this.
+          echo "build=$(sed -n 's/^commit=//p' api.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Production runs only what staging ran
+        if: inputs.environment == 'production' && inputs.mode == 'release'
+        env:
+          COMPUTE_API_IMAGE: ${{ steps.inputs.outputs.compute_api_image }}
+          SITE_IMAGE: ${{ steps.inputs.outputs.site_image }}
+        run: |
+          set -euo pipefail
+          if [[ "$REASON" == HOTFIX* ]]; then
+            if scripts/release/staging-first.sh; then exit 0; fi
+            echo "::warning::HOTFIX: releasing to PRODUCTION digests that staging has NOT run. Allowed only for a live outage, a security issue, or data being lost. A record with 'hotfix: true' and '## What was skipped' must follow (ci.yml enforces it)."
+            {
+              echo "## HOTFIX: staging-first gate bypassed"
+              echo
+              echo "These digests have no successful staging release. Write the record under"
+              echo "\`deploy/releases/\` with \`hotfix: true\` and a \`## What was skipped\` section,"
+              echo "and release the same digests to staging afterwards."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          scripts/release/staging-first.sh
+
+  deploy:
+    needs: [plan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment: ${{ inputs.environment }}
+    # One lane per environment, never cancelled. The in-flight check in `plan`
+    # is what makes a second dispatch fail loudly; this is the backstop.
+    concurrency:
+      group: release-${{ inputs.environment }}
+      cancel-in-progress: false
+    permissions:
+      id-token: write   # OIDC: no long-lived AWS keys exist for this repo
+      contents: read
+    env:
+      ENVIRONMENT: ${{ inputs.environment }}
+      MODE: ${{ inputs.mode }}
+      REASON: ${{ inputs.reason }}
+      API: ${{ needs.plan.outputs.compute_api_image }}
+      SITE: ${{ needs.plan.outputs.site_image }}
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+
+      - name: Record who is releasing what, and why
+        run: |
+          {
+            echo "### unify-compute $MODE → $ENVIRONMENT"
+            echo
+            echo "- Actor: \`$GITHUB_ACTOR\`"
+            echo "- Workflow commit: \`$GITHUB_SHA\`"
+            echo "- Reason: $REASON"
+            [ -z "$API" ] || echo "- compute-api: \`$API\`"
+            [ -z "$SITE" ] || echo "- site: \`$SITE\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a  # v4.3.1
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Find the instance
+        id: instance
+        run: |
+          set -euo pipefail
+          ids=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=unify-compute-$ENVIRONMENT" "Name=instance-state-name,Values=running" \
+            --query 'Reservations[].Instances[].InstanceId' --output text)
+          n=$(wc -w <<<"$ids")
+          [ "$n" = 1 ] || { echo "::error::expected exactly one running instance tagged Name=unify-compute-$ENVIRONMENT, found $n: $ids"; exit 1; }
+          echo "id=$ids" >> "$GITHUB_OUTPUT"
+          echo "instance: $ids"
+
+      # Read off the host BEFORE anything changes, so the record's "previous"
+      # line is evidence rather than reconstruction.
+      - name: What the host runs now
+        env:
+          INSTANCE: ${{ steps.instance.outputs.id }}
+        run: |
+          set -euo pipefail
+          {
+            echo "ACTION='status'"
+            echo "ENV_NAME='$ENVIRONMENT'"
+            echo "RELEASE_ID='$GITHUB_RUN_ID'"
+            echo "REGION='$AWS_REGION'"
+            cat scripts/release/host.sh
+          } > status.sh
+          scripts/ssm-run.sh "$INSTANCE" status.sh "status $ENVIRONMENT $GITHUB_RUN_ID" 120
+          sed -n 's/^CURRENT /- before: /p' status.sh.out >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Back up, cut over, verify on the host (restores the previous images on failure)
+        if: inputs.mode != 'status'
+        env:
+          INSTANCE: ${{ steps.instance.outputs.id }}
+        run: |
+          set -euo pipefail
+          target=""
+          if [ "$MODE" = release ]; then target="COMPUTE_API_IMAGE=$API SITE_IMAGE=$SITE"; fi
+          # Values were validated in `plan` (digest refs, a run id, a fixed
+          # choice), so single quotes are sufficient. The free-text reason is
+          # deliberately absent.
+          {
+            echo "ACTION='$MODE'"
+            echo "ENV_NAME='$ENVIRONMENT'"
+            echo "RELEASE_ID='$GITHUB_RUN_ID'"
+            echo "REGION='$AWS_REGION'"
+            echo "TARGET='$target'"
+            cat scripts/release/host.sh
+          } > cutover.sh
+          scripts/ssm-run.sh "$INSTANCE" cutover.sh "$MODE $ENVIRONMENT $GITHUB_RUN_ID" 1500
+
+      - name: Read what was released
+        id: released
+        if: inputs.mode != 'status'
+        run: |
+          set -euo pipefail
+          api=$(sed -n 's/^RELEASED COMPUTE_API_IMAGE=//p' cutover.sh.out)
+          site=$(sed -n 's/^RELEASED SITE_IMAGE=//p' cutover.sh.out)
+          [ -n "$api" ] && [ -n "$site" ] || { echo "::error::the host did not report what it released"; exit 1; }
+          if [ "$MODE" = release ] && { [ "$api" != "$API" ] || [ "$site" != "$SITE" ]; }; then
+            echo "::error::the host released $api / $site, not what was asked"; exit 1
+          fi
+          {
+            echo "compute_api_image=$api"
+            echo "site_image=$site"
+            echo "previous_compute_api_image=$(sed -n 's/^CURRENT COMPUTE_API_IMAGE=//p' cutover.sh.out)"
+            echo "previous_site_image=$(sed -n 's/^CURRENT SITE_IMAGE=//p' cutover.sh.out)"
+            echo "backup=$(sed -n 's/^BACKUP [^ ]* //p' cutover.sh.out)"
+            if grep -qx NOOP cutover.sh.out; then echo "noop=true"; else echo "noop=false"; fi
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Smoke from outside
+        if: inputs.mode != 'status'
+        env:
+          ORIGIN: ${{ vars.PUBLIC_ORIGIN }}
+          EXPECT_BUILD: ${{ needs.plan.outputs.build }}
+        run: |
+          set -euo pipefail
+          [ -n "$ORIGIN" ] || { echo "::error::set the PUBLIC_ORIGIN variable on the $ENVIRONMENT environment"; exit 1; }
+          if ! scripts/release/smoke.sh; then
+            {
+              echo "## Smoke FAILED after cutover"
+              echo
+              echo "The host passed its own checks, so it was not rolled back automatically."
+              echo "Decide, then if it is the release:"
+              echo
+              echo "\`\`\`"
+              echo "gh workflow run release.yml --ref main -f environment=$ENVIRONMENT -f mode=rollback -f reason=\"rollback: <why>\""
+              echo "\`\`\`"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+      - name: Public domain is served by AWS (after the DNS cutover only)
+        if: inputs.environment == 'production' && inputs.mode != 'status'
+        env:
+          DNS_CUTOVER: ${{ vars.DNS_CUTOVER }}
+          PUBLIC_ORIGIN: ${{ vars.PUBLIC_ORIGIN }}
+          DOMAIN: compute.unifyai.us
+          ALB_DNS_NAME: ${{ vars.ALB_DNS_NAME }}
+          ORIGIN: https://compute.unifyai.us
+          EXPECT_BUILD: ${{ needs.plan.outputs.build }}
+        run: |
+          set -euo pipefail
+          if [ "$DNS_CUTOVER" != "done" ]; then
+            echo "::notice::compute.unifyai.us has not been cut over to AWS (vars.DNS_CUTOVER != done); smoke ran against PUBLIC_ORIGIN only."
+            echo "- DNS: compute.unifyai.us not cut over yet; checked \`$PUBLIC_ORIGIN\` only" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          scripts/release/served-by-aws.sh
+          if [ "$ORIGIN" != "$PUBLIC_ORIGIN" ]; then scripts/release/smoke.sh; fi
+
+      # LAST step on purpose: this artifact is what the production gate looks
+      # for, so it must exist only for a run where everything above passed.
+      - name: Write the release manifest
+        if: inputs.mode != 'status'
+        id: manifest
+        env:
+          R_API: ${{ steps.released.outputs.compute_api_image }}
+          R_SITE: ${{ steps.released.outputs.site_image }}
+        run: |
+          set -euo pipefail
+          mkdir manifest
+          {
+            echo "ENVIRONMENT=$ENVIRONMENT"
+            echo "ACTION=$MODE"
+            echo "RUN_ID=$GITHUB_RUN_ID"
+            echo "COMMIT=$GITHUB_SHA"
+            echo "COMPUTE_API_IMAGE=$R_API"
+            echo "SITE_IMAGE=$R_SITE"
+          } > manifest/manifest.env
+          a=${R_API#*@sha256:}; s=${R_SITE#*@sha256:}
+          echo "name=release-manifest-$ENVIRONMENT-${a:0:12}-${s:0:12}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        if: inputs.mode != 'status'
+        with:
+          name: ${{ steps.manifest.outputs.name }}
+          path: manifest/manifest.env
+          retention-days: 90
+
+      - name: The record to write
+        if: inputs.mode != 'status'
+        env:
+          R_API: ${{ steps.released.outputs.compute_api_image }}
+          R_SITE: ${{ steps.released.outputs.site_image }}
+          P_API: ${{ steps.released.outputs.previous_compute_api_image }}
+          P_SITE: ${{ steps.released.outputs.previous_site_image }}
+          BACKUP: ${{ steps.released.outputs.backup }}
+          NOOP: ${{ steps.released.outputs.noop }}
+        run: |
+          hotfix=false; [[ "$REASON" == HOTFIX* ]] && hotfix=true
+          {
+            echo
+            echo "A pushed commit is not a release, and neither is this run until it is written down."
+            echo "Commit this as \`deploy/releases/$(date -u +%Y-%m-%d)-<name>.md\` within 24h (ci.yml checks):"
+            echo
+            echo '```markdown'
+            echo "---"
+            echo "environment: $ENVIRONMENT"
+            echo "action: $MODE"
+            echo "outcome: success"
+            echo "run: $GITHUB_RUN_ID"
+            echo "commit: $GITHUB_SHA"
+            echo "compute_api_image: $R_API"
+            echo "site_image: $R_SITE"
+            echo "previous_compute_api_image: ${P_API:-none}"
+            echo "previous_site_image: ${P_SITE:-none}"
+            echo "hotfix: $hotfix"
+            echo "---"
+            echo
+            echo "# $(date -u +%Y-%m-%d) — $REASON"
+            echo
+            echo "Backup: \`${BACKUP:-none (no-op)}\`. No-op: $NOOP."
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

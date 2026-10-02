@@ -35,6 +35,29 @@ jobs:
           grep -q 'AGENTS.md' .cursor/rules/agents.mdc
           grep -q 'AGENTS.md' .github/copilot-instructions.md
 
+  # One record per release under deploy/releases/, in the shape the README
+  # defines, and every successful release.yml run older than a day cited by
+  # one. A run nobody wrote down is found later by whoever needed to know what
+  # shipped. Also lints the release scripts, which `infra-checks` does not
+  # reach (it globs scripts/*.sh only); the host script is POSIX sh because
+  # SSM runs it with `sh`.
+  release-records:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Release records
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/release/check-records.sh
+      - name: shellcheck the release scripts
+        run: |
+          shellcheck -s sh scripts/release/host.sh
+          shellcheck scripts/release/*.sh
+
   site:
     runs-on: ubuntu-latest
     timeout-minutes: 15
