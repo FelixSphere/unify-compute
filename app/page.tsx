@@ -1,4 +1,5 @@
 import Image from 'next/image';
+import Link from 'next/link';
 import { ArrowUpRight, ArrowRight, Layers3, ScanText, SlidersHorizontal, Binary, Zap, GitFork } from 'lucide-react';
 
 const workloads = [
@@ -44,7 +45,7 @@ export default function Home() {
       <section className="process-section" id="how-it-works"><div className="wrap section"><div className="section-heading"><div><p className="eyebrow">02 / THE COMPUTE MODEL</p><h2>From workload to output.<br/>Without the capacity planning.</h2></div><span className="subtle-label">DESIGNED TO KEEP YOU BUILDING</span></div><div className="steps"><article><span className="step-number">01</span><h3>Define the work</h3><p>Choose a model or bring your own job. Specify the data and resources it needs.</p></article><article><span className="step-number">02</span><h3>Run on demand</h3><p>The platform is designed to provision GPU compute for the task and release it when finished.</p></article><article><span className="step-number">03</span><h3>Keep the output</h3><p>Take the results into your application. Track consumption across your jobs.</p></article></div></div></section>
 
       <section className="consumption wrap section" id="consumption"><div><p className="eyebrow">03 / CONSUMPTION, NOT COMMITMENT</p><h2>Your work has a runtime.<br/><span>Your bill should, too.</span></h2><p>Our billing model is built around consumption, so you can match compute spend to actual workloads instead of reserving capacity ahead of time.</p><div className="pricing-note">Rates and availability will be announced at launch.</div></div><div className="billing-card"><div className="billing-title"><Zap size={18}/> THE PRINCIPLE</div><p>Run the job.<br/>Use the compute.<br/><span>Pay for the usage.</span></p><div className="billing-bottom"><span>Consumption-based</span><ArrowUpRight size={22}/></div></div></section>
-      <footer className="wrap"><a href="#top" className="brand"><Image unoptimized src="/unifyai-mark.png" alt="" width={34} height={34} className="brand-mark"/><span>unify<span className="brand-ai">AI</span></span></a><span>Compute beyond chat.</span><a href="https://github.com/FelixSphere" target="_blank" rel="noreferrer"><GitFork size={17}/> Follow development <ArrowUpRight size={15}/></a><span className="copyright">© {new Date().getFullYear()} unifyAI</span></footer>
+      <footer className="wrap"><a href="#top" className="brand"><Image unoptimized src="/unifyai-mark.png" alt="" width={34} height={34} className="brand-mark"/><span>unify<span className="brand-ai">AI</span></span></a><span>Compute beyond chat.</span><Link href="/privacy" className="footer-privacy">Privacy</Link><a href="https://github.com/FelixSphere" target="_blank" rel="noreferrer"><GitFork size={17}/> Follow development <ArrowUpRight size={15}/></a><span className="copyright">© {new Date().getFullYear()} unifyAI</span></footer>
     </main>
   );
 }
