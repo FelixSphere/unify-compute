@@ -103,7 +103,11 @@ SESSION_SECRET=$(require_param '${ssm_session_secret}')
 # Optional until the console ships the bridge routes.
 COMPUTE_BRIDGE_SECRET=$(get_param '${ssm_bridge_secret}' 2>/dev/null || true)
 %{ else ~}
-# bridge_enabled = false: the bridge stays dark whatever exists in SSM.
+# bridge_enabled = false: the bridge stays dark whatever exists in SSM. So
+# does CONSOLE_URL (rendered empty below): compute-api builds the bridge
+# client at boot whenever CONSOLE_URL is set and exits on a secret shorter
+# than 32 bytes, which is how production's first boot (2026-10-02) crash-
+# looped. Unset is compute-api's own dark mode ("job routes will refuse").
 COMPUTE_BRIDGE_SECRET=
 %{ endif ~}
 
@@ -134,7 +138,7 @@ COMPUTE_API_IMAGE=${compute_api_image}
 SITE_IMAGE=${site_image}
 POSTGRES_PASSWORD=$POSTGRES_PASSWORD
 COMPUTE_BRIDGE_SECRET=$COMPUTE_BRIDGE_SECRET
-CONSOLE_URL=${console_url}
+CONSOLE_URL=%{ if bridge_enabled }${console_url}%{ endif }
 COMPUTE_API_BIND=0.0.0.0
 SITE_BIND=0.0.0.0
 DATA_DIR=/data
