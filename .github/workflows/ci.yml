@@ -98,7 +98,14 @@ jobs:
             sleep 2
           done
           echo "health status: $status"; docker inspect -f '{{json .State.Health}}' site; exit 1
-      - run: deploy/site/smoke.sh http://127.0.0.1:8080 "${{ github.sha }}"
+      - run: deploy/site/smoke.sh http://127.0.0.1:8080
+      # smoke.sh proves the navigation payloads are served; this clicks the
+      # links in headless Chrome (preinstalled on the runner) and proves the
+      # router uses them. Node 22 for the built-in WebSocket it drives CDP with.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node deploy/site/browser-check.mjs http://127.0.0.1:8080
       - if: failure()
         run: docker logs site
 
