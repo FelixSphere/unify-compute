@@ -157,6 +157,13 @@ Body: the `spec` object above plus `sku` (required), optional `providers`
 (a subset of the SKU's provider clouds, to pin placement; default all), and
 optional `metadata` (≤ 16 string pairs). Server fills everything else.
 
+Optional `template`: the id of a template from `GET /compute/v1/templates`.
+The template supplies the spec and the default `sku`; the body may then set
+only the fields that template lists as overridable, and binds a `source` to
+each of its input mounts. The resolved spec goes through the validation below
+unchanged. Rules and the template error codes are in
+[`templates.md`](templates.md).
+
 Validated before anything is held or persisted, in this order: body parses
 (`malformed_body`), `sku` present (`missing_sku`) and offered (`unknown_sku`)
 and sold (`sku_unavailable`), `spec.max_runtime_seconds` positive
