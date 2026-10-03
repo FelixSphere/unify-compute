@@ -29,6 +29,17 @@ account. Two consequences:
 
 ## The state of the world (keep this section true)
 
+> **The shared runbook `~/unifyai/AGENTS.md` / `~/.claude/agents/unifyai-cicd.md`
+> is stale about this product.** Its §C still says unify-compute staging is
+> "defined, never applied" and that a production compute API "does not exist".
+> Both have been false since the AWS cutover on 2026-10-02: staging and
+> production are applied and serving, and `compute.unifyai.us` is an A alias to
+> the production ALB. **This file is the authority for this repo** — an agent
+> that follows §C will target infrastructure that does not match reality, and
+> may believe it is safe to apply a stack that is already live. Those files are
+> user-level config, so this note is here rather than an edit there; ask the
+> operator before changing them.
+
 - **Marketing site:** live at https://compute.unifyai.us on AWS production
   since the DNS cutover on 2026-10-02 (Route53 change
   `C07235422LT740FCOOAEW`, CNAME to `custom-domains.chatgpt.site.` replaced
@@ -75,6 +86,32 @@ account. Two consequences:
   `scripts/release/check-imds.sh` (`CHECK_IMDS_OK`), then the Terraform
   apply that sets hop limit 1, then `check-imds.sh` again. Update this line
   when each host is done.
+- **Staging and production have diverged, on purpose, since 2026-10-03.**
+  `wave2-jobs` released compute-api `cfbbbdd9…` (`667b381`) to **staging
+  only** (run 37091108250, record
+  `deploy/releases/2026-10-03-staging-wave2-jobs.md`). Production still runs
+  `ec4bd964…` (`a8562dd`). The hold is a product decision referred to the
+  operator, not a failed gate: the job API is wired but the console billing
+  bridge 404s, so every keyed job route stops at key verification. When
+  production goes, it takes **those same digests**, not a rebuild of a later
+  `main`. Until then staging is ahead, and the next ordinary release must not
+  mistake staging's state for production's. Since #44 the production release
+  is gated twice over: the operator's answer **and** the IMDS lockdown above,
+  which `release.yml` now requires on the target host. A staging rollback is
+  refused for the same reason, so the way back from `cfbbbdd9…` today is a
+  forward release of `ec4bd964…`, not `mode=rollback`.
+- **Two crash-loop paths now live in the compute-api image**, both at boot
+  and both `os.Exit(1)`: `sku.Parse` rejecting `config/skus.json`, and
+  `store.Migrate` failing. `a8562dd` and earlier never opened the database
+  despite being handed `DATABASE_URL`, so any release from that baseline
+  migrates for the first time. Staging's was create-from-empty (0 tables
+  before, 10 after); production's will be too.
+- **#38 artifacts and #39 GPU workers are in the binary but dark.** No
+  Terraform applied: no artifacts bucket or writer role, no SkyPilot API
+  server, no GPU worker stack. `scripts/release/host.sh` only rewrites the
+  image pins, so a release can never turn them on. Doing so is a Terraform
+  apply plus an explicit instance `-replace` (staging first), because
+  `ignore_changes = [user_data, user_data_base64]` keeps it inert otherwise.
 - **Console:** production `app.unifyapi.ai` belongs to the UnifyAPI CI/CD agent.
   Staging runs its own console container from the same pinned image
   (`CONSOLE_IMAGE` in `deploy/compose/.env.example`), with a separate database.
