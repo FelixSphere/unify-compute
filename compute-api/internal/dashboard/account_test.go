@@ -22,12 +22,29 @@ func (f *fakeJobs) rec(name string, w http.ResponseWriter, r *http.Request, acco
 
 func jsonNum(n int64) string { b, _ := json.Marshal(n); return string(b) }
 
-func (f *fakeJobs) List(w http.ResponseWriter, r *http.Request, a int64)      { f.rec("list", w, r, a) }
-func (f *fakeJobs) Get(w http.ResponseWriter, r *http.Request, a int64)       { f.rec("get", w, r, a) }
-func (f *fakeJobs) Cancel(w http.ResponseWriter, r *http.Request, a int64)    { f.rec("cancel", w, r, a) }
-func (f *fakeJobs) Logs(w http.ResponseWriter, r *http.Request, a int64)      { f.rec("logs", w, r, a) }
-func (f *fakeJobs) Events(w http.ResponseWriter, r *http.Request, a int64)    { f.rec("events", w, r, a) }
-func (f *fakeJobs) Artifacts(w http.ResponseWriter, r *http.Request, a int64) { f.rec("artifacts", w, r, a) }
+func (f *fakeJobs) List(w http.ResponseWriter, r *http.Request, a int64) {
+	f.rec("list", w, r, a)
+}
+
+func (f *fakeJobs) Get(w http.ResponseWriter, r *http.Request, a int64) {
+	f.rec("get", w, r, a)
+}
+
+func (f *fakeJobs) Cancel(w http.ResponseWriter, r *http.Request, a int64) {
+	f.rec("cancel", w, r, a)
+}
+
+func (f *fakeJobs) Logs(w http.ResponseWriter, r *http.Request, a int64) {
+	f.rec("logs", w, r, a)
+}
+
+func (f *fakeJobs) Events(w http.ResponseWriter, r *http.Request, a int64) {
+	f.rec("events", w, r, a)
+}
+
+func (f *fakeJobs) Artifacts(w http.ResponseWriter, r *http.Request, a int64) {
+	f.rec("artifacts", w, r, a)
+}
 
 type fakeLedger struct {
 	usage    []billing.SKUUsage
