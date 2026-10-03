@@ -402,6 +402,7 @@ after the response, so neither the status nor the time depends on it.
 | `GET /jobs/{id}` | — | The Job object (`job-api.md`) |
 | `GET /jobs/{id}/events`, `GET /jobs/{id}/logs` | — | As the job API |
 | `POST /jobs/{id}/cancel` | — | As the job API |
+| `GET /jobs/{id}/artifacts` | — | As the job API. *Proposed by A7c, not yet agreed or built*: without it the dashboard's job page cannot offer downloads, because the page has a session and the job API takes only a key. The page calls it and, while it answers `404`, names the job API route instead |
 | `GET /usage?month=YYYY-MM` | — | `{ gpu_usd, storage_usd, egress_usd, total_usd, by_sku: [...] }`, from settle entries |
 | `POST /topups` | `{ amount_usd: "20.00" }` | `201 { id, status: "open", checkout_url }` |
 | `GET /topups`, `GET /topups/{id}` | — | `{ id, amount_usd, status, created_at, paid_at, receipt_url, refunded_usd }` |
@@ -410,6 +411,13 @@ after the response, so neither the status nor the time depends on it.
 
 Submitting jobs from the dashboard is not in the first version: customers
 submit with a key.
+
+The pages (A7c, `dashboard/`) call every route above except top-ups, export
+and close. Of the session routes only `/me`, `/logout`, `/password` and
+`/reauth` are built; for the others compute-api answers `404 not_found`, and
+each page section says what will appear there instead of failing. The page
+reads `by_sku` entries as `{ sku, gpu_seconds, usd }`; whoever builds
+`/usage` fixes that shape here.
 
 ## Job API changes (`/compute/v1`)
 
