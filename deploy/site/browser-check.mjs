@@ -323,7 +323,7 @@ let stubs = {};
 listeners.add((msg) => {
   if (msg.sessionId !== sessionId) return;
   if (msg.method === 'Network.requestWillBeSent') {
-    requests.push({ url: msg.params.request.url, headers: msg.params.request.headers });
+    requests.push({ url: msg.params.request.url, headers: msg.params.request.headers, document: msg.params.documentURL });
   } else if (msg.method === 'Fetch.requestPaused') {
     const { requestId, request } = msg.params;
     const path = new URL(request.url).pathname.replace(/^\/dashboard\/v1/, '');
@@ -1134,8 +1134,18 @@ async function appChecks() {
 
   await dashboardChecks();
 
-  const foreign = [...new Set(requests.map((r) => r.url).filter((u) => !u.startsWith(appOrigin) && !u.startsWith('data:')))];
-  check(foreign.length === 0, `${APP_HOST}: no third-party requests`, `${APP_HOST} requested: ${foreign.join(', ')}`);
+  // Only what the app host's own documents asked for: the marketing pages
+  // checked before this can still be finishing lazy chunk loads.
+  const foreign = [
+    ...new Set(
+      requests
+        .filter((r) => r.document?.startsWith(appOrigin))
+        .map((r) => r.url)
+        .filter((u) => !u.startsWith(appOrigin) && !u.startsWith('data:')),
+    ),
+  ];
+  const appRequests = requests.filter((r) => r.document?.startsWith(appOrigin)).length;
+  check(appRequests > 0 && foreign.length === 0, `${APP_HOST}: no third-party requests (${appRequests} seen)`, `${APP_HOST} requested: ${foreign.join(', ')}`);
   await page('Fetch.disable');
 }
 
