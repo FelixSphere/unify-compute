@@ -146,10 +146,17 @@ app_headers_clean() {
     echo "FAIL $label: the site container sets a cookie; only compute-api may"; fail=1
   fi
 }
-# The pages A7b builds (dashboard/), at the paths the mailer links to
+# The pages A7b and A7c build (dashboard/), at the paths the mailer links to
 # (compute-api/internal/mailer/messages.go), and the title each must carry.
+# /jobs/<id> is one static page that Caddy serves for every job id.
 app_pages=(
   "/|Unify Compute"
+  "/keys|API keys — Unify Compute"
+  "/jobs|Jobs — Unify Compute"
+  "/jobs/job_01J8Q6ZK3R7Y9W2X4V6T8S0A1B|Job — Unify Compute"
+  "/usage|Usage — Unify Compute"
+  "/billing|Billing — Unify Compute"
+  "/account|Account — Unify Compute"
   "/signup|Sign up — Unify Compute"
   "/login|Log in — Unify Compute"
   "/verify|Check your email — Unify Compute"
@@ -217,6 +224,22 @@ for app_host in app.compute.unifyai.us app.staging.compute.unifyai.us; do
   grep -q 'Page not found' "$tmp/body" \
     || { echo "FAIL $app_host 404: not the app's 404 page"; fail=1; }
   check /login/ 308 "Location: /login"
+  check /jobs/ 308 "Location: /jobs"
+  # Only one path segment after /jobs is a job page.
+  check /jobs/job_1/logs 404 "Content-Type: text/html" "${app_common[@]}"
+  # The signed-in pages carry the app shell (UI-STANDARD "App shell"): the
+  # sidebar with this page marked current, the phone menu button and the
+  # account button.
+  for entry in "/|/" "/keys|/keys" "/jobs/job_1|/jobs" "/account|/account"; do
+    path=${entry%%|*}; current=${entry#*|}
+    check "$path" 200
+    grep -q "<a href=\"$current\" aria-current=\"page\">" "$tmp/body" \
+      || { echo "FAIL $app_host $path: sidebar does not mark $current as the current page"; fail=1; }
+    grep -qE '<button class="menu-button" type="button" id="menu-button" aria-label="Menu" aria-expanded="false" aria-controls="app-nav">' "$tmp/body" \
+      || { echo "FAIL $app_host $path: no phone menu button"; fail=1; }
+    grep -q 'id="account-button"' "$tmp/body" \
+      || { echo "FAIL $app_host $path: no account button"; fail=1; }
+  done
   # Build output that is not a page.
   check /.vite/manifest.json 404
 done

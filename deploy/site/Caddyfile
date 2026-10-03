@@ -119,6 +119,11 @@ http://app.compute.unifyai.us:8080, http://app.staging.compute.unifyai.us:8080 {
 	@app_hashed path /assets/*
 	header @app_hashed Cache-Control "public, max-age=31536000, immutable"
 
+	# A job's page is /jobs/<id> (the address job emails link to, plan task
+	# B3); one static page reads the id from the path.
+	@job_page path_regexp job_page ^/jobs/[^/]+$
+	rewrite @job_page /job.html
+
 	handle {
 		header ?Cache-Control no-cache
 		try_files {path} {path}.html

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <!-- @head -->
+    <title>Account — Unify Compute</title>
+    <link rel="stylesheet" href="/src/app.css" />
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body class="app" data-page="account">
+    <!-- @shell:account -->
+    <main class="content" id="main" tabindex="-1">
+      <!-- @form-error -->
+      <section class="focal" aria-labelledby="focal-label">
+        <div>
+          <p class="eyebrow" id="focal-label">Signed in as</p>
+          <h1 class="identity" id="me-email">—</h1>
+          <p class="sub" id="me-sub"></p>
+        </div>
+        <button class="ghost" type="button" id="logout-main">Log out</button>
+      </section>
+      <section class="card narrow" aria-labelledby="password-title">
+        <h2 id="password-title">Change password</h2>
+        <p class="muted">You stay logged in here. Every other session is logged out.</p>
+        <p class="status-line" id="password-status" role="status"></p>
+        <form id="form" novalidate>
+          <div class="field">
+            <label for="current_password">Current password</label>
+            <div class="password">
+              <input id="current_password" name="current_password" type="password" autocomplete="current-password" required aria-describedby="current_password-error" />
+              <!-- @toggle:current_password -->
+            </div>
+            <p class="field-error" id="current_password-error" hidden></p>
+          </div>
+          <div class="field">
+            <label for="password">New password</label>
+            <div class="password">
+              <input id="password" name="password" type="password" autocomplete="new-password" required aria-describedby="password-hint password-error" />
+              <!-- @toggle:password -->
+            </div>
+            <p class="hint" id="password-hint">At least 12 characters.</p>
+            <p class="field-error" id="password-error" hidden></p>
+          </div>
+          <div class="field">
+            <label for="password_confirm">Confirm new password</label>
+            <div class="password">
+              <input id="password_confirm" name="password_confirm" type="password" autocomplete="new-password" required aria-describedby="password_confirm-error" />
+              <!-- @toggle:password_confirm -->
+            </div>
+            <p class="field-error" id="password_confirm-error" hidden></p>
+          </div>
+          <button class="primary" type="submit">Change password</button>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>

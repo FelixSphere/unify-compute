@@ -1,6 +1,6 @@
-/* UI-STANDARD "Log in / Sign up pages". Every value comes from the tokens or
-   the standard's fixed sizes; the app host's CSP allows no inline style, so
-   all of it lives here. */
+/* UI-STANDARD "Log in / Sign up pages" and "App shell". Every value comes
+   from the tokens or the standard's fixed sizes; the app host's CSP allows no
+   inline style, so all of it lives here. */
 @import '../../app/unifyai-tokens.css';
 @import '@fontsource/space-grotesk/500.css';
 @import '@fontsource/space-grotesk/700.css';
@@ -347,9 +347,48 @@ input[aria-invalid='true'] {
   font-weight: 400;
 }
 
-/* The signed-in placeholder: the app shell's header (UI-STANDARD "App
-   shell"). A7c builds the sidebar and the pages. */
+/* ------------------------------------------------------------ app shell
+   UI-STANDARD "App shell": 64px header, 216px Paper sidebar, content padding
+   32/36. Below 768px the sidebar becomes the menu panel under the header. */
+body.app {
+  display: grid;
+  grid-template-columns: var(--u-sidebar-width) minmax(0, 1fr);
+  grid-template-rows: var(--u-header-height) minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip {
+  position: absolute;
+  left: 16px;
+  top: -100px;
+  z-index: 10;
+  padding: 8px 12px;
+  background: var(--u-surface);
+  border: var(--u-rule);
+  border-radius: var(--u-radius);
+}
+
+.skip:focus {
+  top: 12px;
+}
+
 .app-header {
+  grid-column: 1 / -1;
+  position: sticky;
+  top: 0;
+  z-index: 3;
   height: var(--u-header-height);
   display: flex;
   align-items: center;
@@ -362,15 +401,170 @@ input[aria-invalid='true'] {
 
 .app-header .brand {
   margin: 0;
+  color: var(--u-text);
+  text-decoration: none;
 }
 
+.app-header .mark {
+  display: none;
+}
+
+.app-header .mark img {
+  display: block;
+  height: 32px;
+  width: auto;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.menu-button {
+  display: none;
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--u-radius);
+  background: transparent;
+  color: var(--u-text);
+  cursor: pointer;
+}
+
+.menu-button .icon-close,
+.menu-button[aria-expanded='true'] .icon-open {
+  display: none;
+}
+
+.menu-button[aria-expanded='true'] .icon-close {
+  display: block;
+}
+
+.account-menu {
+  position: relative;
+}
+
+.avatar {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--u-radius-pill);
+  background: var(--u-btn-secondary-bg);
+  color: var(--u-btn-secondary-fg);
+  font-family: var(--u-font-body);
+  font-size: var(--u-text-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.avatar:focus-visible {
+  border-radius: var(--u-radius-pill);
+}
+
+.account-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  min-width: 240px;
+  max-width: calc(100vw - 32px);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+  background: var(--u-surface);
+  border: var(--u-rule);
+  border-radius: var(--u-radius);
+  font-size: var(--u-text-sm);
+}
+
+.account-email {
+  margin: 0;
+  color: var(--u-text-2);
+  overflow-wrap: anywhere;
+}
+
+.app-nav {
+  position: sticky;
+  top: var(--u-header-height);
+  height: calc(100vh - var(--u-header-height));
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 16px 12px;
+  background: var(--u-bg);
+  border-right: var(--u-rule);
+  overflow-y: auto;
+}
+
+.app-nav ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.app-nav a {
+  display: block;
+  padding: 10px 12px;
+  border-radius: var(--u-radius);
+  font-size: var(--u-text-sm);
+  font-weight: 500;
+  color: var(--u-text-2);
+  text-decoration: none;
+}
+
+.app-nav a:hover {
+  color: var(--u-text);
+  background: color-mix(in srgb, var(--u-ink) 6%, transparent);
+}
+
+.app-nav a[aria-current='page'] {
+  background: var(--u-nav-active-bg);
+  color: var(--u-nav-active-fg);
+}
+
+.nav-foot {
+  margin: 16px 12px 0;
+  font-family: var(--u-font-mono);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--u-text-muted);
+}
+
+/* ------------------------------------------------------------ content */
 .content {
-  padding: 32px 36px;
-  max-width: 720px;
+  min-width: 0;
+  max-width: 1120px;
+  width: 100%;
+  padding: 32px 36px 48px;
 }
 
-.content .status {
-  text-align: left;
+.content:focus {
+  outline: none;
+}
+
+.focal {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px 24px;
+  margin-bottom: 32px;
+}
+
+.focal > div {
+  min-width: 0;
 }
 
 .eyebrow {
@@ -382,13 +576,444 @@ input[aria-invalid='true'] {
   color: var(--u-text-muted);
 }
 
-.content h1 {
+.metric {
+  margin: 0 0 12px;
+  font-family: var(--u-font-display);
+  font-weight: 700;
+  font-size: var(--u-metric);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
+}
+
+.sub {
+  margin: 0;
+  font-size: var(--u-text-sm);
+  color: var(--u-text-2);
+}
+
+h1.identity {
+  margin: 0 0 8px;
+  overflow-wrap: anywhere;
+}
+
+h2 {
+  margin: 0 0 12px;
+  font-family: var(--u-font-display);
+  font-weight: 700;
+  font-size: var(--u-h3);
+  line-height: 1.3;
+}
+
+h2:focus {
+  outline: none;
+}
+
+.muted {
+  margin: 0;
+  font-size: var(--u-text-sm);
+  color: var(--u-text-2);
+}
+
+.crumb {
+  margin: 0 0 16px;
+  font-size: var(--u-text-sm);
+  color: var(--u-text-2);
+  overflow-wrap: anywhere;
+}
+
+.mono {
+  font-family: var(--u-font-mono);
+}
+
+.section {
+  margin-bottom: 32px;
+}
+
+.section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.section-head a,
+.section-head .link {
+  font-size: var(--u-text-sm);
+}
+
+.card {
+  max-width: none;
+  margin-bottom: 24px;
+  padding: 22px 24px;
+}
+
+.card.narrow {
+  max-width: 480px;
+}
+
+.card > .muted + form,
+.card > .status-line + form {
+  margin-top: 20px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 0 24px;
+}
+
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+p.state {
+  margin: 0 0 8px;
+  font-size: var(--u-text-sm);
+  font-weight: 500;
+}
+
+.dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--u-radius-pill);
+  background: var(--u-stone);
+}
+
+.dot-success {
+  background: var(--u-success);
+}
+
+.dot-live {
+  background: var(--u-accent);
+}
+
+.dot-warning {
+  background: var(--u-warning);
+}
+
+.dot-danger {
+  background: var(--u-danger);
+}
+
+.status-line {
+  margin: 0 0 16px;
+  font-size: var(--u-text-sm);
+  color: var(--u-text-2);
+}
+
+.status-line:empty {
+  margin: 0;
+}
+
+/* Tables: UI-STANDARD "Components". */
+.table-wrap {
+  overflow-x: auto;
+  background: var(--u-surface);
+  border: var(--u-rule);
+  border-radius: var(--u-radius);
+}
+
+.table-wrap + .table-wrap {
+  margin-top: 16px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--u-text-sm);
+}
+
+th {
+  padding: 10px 16px;
+  border-bottom: var(--u-rule);
+  font-family: var(--u-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  text-align: left;
+  color: var(--u-text-muted);
+  white-space: nowrap;
+}
+
+td {
+  padding: 12px 16px;
+  border-bottom: var(--u-rule);
+  vertical-align: middle;
+}
+
+td .mono {
+  white-space: nowrap;
+}
+
+tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+th.num,
+td.num {
+  text-align: right;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.chip {
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--u-btn-ghost-border);
+  border-radius: var(--u-radius-pill);
+  background: var(--u-surface);
+  color: var(--u-text);
+  font-family: var(--u-font-body);
+  font-size: var(--u-text-sm);
+  cursor: pointer;
+}
+
+.chip[aria-pressed='true'] {
+  background: var(--u-nav-active-bg);
+  border-color: var(--u-nav-active-bg);
+  color: var(--u-nav-active-fg);
+}
+
+.chip:focus-visible {
+  outline: none;
+  box-shadow: var(--u-focus);
+}
+
+dl.facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 16px;
+  margin: 0;
+  font-size: var(--u-text-sm);
+}
+
+dl.facts dt {
+  color: var(--u-text-muted);
+}
+
+dl.facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+dl.facts dd .mono {
+  white-space: normal;
+}
+
+.code-block {
+  margin: 0;
+  max-height: 420px;
+  overflow: auto;
+  padding: 16px;
+  background: var(--u-code-bg);
+  color: var(--u-code-fg);
+  border-radius: var(--u-radius);
+  font-family: var(--u-font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.code-block:focus-visible {
+  outline: none;
+  box-shadow: var(--u-focus);
+}
+
+code.inline {
+  font-family: var(--u-font-mono);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+/* Buttons inside the app sit at their content width; the auth card's are
+   full width. */
+body.app .primary {
+  width: auto;
+  margin-top: 0;
+}
+
+a.primary,
+a.ghost {
+  text-decoration: none;
+}
+
+.secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--u-btn-height);
+  padding: 0 20px;
+  border: 0;
+  border-radius: var(--u-radius);
+  background: var(--u-btn-secondary-bg);
+  color: var(--u-btn-secondary-fg);
+  font-family: var(--u-font-body);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.primary:disabled,
+.ghost:disabled {
+  cursor: default;
+  color: var(--u-text-muted);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.more {
+  margin-top: 16px;
+}
+
+.month-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+fieldset {
+  margin: 0 0 20px;
+  padding: 0;
+  border: 0;
+}
+
+legend {
+  padding: 0;
+  margin-bottom: 8px;
+  font-size: var(--u-text-sm);
+  font-weight: 500;
+}
+
+label.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-weight: 400;
+}
+
+label.check input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--u-ink);
+}
+
+label.check input:focus-visible {
+  box-shadow: var(--u-focus);
+}
+
+/* The one-time key: the secret in the code style, a warning in the badge
+   colours, the copy button beside it. */
+.warning {
+  margin: 0 0 16px;
+  padding: 12px;
+  background: var(--u-badge-bg);
+  color: var(--u-badge-fg);
+  border-radius: var(--u-radius);
+  font-size: var(--u-text-sm);
+}
+
+.secret {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
   margin-bottom: 12px;
 }
 
-.content .lead {
-  margin: 0;
+.secret code {
+  flex: 1 1 280px;
+  min-width: 0;
+  padding: 12px;
+  background: var(--u-code-bg);
+  color: var(--u-code-fg);
+  border-radius: var(--u-radius);
+  font-family: var(--u-font-mono);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+dialog {
+  width: min(440px, calc(100vw - 32px));
+  padding: 24px;
+  background: var(--u-surface);
+  color: var(--u-text);
+  border: var(--u-rule);
+  border-radius: var(--u-radius);
+  font-size: var(--u-text-sm);
+}
+
+dialog::backdrop {
+  background: color-mix(in srgb, var(--u-ink) 40%, transparent);
+}
+
+dialog p {
+  margin: 0 0 16px;
+}
+
+dialog code {
+  font-family: var(--u-font-mono);
+}
+
+@media (max-width: 767px) {
+  body.app {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .menu-button {
+    display: flex;
+  }
+
+  .app-nav {
+    display: none;
+    position: fixed;
+    top: var(--u-header-height);
+    left: 0;
+    right: 0;
+    z-index: 2;
+    height: auto;
+    max-height: calc(100vh - var(--u-header-height));
+    padding: 8px 16px 16px;
+    border-right: 0;
+    border-bottom: var(--u-rule);
+  }
+
+  .app-nav[data-open] {
+    display: flex;
+  }
+
+  .app-nav a {
+    display: flex;
+    align-items: center;
+    min-height: 48px;
+    padding: 0 12px;
+  }
+
+  .nav-foot {
+    display: none;
+  }
+
+  .metric {
+    font-size: var(--u-h1);
+  }
 }
 
 @media (max-width: 480px) {
@@ -397,14 +1022,12 @@ input[aria-invalid='true'] {
   }
 
   .content {
-    padding: 24px 16px;
+    padding: 24px 16px 40px;
   }
-}
 
-.app-header .mark {
-  display: none;
-  height: 32px;
-  width: auto;
+  .card {
+    padding: 20px 16px;
+  }
 }
 
 /* Below 581px the page header shows the mark alone; the auth card keeps the

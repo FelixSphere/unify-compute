@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <!-- @head -->
+    <title>API keys — Unify Compute</title>
+    <link rel="stylesheet" href="/src/app.css" />
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body class="app" data-page="keys">
+    <!-- @shell:keys -->
+    <main class="content" id="main" tabindex="-1">
+      <h1 class="sr-only">API keys</h1>
+      <!-- @form-error -->
+      <section class="focal" aria-labelledby="focal-label">
+        <div>
+          <p class="eyebrow" id="focal-label">Active API keys</p>
+          <p class="metric" id="keys-count" aria-live="polite">—</p>
+          <p class="sub">Up to 10 at a time. Each key submits and reads jobs on this account's balance.</p>
+        </div>
+        <button class="primary" type="button" id="create-open">Create key</button>
+      </section>
+
+      <section class="card" id="create" aria-labelledby="create-title" hidden>
+        <h2 id="create-title" tabindex="-1">Create an API key</h2>
+        <form id="create-form" novalidate>
+          <div class="field">
+            <label for="key-name">Name</label>
+            <input id="key-name" name="name" type="text" maxlength="64" autocomplete="off" required aria-describedby="key-name-hint key-name-error" />
+            <p class="hint" id="key-name-hint">So you can tell keys apart, e.g. "nightly pipeline".</p>
+            <p class="field-error" id="key-name-error" hidden></p>
+          </div>
+          <fieldset class="field">
+            <legend>Access</legend>
+            <label class="check"><input type="radio" name="scope" value="jobs" checked /> Submit, cancel and read jobs</label>
+            <label class="check"><input type="radio" name="scope" value="read" /> Read only</label>
+          </fieldset>
+          <div class="actions">
+            <button class="primary" type="submit">Create key</button>
+            <button class="ghost" type="button" id="create-cancel">Cancel</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="card reveal" id="reveal" aria-labelledby="reveal-title" hidden>
+        <h2 id="reveal-title" tabindex="-1">Copy your new key</h2>
+        <p class="warning" id="reveal-warning">This is the only time the full key is shown. Store it somewhere safe now: if you lose it, revoke it and create another.</p>
+        <div class="secret">
+          <code id="reveal-secret" aria-describedby="reveal-warning"></code>
+          <button class="secondary" type="button" id="reveal-copy">Copy</button>
+        </div>
+        <p class="status-line" id="reveal-status" role="status"></p>
+        <button class="ghost" type="button" id="reveal-done">I've saved it</button>
+      </section>
+
+      <section class="section" aria-labelledby="list-title">
+        <h2 id="list-title">Keys</h2>
+        <div id="keys-list" aria-live="polite"><p class="muted">Loading keys…</p></div>
+      </section>
+
+      <dialog id="revoke-dialog" aria-labelledby="revoke-title">
+        <form method="dialog" id="revoke-form">
+          <h2 id="revoke-title">Revoke this key?</h2>
+          <p>Anything using <code id="revoke-display"></code> stops working at once. Running jobs keep running. This can't be undone.</p>
+          <div class="form-error" id="revoke-error" role="alert" hidden><p></p></div>
+          <div class="actions">
+            <button class="ghost" type="submit" value="revoke" id="revoke-confirm">Revoke key</button>
+            <button class="ghost" type="submit" value="cancel">Keep it</button>
+          </div>
+        </form>
+      </dialog>
+      <!-- @reauth -->
+    </main>
+  </body>
+</html>

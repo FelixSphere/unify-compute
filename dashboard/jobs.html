@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <!-- @head -->
+    <title>Jobs — Unify Compute</title>
+    <link rel="stylesheet" href="/src/app.css" />
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body class="app" data-page="jobs">
+    <!-- @shell:jobs -->
+    <main class="content" id="main" tabindex="-1">
+      <h1 class="sr-only">Jobs</h1>
+      <!-- @form-error -->
+      <section class="focal" aria-labelledby="focal-label">
+        <div>
+          <p class="eyebrow" id="focal-label">Running now</p>
+          <p class="metric" id="jobs-running" aria-live="polite">—</p>
+          <p class="sub">Jobs are submitted with an API key: see the <a href="https://compute.unifyai.us/start">quick start</a>.</p>
+        </div>
+      </section>
+      <section class="section" aria-labelledby="list-title">
+        <h2 id="list-title">Jobs</h2>
+        <div class="chips" role="group" aria-label="Filter by status" id="filters">
+          <button type="button" class="chip" data-status="" aria-pressed="true">All</button>
+          <button type="button" class="chip" data-status="running" aria-pressed="false">Running</button>
+          <button type="button" class="chip" data-status="queued,provisioning" aria-pressed="false">Starting</button>
+          <button type="button" class="chip" data-status="succeeded" aria-pressed="false">Succeeded</button>
+          <button type="button" class="chip" data-status="failed,interrupted" aria-pressed="false">Failed</button>
+          <button type="button" class="chip" data-status="cancelled" aria-pressed="false">Cancelled</button>
+        </div>
+        <div id="jobs-list" aria-live="polite"><p class="muted">Loading jobs…</p></div>
+        <button class="ghost more" type="button" id="jobs-more" hidden>Load more</button>
+      </section>
+    </main>
+  </body>
+</html>
