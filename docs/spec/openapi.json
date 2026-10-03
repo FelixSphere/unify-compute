@@ -130,6 +130,29 @@
         }
       }
     },
+    "/compute/v1/templates": {
+      "get": {
+        "operationId": "listTemplates",
+        "tags": [
+          "catalogue"
+        ],
+        "security": [],
+        "summary": "List job templates",
+        "description": "Public, like /skus. Every curated template (docs/spec/templates.md), including unavailable ones and their reasons, sorted by id. Not paginated.",
+        "responses": {
+          "200": {
+            "description": "The templates.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateList"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/compute/v1/jobs": {
       "post": {
         "operationId": "submitJob",
@@ -137,7 +160,7 @@
           "jobs"
         ],
         "summary": "Submit a job",
-        "description": "Validated before anything is held or persisted, in this order: body parses (`malformed_body`), `sku` present (`missing_sku`), offered (`unknown_sku`) and sold (`sku_unavailable`), `spec.max_runtime_seconds` positive (`missing_max_runtime`) and at most 86400 (`runtime_over_ceiling`), every entry of `providers` offered by the SKU (`provider_not_offered`), and at least one candidate enabled in this deployment (`503 upstream_unavailable`). A request that passes validation currently receives `501 not_implemented`. Planned flow: verify key, place a hold on the UnifyAPI balance, persist the job `queued`, hand it to SkyPilot.",
+        "description": "Validated before anything is held or persisted, in this order: body parses (`malformed_body`); if `template` is set, it is offered (`unknown_template`) and available (`template_unavailable`), every field sent is overridable (`field_not_overridable`), env keys are identifiers (`invalid_env`) and inputs bind each declared mount once (`missing_input`, `unknown_input_mount`, `duplicate_input_mount`), and the resolved spec continues through the same checks as a hand-written one: `sku` present (`missing_sku`), offered (`unknown_sku`) and sold (`sku_unavailable`), `spec.max_runtime_seconds` positive (`missing_max_runtime`) and at most 86400 (`runtime_over_ceiling`), every entry of `providers` offered by the SKU (`provider_not_offered`), and at least one candidate enabled in this deployment (`503 upstream_unavailable`). A request that passes validation currently receives `501 not_implemented`. Planned flow: verify key, place a hold on the UnifyAPI balance, persist the job `queued`, hand it to SkyPilot.",
         "parameters": [
           {
             "$ref": "#/components/parameters/IdempotencyKey"
@@ -192,7 +215,7 @@
             }
           },
           "400": {
-            "description": "Validation failed. `error.code` is one of `malformed_body`, `missing_sku`, `unknown_sku`, `sku_unavailable`, `missing_max_runtime`, `runtime_over_ceiling`, `provider_not_offered`; `error.param` names the field.",
+            "description": "Validation failed. `error.code` is one of `malformed_body`, `missing_sku`, `unknown_sku`, `sku_unavailable`, `missing_max_runtime`, `runtime_over_ceiling`, `provider_not_offered`, or with `template` also `unknown_template`, `template_unavailable`, `field_not_overridable`, `invalid_env`, `missing_input`, `unknown_input_mount`, `duplicate_input_mount`; `error.param` names the field.",
             "content": {
               "application/json": {
                 "schema": {
@@ -228,7 +251,7 @@
             "$ref": "#/components/responses/RateLimited"
           },
           "500": {
-            "description": "`internal_error`/`placement_failed`: placement failed for a reason other than the two the API distinguishes. Not expected in normal operation.",
+            "description": "`internal_error`/`placement_failed`: placement failed for a reason other than the two the API distinguishes; or `internal_error`/`template_resolution_failed`: a template could not be resolved for a reason that is not the submitter's. Not expected in normal operation.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1043,9 +1066,7 @@
       },
       "JobSpec": {
         "type": "object",
-        "required": [
-          "max_runtime_seconds"
-        ],
+        "required": [],
         "properties": {
           "image": {
             "type": "string",
@@ -1079,20 +1100,21 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 86400,
-            "description": "Platform ceiling is 24 hours."
+            "description": "Platform ceiling is 24 hours. Required unless `template` supplies it."
           }
         }
       },
       "SubmitJobRequest": {
         "type": "object",
-        "required": [
-          "sku",
-          "spec"
-        ],
+        "required": [],
         "properties": {
+          "template": {
+            "type": "string",
+            "description": "An `id` from GET /compute/v1/templates. The template supplies the spec and the default `sku`; the body may then send only the fields the template lists in `overridable`, and must bind a `source` to each of its input mounts. See docs/spec/templates.md."
+          },
           "sku": {
             "type": "string",
-            "description": "An `id` from GET /compute/v1/skus."
+            "description": "An `id` from GET /compute/v1/skus. Required unless `template` is set; with a template, allowed only if the template lists `sku` as overridable."
           },
           "providers": {
             "type": "array",
@@ -1112,7 +1134,8 @@
             },
             "description": "At most 16 string pairs (not yet enforced)."
           }
-        }
+        },
+        "description": "Without `template`, `sku` and `spec.max_runtime_seconds` are required. With `template`, both default from it."
       },
       "JobUsage": {
         "type": "object",
@@ -1374,6 +1397,157 @@
           "next": {
             "type": "string",
             "description": "Id of the last event returned, present whenever `data` is non-empty, so a poller can always resume from it."
+          }
+        }
+      },
+      "TemplateMount": {
+        "type": "object",
+        "required": [
+          "mount",
+          "description"
+        ],
+        "properties": {
+          "mount": {
+            "type": "string",
+            "description": "Absolute path inside the job's container."
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      },
+      "Template": {
+        "type": "object",
+        "required": [
+          "id",
+          "object",
+          "title",
+          "description",
+          "image",
+          "command",
+          "env",
+          "sku",
+          "max_runtime_seconds",
+          "inputs",
+          "outputs",
+          "overridable",
+          "available"
+        ],
+        "description": "A named, reviewed job spec a submit can name in `template`.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Lowercase slug; what a submit names."
+          },
+          "object": {
+            "type": "string",
+            "const": "compute.template"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "image": {
+            "type": "string",
+            "description": "Container image pinned by `@sha256` digest. Empty only on an unavailable placeholder."
+          },
+          "image_licence": {
+            "type": "string"
+          },
+          "image_source": {
+            "type": "string",
+            "description": "Where the image and its licence were checked."
+          },
+          "command": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Full argv; the image's entrypoint is not used."
+          },
+          "env": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Defaults. A submit that may override `spec.env` merges over them key by key."
+          },
+          "sku": {
+            "type": "string",
+            "description": "Default SKU, an `id` from GET /compute/v1/skus."
+          },
+          "max_runtime_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 86400
+          },
+          "inputs": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/TemplateMount"
+            },
+            "description": "Mounts a submit must bind a `source` to, one each."
+          },
+          "outputs": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/TemplateMount"
+            }
+          },
+          "overridable": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "enum": [
+                "sku",
+                "providers",
+                "spec.command",
+                "spec.env",
+                "spec.max_runtime_seconds"
+              ]
+            },
+            "description": "Request fields a submit naming this template may send."
+          },
+          "available": {
+            "type": "boolean",
+            "description": "Declared available and its default SKU is sold."
+          },
+          "unavailable_reason": {
+            "type": "string",
+            "description": "Present when `available` is false."
+          }
+        }
+      },
+      "TemplateList": {
+        "type": "object",
+        "required": [
+          "object",
+          "data"
+        ],
+        "properties": {
+          "object": {
+            "type": "string",
+            "const": "list"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Template"
+            }
           }
         }
       }
