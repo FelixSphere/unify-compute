@@ -20,7 +20,7 @@ provider "aws" {
   default_tags {
     tags = {
       Project     = "unify-compute"
-      Environment = var.environment
+      Environment = "production"
       ManagedBy   = "terraform"
       Repository  = "FelixSphere/unify-compute"
     }

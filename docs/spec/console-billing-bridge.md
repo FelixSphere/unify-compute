@@ -1,8 +1,10 @@
 # Console billing bridge — contract and console change list
 
-- **Status:** Spec. Not implemented on either side. `compute-api/internal/console`
-  holds the client (request signing and shapes); the console fork holds no
-  server for it yet.
+- **Status:** Spec, last revised 2026-10-02. `compute-api/internal/console`
+  holds the client (request signing and shapes) and `consoletest` a fake of the
+  server. The console's server half is merged (unifyapi-console #225) but not
+  released, and runs dark until `COMPUTE_BRIDGE_SECRET` is set. Where either
+  side does not yet match this revision is listed under "Revision 2026-10-02".
 - Direction: compute-api → console. The console never calls compute.
 - Licence note: the server half is written in `FelixSphere/unifyapi-console`
   as new files under AGPL. It exposes existing console behaviour (validate a
@@ -32,6 +34,11 @@ Server-to-server, modelled on the console's existing Builder bridge:
   tell "bridge off" from "credential wrong" (`401`) without guessing.
 - Routes sit under `/api/compute/v1/` and are excluded from the browser
   session auth; the HMAC is the only credential.
+- A request body is at most **32 KiB (32768 bytes)**. A larger one is refused
+  with `413 payload_too_large`, decided before the timestamp or the signature is
+  examined, so a `413` says nothing about either. compute-api never sends a
+  larger body: the client refuses locally (`ErrRequestTooLarge`) and nothing
+  reaches the console.
 
 The client implementation is `compute-api/internal/console/client.go`; its test
 (`client_test.go`) pins the canonical string so both sides can be checked
@@ -54,7 +61,17 @@ retrying.
 The limiter runs **before** HMAC verification: the cheap rejection comes
 first, so unsigned or forged traffic is bounded too and cannot make the console
 spend HMAC work without limit. A `429` therefore says nothing about whether
-the request was correctly signed.
+the request was correctly signed. The full order on the console is: bridge
+enabled (else bodiless `404`), rate limit (`429`), body size (`413`),
+timestamp and signature (`401`), then the handler.
+
+The limiter is **per console process**, in memory, not shared between nodes.
+With N console nodes the effective limit is N × the configured rate (and
+N × the burst), and how much of that one caller sees depends on how the load
+balancer spreads its connections. compute-api assumes only the configured
+per-node rate, never the total: it does not size its sending rate on N, and it
+honours every `429` and its `Retry-After` however many nodes are running,
+because one node can refuse while another still has room.
 
 ## Errors and `404`
 
@@ -73,7 +90,7 @@ in `message`.
 
 | `message` | Status | When |
 |---|---|---|
-| `invalid_request` | `400` | Body is not valid JSON, or a required field is missing or out of range |
+| `invalid_request` | `400` | Body is not valid JSON, or a required field is missing or out of range (including a missing `sku` on `settle`) |
 | `invalid_signature` | `401` | `X-Compute-Signature` missing or wrong |
 | `invalid_timestamp` | `401` | `X-Compute-Timestamp` missing, unparsable, or more than 30 s from the console's clock |
 | `invalid_key` | `401` | `verify`: key unknown, disabled or expired |
@@ -87,7 +104,9 @@ in `message`.
 | `sku_mismatch` | `409` | `settle`: `sku` differs from the hold's `sku` |
 | `cumulative_quota_regressed` | `409` | `settle`: `cumulative_quota` is lower than the amount already settled |
 | `idempotency_conflict` | `409` | A `hold_id`, `event_id` or `extend_id` reused with a different request or on a different hold (see `holds`, `settle` and `extend`) |
+| `payload_too_large` | `413` | Request body over 32 KiB; checked before the timestamp and signature |
 | `rate_limited` | `429` | Over the bridge limiter; `Retry-After` is set |
+| `internal_error` | `500` | Unexpected server failure (a database error, a panic in a bridge handler). The detail goes only to the console log, never into the response |
 
 Two `404`s exist and are distinguished by the body:
 
@@ -203,7 +222,10 @@ idempotency_conflict` with nothing recorded.
 `cumulative_quota` above the hold is refused with `409 hold_exceeded`; compute
 must extend first. `cumulative_quota` below what is already settled is
 `409 cumulative_quota_regressed` (the bridge has no refund verb), and a `sku`
-that differs from the hold's is `409 sku_mismatch`; neither records anything. `final: true` settles and releases the remainder in one
+that differs from the hold's is `409 sku_mismatch`; neither records anything.
+`sku` is required: a settle without one is `400 invalid_request`, not a
+`sku_mismatch` and not an implicit "use the hold's SKU", so a caller that lost
+track of the SKU finds out instead of having it filled in. `final: true` settles and releases the remainder in one
 call.
 
 ### `POST /api/compute/v1/holds/{hold_id}/extend`
@@ -304,3 +326,28 @@ server) found gaps:
 - File references corrected to `client.go` / `client_test.go`.
 - The Builder bridge answers `401`, not `404`, when its secret is unset; the
   compute bridge's `404` is kept on purpose.
+
+## Revision 2026-10-02
+
+Approved by the operator as part of wave 2, closing four leftovers from the
+first implementations:
+
+- `settle`'s `sku` is required: missing → `400 invalid_request`; present but
+  different from the hold's → `409 sku_mismatch`, as before.
+- `internal_error` (`500`) is in the error table: an unexpected server failure,
+  with the detail only in the console log.
+- Request bodies over 32 KiB → `413 payload_too_large`, checked before the
+  signature verification's body handling. Until now the console refused them
+  as `401 invalid_signature`, which sent the caller looking for a wrong secret.
+- The dedicated rate limiter is per console process: with N nodes the
+  effective limit is N × the configured rate. compute-api assumes only the
+  per-node rate and must still honour every `429` and `Retry-After`.
+
+Where the implementations stand against this revision:
+
+| Item | compute-api client | `consoletest` fake | Console (unifyapi-console) |
+|---|---|---|---|
+| `sku` required on settle | sends whatever `sku` the caller gives; no settle caller exists yet | **not yet**: a missing `sku` is still `409 sku_mismatch`; an existing test pins that and changing it needs the operator's approval | **not yet**: a missing `sku` is still accepted and the hold's SKU is used; existing tests settle without one and changing them needs the operator's approval |
+| `internal_error` | `CodeInternalError` | a forced `500` answers `internal_error` | already on every unexpected-error path; a handler panic now answers it too instead of the server-wide panic body |
+| `413 payload_too_large` | `CodePayloadTooLarge`; refuses locally above 32 KiB, sends nothing | implemented, before the signature | implemented, before the timestamp and signature |
+| Per-process limiter | surfaces a `429` as `*Error`; it has no retry loop yet and does not expose `Retry-After`, so the retrying caller, when it lands, must read and honour it | single process | documented in `docs/compute-bridge.md` |
