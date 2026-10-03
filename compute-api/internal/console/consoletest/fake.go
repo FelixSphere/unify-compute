@@ -17,6 +17,7 @@ package consoletest
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -203,6 +204,10 @@ type Server struct {
 	tokensNow float64
 	lastFill  time.Time
 	logs      []ConsumeLog
+
+	// book, when set, owns balances and holds instead of the maps above
+	// (book.go).
+	book Book
 }
 
 type holdRecord struct {
@@ -239,6 +244,9 @@ func New(secret []byte) *Server {
 		holdResp: map[string]holdRecord{},
 		events:   map[string]settledEvent{},
 		extends:  map[string]extendRecord{},
+	}
+	if f := bookFactory.Load(); f != nil {
+		s.book = (*f)(s)
 	}
 	s.Server = httptest.NewServer(s.handler())
 	return s
@@ -277,11 +285,18 @@ func (s *Server) SeedTenant(t Tenant) {
 
 func (s *Server) SeedUser(u User) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if u.Group == "" {
 		u.Group = "default"
 	}
 	s.users[u.ID] = &u
+	b := s.book
+	s.mu.Unlock()
+	if b != nil {
+		if u.TenantID > 0 {
+			panic("consoletest: a Book has no tenants")
+		}
+		b.SetBalance(u.ID, u.Quota)
+	}
 }
 
 func (s *Server) SeedKey(k Key) {
@@ -379,6 +394,9 @@ func (s *Server) CallsTo(route string) []Call {
 // Balance is the billing entity's balance for userID: the tenant's when the
 // user belongs to one, else the user's own.
 func (s *Server) Balance(userID int) int64 {
+	if b := s.currentBook(); b != nil {
+		return b.Balance(userID)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	b, _ := s.entityBalance(userID)
@@ -398,6 +416,9 @@ func (s *Server) TokenRemainQuota(tokenID int) int64 {
 }
 
 func (s *Server) Hold(holdID string) (Hold, bool) {
+	if b := s.currentBook(); b != nil {
+		return b.Inspect(holdID)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	h, ok := s.holds[holdID]
@@ -408,6 +429,9 @@ func (s *Server) Hold(holdID string) (Hold, bool) {
 }
 
 func (s *Server) ConsumeLogs() []ConsumeLog {
+	if b := s.currentBook(); b != nil {
+		return b.ConsumeLogs()
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]ConsumeLog(nil), s.logs...)
@@ -417,6 +441,12 @@ func (s *Server) ConsumeLogs() []ConsumeLog {
 // sweeper would. Each request also sweeps first, so tests only need this to
 // observe expiry without making a call.
 func (s *Server) Sweep() {
+	if b := s.currentBook(); b != nil {
+		if err := b.Sweep(context.Background()); err != nil {
+			panic("consoletest: book sweep: " + err.Error())
+		}
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sweep()
