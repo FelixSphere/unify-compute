@@ -36,6 +36,32 @@ A key with `unlimited_quota` set on the console still needs a positive balance
 on its billing entity to submit a job, because compute holds against the
 entity, not the key.
 
+A Unify Compute key (`uck_…`) sent to a deployment on the console bridge is
+`401 invalid_key` without a console call.
+
+### With compute's own accounts (`ACCOUNTS_BACKEND=local`)
+
+Implemented (task A5), deployed nowhere yet; ADR-0011 and `accounts.md`
+"API keys". `Authorization: Bearer uck_…` with a key created on the dashboard:
+`uck_` and 40 characters from `[0-9A-Za-z]`. Any other shape, `sk-` keys
+included, is `401 missing_key` without a database read. The key is looked up
+by its SHA-256 on every request, with no cache, so a revoked key fails on the
+very next request; `last_used_at` is written at most once a minute.
+
+| Lookup | compute-api |
+|---|---|
+| active key | the owner is `account:<account_id>` (`quotas.md`) |
+| unknown, revoked or expired key, or the account is closed | `401 authentication_error`, `invalid_key` |
+| a non-GET route (submit, cancel) with a key that lacks the `jobs` scope | `403 permission_error`, `scope_denied` |
+| the database cannot answer | `500 internal_error` |
+
+Scopes: `jobs` submits, cancels and reads; `read` only reads. Submit then
+checks the account itself, after the request's own validation and before
+quota and the hold: suspended or closed is `403 authentication_error`,
+`account_suspended`; job submission not turned on (ADR-0011 D3, by an
+operator) is `403 permission_error`, `compute_not_enabled`. A suspended
+account's keys still read. The per-key rate limits count per key id.
+
 ## Errors
 
 OpenAI-style envelope so existing client error handling carries over:
@@ -49,6 +75,7 @@ OpenAI-style envelope so existing client error handling carries over:
 | 400 | `invalid_request` | Malformed body, unknown SKU, runtime over the ceiling |
 | 401 | `authentication_error` | Missing, malformed, revoked, or expired key |
 | 403 | `authentication_error` | The key is valid but its account may not spend (`account_disabled`, `account_suspended`) |
+| 403 | `permission_error` | `ACCOUNTS_BACKEND=local` only: the key lacks the `jobs` scope (`scope_denied`), or the account may not run jobs yet (`compute_not_enabled`) |
 | 402 | `insufficient_balance` | Hold refused: balance below the estimate |
 | 403 | `quota_exceeded` | Submit would exceed an account quota or a platform-wide limit (one active job across all accounts while the platform starts small); `error.quotas` lists each limit with usage and headroom ([`quotas.md`](quotas.md)). Never a partial grant, no `Retry-After` |
 | 404 | `not_found` | Job id unknown *for this key* (no existence leak across users) |

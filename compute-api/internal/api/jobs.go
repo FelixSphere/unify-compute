@@ -50,12 +50,12 @@ func (s *Server) now() time.Time {
 // fails any check before the hold, and nothing is persisted for one whose
 // hold is refused.
 func (s *Server) submitWired(w http.ResponseWriter, r *http.Request, sub submission) {
-	id, ok := identityFrom(r.Context())
+	c, ok := callerFrom(r.Context())
 	if !ok {
 		s.notImplemented("job submission").ServeHTTP(w, r)
 		return
 	}
-	owner := id.Owner()
+	owner := c.owner
 	if len(sub.metadata) > MaxMetadata {
 		invalid(w, "invalid_metadata", "metadata", fmt.Sprintf("metadata has %d pairs; at most %d are allowed", len(sub.metadata), MaxMetadata))
 		return
@@ -83,7 +83,7 @@ func (s *Server) submitWired(w http.ResponseWriter, r *http.Request, sub submiss
 	}
 
 	job, created, err := s.JobService.Submit(r.Context(), jobs.Submission{
-		Owner: owner, UserID: id.UserID, TokenID: id.TokenID, SKU: sub.item, Candidates: candidates,
+		Owner: owner, UserID: c.billingID, TokenID: c.tokenID, SKU: sub.item, Candidates: candidates,
 		Spec: sub.spec, Metadata: sub.metadata, Idempotency: idem,
 	})
 	var exceeded *quota.ExceededError

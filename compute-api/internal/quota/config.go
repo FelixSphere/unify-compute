@@ -43,10 +43,11 @@ type Config struct {
 	resolved map[string]Limits
 }
 
-// ownerPattern is the owner string a verified key resolves to: the billing
-// entity, which is the tenant when there is one and the user otherwise
-// (console-billing-bridge.md, verify).
-var ownerPattern = regexp.MustCompile(`^(user|tenant):[1-9][0-9]*$`)
+// ownerPattern is the owner string a verified key resolves to: under the
+// console bridge the billing entity, the tenant when there is one and the
+// user otherwise (console-billing-bridge.md, verify); with compute's own
+// accounts, account:<id> (accounts.md).
+var ownerPattern = regexp.MustCompile(`^(user|tenant|account):[1-9][0-9]*$`)
 
 var allTiers = []sku.Tier{sku.TierHyperscaler, sku.TierNeocloud, sku.TierMarketplace}
 
@@ -86,7 +87,7 @@ func Parse(raw []byte) (*Config, error) {
 	for _, o := range owners {
 		ov := c.Owners[o]
 		if !ownerPattern.MatchString(o) {
-			return nil, fmt.Errorf("quota config: owner %q is not user:<id> or tenant:<id>", o)
+			return nil, fmt.Errorf("quota config: owner %q is not user:<id>, tenant:<id> or account:<id>", o)
 		}
 		if ov.Reason == "" {
 			return nil, fmt.Errorf("quota config: owner %q: override needs a reason", o)

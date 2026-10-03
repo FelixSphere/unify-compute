@@ -141,6 +141,10 @@ func New(db *pgxpool.Pool, cfg Config) *Service {
 	return s
 }
 
+// Now is the service's clock, for callers that compare against times it
+// wrote (a session's reauth_at).
+func (s *Service) Now() time.Time { return s.now() }
+
 // HashPassword hashes with the service's hasher, for callers that validate
 // first and store later (signup, reset, change).
 func (s *Service) HashPassword(ctx context.Context, password string) (string, error) {

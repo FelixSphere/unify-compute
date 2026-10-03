@@ -1,6 +1,6 @@
 // Package dashboard serves the dashboard API, /dashboard/v1 on the app host
 // (ADR-0011 §5 and §8, docs/spec/accounts.md "Dashboard API"): signup,
-// verification, login, sessions, password reset and change. It is mounted
+// verification, login, sessions, password reset and change, and API keys. It is mounted
 // only with ACCOUNTS_BACKEND=local; with the console backend compute-api
 // registers none of it.
 //
@@ -105,6 +105,9 @@ func New(cfg Config) (*Handler, error) {
 	h.handle("POST /logout", h.session(h.logout))
 	h.handle("POST /password", h.session(h.changePassword))
 	h.handle("POST /reauth", h.session(h.reauth))
+	h.handle("GET /keys", h.session(h.listKeys))
+	h.handle("POST /keys", h.session(h.createKey))
+	h.handle("DELETE /keys/{id}", h.session(h.revokeKey))
 	h.mux.HandleFunc(Prefix+"/", func(w http.ResponseWriter, _ *http.Request) { notFound(w) })
 	return h, nil
 }
@@ -328,6 +331,12 @@ var statusOf = map[string]struct {
 	"session_required":    {http.StatusUnauthorized, "authentication_error"},
 	"email_unverified":    {http.StatusForbidden, "authentication_error"},
 	"account_disabled":    {http.StatusForbidden, "authentication_error"},
+	"reauth_required":     {http.StatusUnauthorized, "authentication_error"},
+	"invalid_name":        {http.StatusBadRequest, "invalid_request"},
+	"invalid_scope":       {http.StatusBadRequest, "invalid_request"},
+	"invalid_expires_at":  {http.StatusBadRequest, "invalid_request"},
+	"account_suspended":   {http.StatusForbidden, "authentication_error"},
+	"key_limit_reached":   {http.StatusForbidden, "permission_error"},
 }
 
 func writeAccountsError(w http.ResponseWriter, e *accounts.Error) {
