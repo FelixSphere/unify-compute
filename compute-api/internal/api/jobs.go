@@ -14,6 +14,7 @@ import (
 
 	"github.com/FelixSphere/unify-compute/compute-api/internal/artifacts"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/backend"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/billing"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/jobs"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/ledger"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/quota"
@@ -98,6 +99,14 @@ func (s *Server) submitWired(w http.ResponseWriter, r *http.Request, sub submiss
 			Message: fmt.Sprintf("The Unify API balance does not cover this job's hold of USD %s (up to %d s of %s at USD %s/h; the whole job can cost at most USD %s). Nothing was submitted; top up and retry.",
 				quotaUSD(refused.HoldQuota), min(int64(sub.spec.MaxRuntimeSeconds), ledger.InitialHoldSeconds), sub.item.ID,
 				sub.item.PriceUSDPerHour, quotaUSD(refused.CeilingQuota))})
+		return
+	case errors.Is(err, billing.ErrComputeNotEnabled):
+		writeError(w, http.StatusForbidden, apiError{Type: "permission_error", Code: "compute_not_enabled",
+			Message: "This account cannot run jobs yet. Contact us to have compute enabled."})
+		return
+	case errors.Is(err, billing.ErrAccountSuspended):
+		writeError(w, http.StatusForbidden, apiError{Type: "authentication_error", Code: "account_suspended",
+			Message: "This account is suspended and cannot submit jobs. Contact us."})
 		return
 	case errors.Is(err, jobs.ErrConsoleUnavailable):
 		writeError(w, http.StatusServiceUnavailable, apiError{Type: "console_unavailable", Code: "console_unavailable",
