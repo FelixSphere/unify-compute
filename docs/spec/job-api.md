@@ -9,7 +9,7 @@
 
 ## Authentication
 
-`Authorization: Bearer sk-…` with the customer's existing UnifyAPI key. The
+`Authorization: Bearer sk-…` with the customer's existing Unify API key. The
 same key that calls `api.unifyapi.ai/v1`. compute-api verifies it through the
 console bridge (`console-billing-bridge.md` → `verify`) and caches the result
 for at most 60 seconds; a revoked key stops working within that window.
