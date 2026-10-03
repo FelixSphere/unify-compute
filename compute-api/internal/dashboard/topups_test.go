@@ -237,8 +237,11 @@ func TestTopupFullFlowCreditsOnlyThroughTheWebhook(t *testing.T) {
 	if sess.Form.Get("customer") == "" || sess.Form.Get("payment_intent_data[setup_future_usage]") != "" || sess.Form.Get("line_items[1][quantity]") != "" {
 		t.Errorf("session form %v", sess.Form)
 	}
-	if sess.IdempotencyKey != "unify-compute:topup:"+c.ID {
-		t.Errorf("session idempotency key %q", sess.IdempotencyKey)
+	if sess.IdempotencyKey != "unify-compute:topup:"+c.ID || cust.IdempotencyKey != "unify-compute:staging:customer:"+acctID {
+		t.Errorf("idempotency keys: session %q, customer %q", sess.IdempotencyKey, cust.IdempotencyKey)
+	}
+	if sess.Form.Get("line_items[0][price_data][product_data][metadata][product]") != "unify-compute" {
+		t.Errorf("the inline product is untagged: %v", sess.Form)
 	}
 
 	// Open, listed, and nothing credited: coming back from Checkout is not

@@ -382,6 +382,9 @@ func (s *Service) CreateTopup(ctx context.Context, u accounts.User, amountUSD st
 	}
 	putMetadata(form, "metadata", meta)
 	putMetadata(form, "payment_intent_data[metadata]", meta)
+	// price_data makes Stripe create an inline Product; tag it too, so
+	// nothing compute causes in the shared account is untagged.
+	putMetadata(form, "line_items[0][price_data][product_data][metadata]", map[string]string{"product": Product, "environment": s.env})
 	sctx, cancel := context.WithTimeout(ctx, stripeTO)
 	defer cancel()
 	// The idempotency key is the top-up id: a retried request can never make
@@ -429,7 +432,10 @@ func (s *Service) customer(ctx context.Context, u accounts.User, a accountRow) (
 	}
 	sctx, cancel := context.WithTimeout(ctx, stripeTO)
 	defer cancel()
-	id, err := s.stripe.CreateCustomer(sctx, u.Email, s.metadata(u.AccountID, ""), "unify-compute:customer:"+strconv.FormatInt(u.AccountID, 10))
+	// The environment is in the key: staging and a developer's machine share
+	// test mode and both number accounts from 1.
+	id, err := s.stripe.CreateCustomer(sctx, u.Email, s.metadata(u.AccountID, ""),
+		"unify-compute:"+s.env+":customer:"+strconv.FormatInt(u.AccountID, 10))
 	if err != nil {
 		s.log.Error("stripe: create customer", "account", u.AccountID, "err", err)
 		return "", ErrStripeUnavailable
