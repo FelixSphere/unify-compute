@@ -97,14 +97,18 @@ account. Two consequences:
   compute-api 5f964c1 (platform caps 1 job / 1 GPU, ceiling 4 h). The
   operator handles the quota case (4 vCPU now, not 8); agents do not
   request quota.
-- **Accounts (ADR-0011), 2026-10-03:** staging runs `ACCOUNTS_BACKEND=local`
+- **Accounts (ADR-0011): both hosts on `ACCOUNTS_BACKEND=local`** (staging
+  2026-10-03 17:52Z, production 18:38Z, C1). Production also has live
+  Stripe (`stripe top-ups enabled livemode=true`). Rollback and the
+  rebuild warning are in docs/staging.md, "Production on Compute's own
+  accounts". GitHub `APP_ORIGIN` is set for both environments.
+- **Accounts (ADR-0011), 2026-10-03 (staging step):** staging runs `ACCOUNTS_BACKEND=local`
   (host `.env`, set over SSM under the ops lock; previous files in
   `/data/backups/20261003T175222Z-manual-own-accounts-env/`). It also has
   `APP_ORIGIN`, the quoted `SES_SENDER`, `SES_CONFIGURATION_SET` and
   `ENVIRONMENT=staging`. The compose file must pass these through (#67); a
-  host with an older compose file ignores them silently. Production stays on
-  `console`. `app.compute.unifyai.us` is served but unlinked, and its
-  dashboard routes are 404.
+  host with an older compose file ignores them silently. (Production followed
+  in C1, above.)
   - SES identity `compute.unifyai.us`: verified, DKIM/MAIL FROM SUCCESS.
   - Terraform trap: the #58 certificate replacement left **deposed copies of
     the three re-created validation records**, sharing ids with the live

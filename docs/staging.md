@@ -532,7 +532,46 @@ mailer in A8; until it exists, `aws sesv2 send-email` over SSM proves the
 policy. A send denied on `configuration-set/unify-compute` means the second
 ARN is missing.
 
-## Stripe top-ups (ADR-0011 §4, task B1; nothing configured yet)
+## Production on Compute's own accounts (C1, 2026-10-03)
+
+Production runs `ACCOUNTS_BACKEND=local`. These are set in
+`/opt/unify-compute/compose/.env` over SSM, under the ops lock:
+`APP_ORIGIN=https://app.compute.unifyai.us`, the quoted `SES_SENDER`,
+`SES_CONFIGURATION_SET=unify-compute`, `ENVIRONMENT=production`, and
+`STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` read on the host from
+`/unify-compute-production/stripe_*`. `CONSOLE_URL` and
+`COMPUTE_BRIDGE_SECRET` stay in `.env`; local mode ignores them. The GitHub
+production variable `APP_ORIGIN` is set, so release smoke probes the app host.
+
+**User-data does not render any of these.** A rebuild of either host (an
+instance replace) comes back on console accounts with no Stripe, and every
+`uck_` key stops working. Before any rebuild, either add them to
+`modules/compute-stack` user-data, or repeat the SSM step right after the
+first boot.
+
+**Rollback** (one step, production host, over SSM):
+
+```sh
+B=/data/backups/20261003T183839Z-manual-prod-own-accounts-env   # .env before C1
+flock -w 900 /run/lock/unify-compute-ops.lock sh -c '
+  cd /opt/unify-compute/compose && cp -p .env .env.c1 && cp -p "$B/env.before" .env &&
+  docker compose up -d --no-deps compute-api'
+```
+
+Then unset the GitHub production variable `APP_ORIGIN`, so release smoke
+stops probing `/dashboard/v1`. Restoring that `.env` also drops the Stripe
+lines. The databases keep the accounts, keys and balances (migrations
+0005–0008 stay); switching back to `local` restores them as they were.
+
+## Stripe top-ups (ADR-0011 §4, task B1)
+
+**Status: live on production since 2026-10-03** (operator decision, no test
+phase). Production uses Unify API's live secret key (shared, not a
+restricted key) and endpoint `we_1UMY6T08R23kVnSzvjZa1tSI` →
+`https://app.compute.unifyai.us/dashboard/v1/stripe/webhook` (API 2024-06-20,
+the seven events below). Staging has no Stripe keys, and its top-ups answer
+503. The design below still describes separate restricted keys; that part
+is not how production is configured today.
 
 Card top-ups use the Stripe account **Unify API already runs production
 on** (operator, 2026-10-03: KYC, bank details and receipts are done there).
