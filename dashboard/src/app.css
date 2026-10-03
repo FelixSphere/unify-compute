@@ -42,13 +42,14 @@ button:focus-visible {
   border-radius: var(--u-radius);
 }
 
+/* Top-anchored, as Unify Data's sign-in card is, not vertically centred: the
+   two products' auth pages are meant to be indistinguishable in layout. */
 .page {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: 32px 16px;
+  padding: 80px 16px 48px;
   gap: 16px;
 }
 
@@ -66,7 +67,7 @@ button:focus-visible {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin: -8px 0 16px;
+  margin: 0 0 20px;
 }
 
 .brand img {
@@ -93,7 +94,7 @@ h1 {
   font-weight: 700;
   font-size: var(--u-h2);
   line-height: 1.25;
-  margin: 0 0 24px;
+  margin: 0 0 8px;
 }
 
 h1:focus {
@@ -101,20 +102,25 @@ h1:focus {
 }
 
 .lead {
-  margin: -12px 0 24px;
+  margin: 0 0 4px;
   font-size: var(--u-text-sm);
-  color: var(--u-text-2);
+  line-height: 1.6;
+  color: var(--u-text-muted);
+}
+
+.page form {
+  margin-top: 20px;
 }
 
 .field {
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
 label {
   display: block;
   font-size: var(--u-text-sm);
   font-weight: 500;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .label-row {
@@ -122,7 +128,7 @@ label {
   justify-content: space-between;
   align-items: baseline;
   gap: 12px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .label-row label {
@@ -131,6 +137,11 @@ label {
 
 .label-row a {
   font-size: var(--u-text-sm);
+  text-decoration: none;
+}
+
+.label-row a:hover {
+  text-decoration: underline;
 }
 
 input {
@@ -203,14 +214,16 @@ input[aria-invalid='true'] {
 }
 
 .hint {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   font-size: 13px;
+  line-height: 1.5;
   color: var(--u-text-muted);
 }
 
 .field-error {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   font-size: 13px;
+  line-height: 1.5;
   color: var(--u-danger);
 }
 
@@ -308,8 +321,9 @@ input[aria-invalid='true'] {
 }
 
 .legal {
-  margin: 16px 0 0;
+  margin: 14px 0 0;
   font-size: var(--u-text-xs);
+  line-height: 1.6;
   color: var(--u-text-muted);
 }
 
@@ -318,10 +332,20 @@ input[aria-invalid='true'] {
 }
 
 .switch {
-  margin: 24px 0 0;
+  margin: 18px 0 0;
   font-size: var(--u-text-sm);
-  color: var(--u-text-2);
-  text-align: center;
+  color: var(--u-text-muted);
+}
+
+.switch a,
+.switch .link {
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.switch a:hover,
+.switch .link:hover {
+  text-decoration: underline;
 }
 
 .status {
@@ -345,6 +369,16 @@ input[aria-invalid='true'] {
 .below a {
   color: var(--u-text-muted);
   font-weight: 400;
+}
+
+@media (max-width: 580px) {
+  .page {
+    padding: 24px 16px 32px;
+  }
+
+  .card {
+    padding: 24px 16px;
+  }
 }
 
 /* ------------------------------------------------------------ app shell
@@ -642,13 +676,15 @@ h2:focus {
   font-size: var(--u-text-sm);
 }
 
-.card {
+/* Scoped to the shell: an unscoped `.card` here outranked the auth card's
+   400px above and stretched Log in / Sign up across the whole viewport. */
+body.app .card {
   max-width: none;
   margin-bottom: 24px;
   padding: 22px 24px;
 }
 
-.card.narrow {
+body.app .card.narrow {
   max-width: 480px;
 }
 
