@@ -62,6 +62,12 @@ Current status (say what exists rather than describing targets as shipped):
   `503 upstream_unavailable`. Not built: resuming live jobs after a restart
   (`docs/spec/backend.md` open question 2), webhook registration, storage
   and egress metering.
+- GPU spend is capped while there are no customers (ADR-0010, "Start small"):
+  one GPU job across all accounts and a 4 h runtime ceiling
+  (`compute-api/config/platform.json`), workers reaped at 5 h, and a USD 50
+  monthly budget whose action denies new launches at 100%
+  (`deploy/aws/shared/gpu-budget`, **not applied yet**). The G-instance quota
+  to request is 4 vCPU; it is 0 today, so nothing can launch.
 - The console bridge's server half is merged in `unifyapi-console` (#225)
   but not released (`docs/spec/console-billing-bridge.md`).
 - The AWS Terraform — one module (`deploy/aws/modules/compute-stack/`) with

@@ -1,7 +1,8 @@
 # ADR-0010 — GPU workers in the shared account
 
 - **Status:** Proposed
-- **Date:** 2026-10-03, amended 2026-10-03 (IMDS closed to containers)
+- **Date:** 2026-10-03, amended 2026-10-03 (IMDS closed to containers), amended
+  2026-10-03 (start small: GPU spend hard-capped, see [below](#amendment-start-small-2026-10-03))
 - **Related:** ADR-0003 (SkyPilot through its API server), ADR-0006 (upstreams
   are SkyPilot clouds), ADR-0009 (everything on AWS), `docs/spec/backend.md`
   (C4: compute-api drives SkyPilot clusters over HTTP).
@@ -174,6 +175,11 @@ without it (rule 1).
 
 ### Money: quota as the hard cap, a budget, and a reaper
 
+> Amended by [Start small](#amendment-start-small-2026-10-03): the budget is
+> USD 50 and stops launches by itself, the quota to request is 4 vCPU, the
+> runtime ceiling is 4 h and the reaper's age 5 h. The text below is the
+> original decision.
+
 - **Concurrency cap.** IAM cannot count running instances. The hard cap is
   the account's EC2 quota *Running On-Demand G and VT instances* (vCPU,
   `L-DB2E81BA`). It applies to the whole account, and no other product runs G
@@ -261,6 +267,103 @@ alarms and SNS cost cents.
 - The G/VT quota is shared with the rest of the account. If another product
   ever runs G instances, our cap becomes theirs too.
 
+## Amendment: Start small (2026-10-03)
+
+**Context.** There are no customers yet, and the operator will not accept a
+sudden large bill. AWS answered the request for 8 vCPU of G instances by
+suggesting we start smaller. The original decision above *alerted* on spend
+and relied on someone reading the mail in time. Budget data lags spend by
+hours, so an alert is not a cap. The operator decided that GPU spend is
+**hard-capped**, not just alerted.
+
+**Decision.** Four limits, each enforced by a different thing, so that no
+one failure removes the cap:
+
+| Limit | Value | Enforced by | Where |
+|---|---|---|---|
+| Concurrent GPU jobs, all accounts | **1** job, **1** GPU | compute-api admission, under one platform-wide advisory lock (`store.CreateAdmittedPlatform`) | `compute-api/config/platform.json` |
+| Runtime of one job | **4 h** (was 24 h; R9 semantics unchanged) | compute-api submit validation and the backend's max_runtime stop | `platform.json` `max_runtime_seconds` |
+| Age of any worker | **5 h** = ceiling + 1 h (was 26 h) | the reaper Lambda, outside the host | derived from `platform.json` in `modules/gpu-workers/reaper.tf` |
+| Concurrent G instances, whole account | **4 vCPU** = one g5.xlarge | the EC2 quota `L-DB2E81BA` (to be requested; it is 0 now) | `docs/staging.md` |
+| Monthly GPU spend | **USD 50** (variable) | an AWS Budgets **action**: at 100% actual, explicit Deny on `ec2:RunInstances` and `ec2:StartInstances` attached to the launch role, automatic, no approval | `deploy/aws/shared/gpu-budget` |
+
+Plus, unchanged in intent but tightened: the launch role starts only
+`g5.xlarge` (now also a module validation), and is explicitly denied spot
+market launches and the fleet/spot request APIs. Before this, those were
+refused only by the 0 spot quota.
+
+How the budget action behaves:
+
+- At 100% of actual spend, AWS Budgets assumes `unify-compute-gpu-budget-action`
+  and attaches `unify-compute-gpu-budget-stop-launches` to
+  `unify-compute-staging-skypilot`. That role can attach or detach that one
+  policy, to the launch roles only. Running workers keep running until
+  compute-api's `/down` or the reaper: Stop and Terminate are not denied, so
+  teardown keeps working. New launches and restarts fail with
+  `UnauthorizedOperation`.
+- Alerts by email at 50%, 80% and 100% actual and at 100% forecast. The
+  action mails its own subscriber when it runs.
+- **It resets monthly.** IAM-policy actions return to standby at the start of
+  each budget period, and the policy is detached then.
+- **Lifting it within the month** is the operator's call. Raise
+  `monthly_limit_usd` and apply the budget stack, then reverse the action:
+  `aws budgets execute-budget-action --execution-type REVERSE_BUDGET_ACTION`.
+  The action id is the stack's `budget_action_id` output. A reversed action is
+  not evaluated again that month. Use `RESET_BUDGET_ACTION` to re-arm it.
+  Detaching the policy in IAM also works, but leaves the action showing
+  "completed" while nothing is attached.
+- **Production** is not in `launch_role_names` while
+  `gpu_workers_enabled = false`, because its role does not exist. The change that
+  enables production's workers adds `unify-compute-production-skypilot` there.
+
+**The overshoot bound.** The cap is not exact, because AWS Budgets sees spend
+late. It refreshes about three times a day, so the lag L is typically 8–12 h,
+and AWS allows up to 24 h for billing data. Between the moment real spend
+crosses USD 50 and the moment the Deny lands, launches continue. After it
+lands, a worker that started just before can run to the reaper's age A. So,
+with concurrency c and the all-in worker rate r (USD 1.039/h: instance,
+256 GB root, public IPv4):
+
+    overshoot ≤ c × r × (L + A)
+             = 1 × 1.039 × (12 + 5) ≈ USD 18   (typical lag)
+             = 1 × 1.039 × (24 + 5) ≈ USD 30   (AWS's worst stated lag)
+
+**Worst-case GPU compute spend is about USD 68–80 a month** with everything
+working. If compute-api's platform limit were bypassed (a bug, or a misuse of
+the launch role), the 4-vCPU quota still holds c at 1 account-wide, and the
+bound is the same. With the 8 vCPU first proposed, c would be 2 and the
+overshoot USD 35–60.
+
+What the bound depends on, stated so nobody reads more into it:
+
+- **The `Project` cost allocation tag must stay active** (`docs/staging.md`).
+  It read Active on 2026-10-03. If it is ever switched off, the budget sees
+  nothing and the action never fires. Then only
+  concurrency limits spend: 1 × 1.039 × 730 h ≈ **USD 758 a month** at most,
+  with the reaper ending each worker by hour 5 but not stopping the next
+  launch.
+- **The quota must be granted at 4, not more.** It is account-wide, so it is
+  the only limit that does not depend on compute-api.
+- **Data transfer out is not capped by any of this.** Egress is billed per
+  GB (USD 0.09 after the first 100 GB). It is tagged to the instance, so the
+  budget counts it, but late, and the Deny stops launches, not a running
+  worker's traffic. A worker uploading flat out for its 5 hours could move
+  terabytes. No open egress limit exists. If customers' code ever runs
+  before one does (an egress proxy, or a NetworkOut alarm that the reaper
+  acts on), this is the term to watch. Today the only workloads are ours.
+
+**Consequences.** One customer job at a time, platform-wide; a second
+account's submit is refused with `403 quota_exceeded` and a
+`platform_max_active_jobs` violation, with headroom, the same shape as a
+per-owner refusal. A 4-hour job is the longest anyone can buy. An orphaned
+worker now costs at most about USD 5 (was about USD 26). Raising any of
+these numbers is a reviewed change to `platform.json`, the quota and the
+budget together, recorded here.
+
+The per-owner defaults in `quotas.json` stay at 2 jobs and 2 GPUs. Existing
+tests pin them, and with the platform cap at 1 they cannot bind. The
+effective per-owner limit is 1.
+
 ## When to move to a separate account
 
 Move the workers to their own account in an AWS Organization when any of
@@ -285,8 +388,8 @@ be unwound.
 
 ## Not decided here
 
-- The quota to request. 8 vCPU (two g5.xlarge) is proposed in
-  `docs/staging.md`; 4 is the minimum for one.
-- The budget amount (USD 300) and the alert address.
+- ~~The quota to request.~~ 4 vCPU, one g5.xlarge (Start small, 2026-10-03).
+- ~~The budget amount (USD 300).~~ USD 50 with an automatic stop (Start
+  small). The alert address is still the operator's to set.
 - ~~Closing IMDS to every container but compute-api.~~ Done by ADR-0005's
   amendment of 2026-10-03, for compute-api too.

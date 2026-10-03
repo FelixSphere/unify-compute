@@ -50,7 +50,7 @@ OpenAI-style envelope so existing client error handling carries over:
 | 401 | `authentication_error` | Missing, malformed, revoked, or expired key |
 | 403 | `authentication_error` | The key is valid but its account may not spend (`account_disabled`, `account_suspended`) |
 | 402 | `insufficient_balance` | Hold refused: balance below the estimate |
-| 403 | `quota_exceeded` | Submit would exceed an account quota; `error.quotas` lists each limit with usage and headroom ([`quotas.md`](quotas.md)). Never a partial grant, no `Retry-After` |
+| 403 | `quota_exceeded` | Submit would exceed an account quota or a platform-wide limit (one active job across all accounts while the platform starts small); `error.quotas` lists each limit with usage and headroom ([`quotas.md`](quotas.md)). Never a partial grant, no `Retry-After` |
 | 404 | `not_found` | Job id unknown *for this key* (no existence leak across users) |
 | 409 | `conflict` | Idempotency-Key reused with a different body; cancel on a terminal job |
 | 429 | `rate_limited` | Per-key submit or read rate exceeded; always with `Retry-After` |
@@ -214,7 +214,8 @@ unchanged. Rules and the template error codes are in
 Validated before anything is held or persisted, in this order: body parses
 (`malformed_body`), `sku` present (`missing_sku`) and offered (`unknown_sku`)
 and sold (`sku_unavailable`), `spec.max_runtime_seconds` positive
-(`missing_max_runtime`) and at most 86400 (`runtime_over_ceiling`), every
+(`missing_max_runtime`) and at most the deployment's ceiling, 14400 today and
+never above 86400 (`runtime_over_ceiling`, upstreams.md R9), every
 entry of `providers` offered by the SKU (`provider_not_offered`), at
 least one candidate enabled in this deployment (`503 upstream_unavailable`),
 and, last, the account's quotas (`403 quota_exceeded`, [`quotas.md`](quotas.md)).

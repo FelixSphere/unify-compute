@@ -170,29 +170,36 @@ each step depends on the one before.
 # 0. GPU quota. On 2026-10-03 both G/VT quotas were 0 vCPU, so nothing can
 #    launch until this is granted. Filed by the operator, not by an agent:
 aws service-quotas request-service-quota-increase --region us-east-1 \
-  --service-code ec2 --quota-code L-DB2E81BA --desired-value 8
-#    (Running On-Demand G and VT instances. 8 vCPU = two g5.xlarge: one job
-#    plus the overlap while an attempt is torn down and the next comes up. 4
-#    is the minimum for one. Spot, L-3819A6DF, is not needed: the spot SKU is
-#    unavailable and the launch role cannot request spot.) If AWS asks for a
-#    use case: "Batch inference on one NVIDIA A10G (g5.xlarge) at a time in
-#    us-east-1 for a staging environment, launched by SkyPilot, every
-#    instance terminated within 26 hours by an automated reaper."
+  --service-code ec2 --quota-code L-DB2E81BA --desired-value 4
+#    (Running On-Demand G and VT instances. 4 vCPU = exactly one g5.xlarge,
+#    which is all ADR-0010's "Start small" amendment allows: one GPU job on
+#    the whole platform. AWS answered the earlier 8 vCPU request by
+#    suggesting a smaller start. The quota is account-wide, so it is the one
+#    concurrency cap that holds even if compute-api's own limit does not;
+#    asking for more would double the budget overshoot. The cost: when an
+#    attempt is torn down and the next comes up, the new launch waits for
+#    the old instance to finish terminating. Spot, L-3819A6DF, is not
+#    needed: the spot SKU is unavailable and the launch role is denied spot.)
+#    If AWS asks for a use case: "Batch inference on one NVIDIA A10G
+#    (g5.xlarge) at a time in us-east-1 for a staging environment, launched
+#    by SkyPilot, every instance terminated within 5 hours by an automated
+#    reaper, launches stopped automatically by an AWS Budgets action at
+#    USD 50 a month."
+#    State on 2026-10-03 (read-only): quota 0; an earlier request for 8 is
+#    open (CASE_OPENED 2026-10-02). Answer that case asking for 4, rather
+#    than filing a second request beside it.
 
 # 1. the admin password for the SkyPilot API server (hex, like the others)
 scripts/staging-secrets.sh --env staging        # creates skypilot_admin_password, keeps the rest
 
 # 2. cost allocation tag (account-wide, so not in Terraform; not
-#    retroactive). Without it the budget in step 3 sees nothing.
+#    retroactive). Without it the budget in step 4 sees nothing, and its
+#    automatic stop never fires (ADR-0010, "Start small"). It read Active on
+#    2026-10-03, so this is a no-op unless someone switched it off.
 aws ce update-cost-allocation-tags-status \
   --cost-allocation-tags-status TagKey=Project,Status=Active
 
-# 3. the budget, its own stack
-terraform -chdir=deploy/aws/shared/gpu-budget init
-terraform -chdir=deploy/aws/shared/gpu-budget plan -var alert_email=<address> -out=budget.tfplan   # 1 to add
-terraform -chdir=deploy/aws/shared/gpu-budget apply budget.tfplan
-
-# 4. staging. Set gpu_alert_email in envs/staging/variables.tf (or -var) so
+# 3. staging. Set gpu_alert_email in envs/staging/variables.tf (or -var) so
 #    reaper reports reach someone; the address must confirm the SNS mail.
 terraform -chdir=deploy/aws/envs/staging plan -out=staging.tfplan
 #    expect 47 to add (48 with gpu_alert_email; 18 are ADR-0005's artifacts
@@ -200,10 +207,25 @@ terraform -chdir=deploy/aws/envs/staging plan -out=staging.tfplan
 #    module.stack.aws_instance.this updated in place (instance_type only) and
 #    module.stack.aws_iam_role_policy.secrets (sts:AssumeRole). Anything
 #    replacing aws_instance.this or touching aws_ebs_volume.data is a stop.
+#    (On a stack that already has the workers, the start-small change alone
+#    is 0 to add, 2 to change: the launch policy gains DenySpot and
+#    DenyOtherWaysToLaunch, and the reaper's MAX_AGE_HOURS goes 26 -> 5.)
 terraform -chdir=deploy/aws/envs/staging apply staging.tfplan
 
+# 4. the budget and its automatic stop, its own stack. After staging,
+#    because the action names staging's launch role; before step 5, so no
+#    worker can launch before the stop exists.
+terraform -chdir=deploy/aws/shared/gpu-budget init
+terraform -chdir=deploy/aws/shared/gpu-budget plan -var alert_email=<address> -out=budget.tfplan
+#    5 to add: the budget (USD 50; 50/80/100% actual, 100% forecast), the
+#    deny policy, the Budgets execution role and its policy, the action.
+#    Read-only plan on 2026-10-03: 5 to add, 0 to change, 0 to destroy.
+terraform -chdir=deploy/aws/shared/gpu-budget apply budget.tfplan
+#    Check: aws budgets describe-budget-actions-for-budget --account-id <id> \
+#      --budget-name unify-compute-gpu-workers  -> one action, STANDBY.
+
 # 5. SkyPilot on the running host, once. Takes the ops lock; assumes the
-#    launch role (fails here if step 4 did not happen); writes the overlay,
+#    launch role (fails here if step 3 did not happen); writes the overlay,
 #    its config and the credential timer; brings the stack up; mints
 #    compute-api's service-account token on the host.
 terraform -chdir=deploy/aws/envs/staging output -raw skypilot_host_setup > skypilot-setup.sh
@@ -234,7 +256,23 @@ What to exercise afterwards, on the host (SSM), before calling it done:
 - `systemctl list-timers unify-compute-skypilot-credentials.timer` shows the
   next run within 20 minutes.
 - Invoke the reaper once (`aws lambda invoke --function-name
-  unify-compute-staging-gpu-reaper out.json`): it reports zero workers.
+  unify-compute-staging-gpu-reaper out.json`): it reports zero workers and
+  `max_age_hours` 5.
+- The budget's stop, without waiting for a month's spend. From the skypilot
+  container, a dry run the launch role allows:
+
+  ```bash
+  T='{Key=Project,Value=unify-compute-workers},{Key=Environment,Value=staging}'
+  aws ec2 run-instances --dry-run --instance-type g5.xlarge --image-id <a us-east-1 AMI> \
+    --subnet-id <a workers subnet> --security-group-ids <the workers SG> \
+    --iam-instance-profile Name=unify-compute-staging-worker \
+    --tag-specifications "ResourceType=instance,Tags=[$T]" "ResourceType=volume,Tags=[$T]"
+  ```
+
+  answers `DryRunOperation`. Attach `unify-compute-gpu-budget-stop-launches`
+  to `unify-compute-staging-skypilot` by hand and rerun: it must now answer
+  `UnauthorizedOperation`. Detach it again. The budget action attaches it
+  when the time comes.
 - The first real launch, after the quota is granted, is the test of
   everything IAM can only simulate. Run one `a10g-24gb-x1` job and confirm
   that the worker has `Project=unify-compute-workers`, `Environment=staging`,
