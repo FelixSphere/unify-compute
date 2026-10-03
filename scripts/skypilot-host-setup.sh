@@ -74,7 +74,9 @@ EOF
   base64 -d > "$COMPOSE_DIR/skypilot/config.yaml.new" <<EOF
 $SKY_CONFIG_B64
 EOF
-  [ -s "$COMPOSE_DIR/$OVERLAY.new" ] && [ -s "$COMPOSE_DIR/skypilot/config.yaml.new" ] || die "an embedded file decoded to nothing"
+  if [ ! -s "$COMPOSE_DIR/$OVERLAY.new" ] || [ ! -s "$COMPOSE_DIR/skypilot/config.yaml.new" ]; then
+    die "an embedded file decoded to nothing"
+  fi
   mv -f "$COMPOSE_DIR/$OVERLAY.new" "$COMPOSE_DIR/$OVERLAY"
   mv -f "$COMPOSE_DIR/skypilot/config.yaml.new" "$COMPOSE_DIR/skypilot/config.yaml"
   cat > "$COMPOSE_DIR/skypilot/aws-config" <<EOF
@@ -160,7 +162,9 @@ EOF
     *":$OVERLAY:"*) ;;
     *) env_set COMPOSE_FILE "${cf:-docker-compose.yml}:$OVERLAY" ;;
   esac
-  [ -s "$TOKEN_FILE" ] && env_set SKYPILOT_SERVICE_ACCOUNT_TOKEN "$(cat "$TOKEN_FILE")"
+  if [ -s "$TOKEN_FILE" ]; then
+    env_set SKYPILOT_SERVICE_ACCOUNT_TOKEN "$(cat "$TOKEN_FILE")"
+  fi
   say "files: $COMPOSE_DIR/$OVERLAY, $COMPOSE_DIR/skypilot/, $UNIT.timer; COMPOSE_FILE=$(env_get COMPOSE_FILE)"
 }
 
