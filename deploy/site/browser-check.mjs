@@ -251,9 +251,9 @@ const clickAndExpectSoftNav = async (selector, label) => {
 
 const START_TITLE = 'Get started — Unify Compute';
 const START_H1 = 'Get started with Unify Compute';
-// Placeholders until Compute's own account pages exist; see app/links.ts.
-const LOGIN = '/start#early-access';
-const REGISTER = '/start#early-access';
+// Production's app host, on staging too: the image is shared. See app/links.ts.
+const LOGIN = 'https://app.compute.unifyai.us/login';
+const REGISTER = 'https://app.compute.unifyai.us/signup';
 
 const setViewport = (width, height, mobile) =>
   page('Emulation.setDeviceMetricsOverride', {
@@ -1352,13 +1352,19 @@ try {
   );
   await clickToStart('header .nav-inline a[href="/start"]', 'header "Quick start"');
   await back();
-  await clickToStart('header .nav-actions a.button.primary', 'header "Sign up"');
-  check(
-    await evaluate(`location.hash === '#early-access' && !!document.getElementById('early-access')`),
-    'header "Sign up" lands on the early-access section',
-    `header "Sign up" landed on "${await evaluate('location.hash')}", not #early-access`,
-  );
-  await back();
+  // The account pages are on another host; the test asserts where the links
+  // go rather than leaving the site under test.
+  for (const [sel, text, label] of [
+    [`.hero-actions a.button.primary[href="${REGISTER}"]`, 'Sign up', 'hero "Sign up"'],
+    [`footer .footer-links a[href="${LOGIN}"]`, 'Log in', 'footer "Log in"'],
+    [`footer .footer-links a[href="${REGISTER}"]`, 'Sign up', 'footer "Sign up"'],
+  ]) {
+    check(
+      (await evaluate(`document.querySelector(${JSON.stringify(sel)})?.textContent.trim()`)) === text,
+      `1280: ${label} → ${sel.match(/href="([^"]+)"/)[1]}`,
+      `1280: ${label} link missing or mislabelled`,
+    );
+  }
 
   await setViewport(375, 812, true);
   await load('/');
@@ -1408,6 +1414,25 @@ try {
     (await evaluate(`document.querySelector('h1')?.textContent`)) === START_H1,
     '/start full page load',
     '/start full page load did not render the guide',
+  );
+  check(
+    (await evaluate(`[...document.querySelectorAll('.guide-steps h2')].some((h) => h.textContent === 'Create an account')`)) &&
+      (await evaluate(`!!document.querySelector('#account a[href=${JSON.stringify(REGISTER)}]')`)) &&
+      (await evaluate(`!document.getElementById('early-access')`)),
+    '/start step 02 is "Create an account", linking to sign-up',
+    '/start step 02 is not "Create an account" with a sign-up link, or #early-access is still there',
+  );
+  for (const copy of ['uck_', '403 compute_not_enabled', '503 upstream_unavailable', 'read -rs UNIFY_KEY']) {
+    check(
+      await evaluate(`document.querySelector('.guide').textContent.includes(${JSON.stringify(copy)})`),
+      `/start says "${copy}"`,
+      `/start does not say "${copy}"`,
+    );
+  }
+  check(
+    !(await evaluate(`/not open yet|Self-serve sign-up is coming/.test(document.querySelector('.guide').textContent)`)),
+    '/start no longer says accounts are closed',
+    '/start still says self-serve accounts are not open',
   );
 
   await load('/privacy');

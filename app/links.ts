@@ -1,11 +1,11 @@
-// Placeholders. Unify Compute is getting its own accounts (the decision that
-// supersedes ADR-0001 is being written), and its sign-up and log-in pages do
-// not exist yet. Until they do, both point at the early-access section of the
-// quick start, which says how to get access today. Change them here only: the
-// header, the mobile menu, the hero and the footer all read these, and
-// deploy/site/smoke.sh and browser-check.mjs assert the same values.
-export const SIGN_UP_URL = '/start#early-access';
-export const LOG_IN_URL = '/start#early-access';
+// Compute's own account pages (ADR-0011, accepted 2026-10-03), served by the
+// app host. The marketing image is shared by staging and production, so these
+// always point at production's app, including on staging.compute.unifyai.us.
+// Change them here only: the header, the mobile menu, the hero and the footer
+// all read these, and deploy/site/smoke.sh and browser-check.mjs assert the
+// same values.
+export const SIGN_UP_URL = 'https://app.compute.unifyai.us/signup';
+export const LOG_IN_URL = 'https://app.compute.unifyai.us/login';
 
 // unifyai.us has no mailbox yet; UI-STANDARD allows this one address until it does.
 export const CONTACT_EMAIL = 'contactus@felixsphere.com';

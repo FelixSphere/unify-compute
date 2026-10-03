@@ -58,13 +58,14 @@ grep -q '<title>Get started — Unify Compute</title>' "$tmp/body" \
   || { echo "FAIL /start: title missing"; fail=1; }
 check /start/ 308 "Location: /start"
 
-# Log in / Sign up point at placeholders until Compute's own account pages
-# exist (app/links.ts): the early-access section of /start. They must not
-# point at the Unify API console, whose accounts Compute no longer uses.
+# Log in / Sign up point at Compute's own account pages on production's app
+# host (app/links.ts; ADR-0011), on staging too, because the image is shared.
+# They must not point at the Unify API console, whose accounts Compute no
+# longer uses.
 links_ok=1
 for page in / /start /privacy; do
   curl -s "$base$page" > "$tmp/links"
-  for href in '/start#early-access' '/start'; do
+  for href in 'https://app.compute.unifyai.us/signup' 'https://app.compute.unifyai.us/login' '/start'; do
     grep -q "href=\"$href\"" "$tmp/links" \
       || { echo "FAIL $page: no link to $href"; fail=1; links_ok=0; }
   done
@@ -84,8 +85,17 @@ for href in 'mailto:contactus@felixsphere.com?subject=Unify%20Compute%20early%20
   grep -qF "href=\"$href\"" "$tmp/links" \
     || { echo "FAIL /start: no link to $href"; fail=1; links_ok=0; }
 done
-grep -q 'id="early-access"' "$tmp/links" \
-  || { echo "FAIL /start: no #early-access section for the placeholder links"; fail=1; links_ok=0; }
+# Self-serve accounts are open; the guide must say so and must still be
+# honest that job execution is enabled per account.
+for copy in 'Create an account' 'uck_' '403 compute_not_enabled' '503 upstream_unavailable' 'read -rs UNIFY_KEY'; do
+  grep -qF "$copy" "$tmp/links" \
+    || { echo "FAIL /start: copy \"$copy\" missing"; fail=1; links_ok=0; }
+done
+for stale in 'id="early-access"' 'not open yet' 'Self-serve sign-up is coming'; do
+  if grep -qF "$stale" "$tmp/links"; then
+    echo "FAIL /start: still says \"$stale\""; fail=1; links_ok=0
+  fi
+done
 [ "$links_ok" = 1 ] && echo "ok   sign-up, log-in and quick-start links"
 
 check /does-not-exist 404 "Content-Type: text/html" "Cache-Control: no-cache" "${common[@]}"

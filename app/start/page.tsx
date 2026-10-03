@@ -1,12 +1,12 @@
 import type { Metadata } from 'next';
-import { COMPUTE_API, CONTACT_EMAIL, EARLY_ACCESS_MAILTO } from '../links';
+import { COMPUTE_API, CONTACT_EMAIL, EARLY_ACCESS_MAILTO, SIGN_UP_URL } from '../links';
 import { SiteFooter } from '../site-footer';
 import { SiteHeader } from '../site-header';
 
 export const metadata: Metadata = {
   title: 'Get started — Unify Compute',
   description:
-    'Browse the Unify Compute catalogue, request early access, and call the Unify Compute API with your key.',
+    'Browse the Unify Compute catalogue, create an account, and call the Unify Compute API with your key.',
 };
 
 // read -s keeps the key out of the terminal and shell history; the examples
@@ -36,8 +36,9 @@ export default function Start() {
         <p className="eyebrow">Quick start</p>
         <h1>Get started with Unify Compute</h1>
         <p className="guide-lead">
-          Unify Compute is in early access. Self-serve sign-up is coming; until
-          then, access is by request.
+          Unify Compute is in early access. Anyone can create an account and an
+          API key; GPU job execution is turned on per account while it rolls
+          out.
         </p>
 
         <ol className="guide-steps">
@@ -51,22 +52,34 @@ export default function Start() {
             <Code label="List SKUs">{LIST_SKUS}</Code>
             <Code label="List templates">{LIST_TEMPLATES}</Code>
           </li>
-          <li id="early-access">
+          <li id="account">
             <span className="step-number">02</span>
-            <h2>Request early access</h2>
+            <h2>Create an account</h2>
+            <ol className="guide-substeps">
+              <li>
+                Sign up at{' '}
+                <a href={SIGN_UP_URL}>app.compute.unifyai.us</a>.
+              </li>
+              <li>Verify your email address from the link we send you.</li>
+              <li>
+                Create an API key in the dashboard. Unify Compute keys start
+                with <code>uck_</code>.
+              </li>
+              <li>
+                Ask us to enable job execution for your account: email{' '}
+                <a href={EARLY_ACCESS_MAILTO}>{CONTACT_EMAIL}</a> and tell us
+                what you want to run.
+              </li>
+            </ol>
             <div className="early-access" role="note">
               <span className="badge">Early access</span>
               <p>
-                Self-serve accounts and log-in are not open yet. Job execution is
-                rolling out gradually: submitting a job may return{' '}
-                <code>503 upstream_unavailable</code> while it opens.
+                GPU job execution is still rolling out. Until your account is
+                enabled, submitting a job returns{' '}
+                <code>403 compute_not_enabled</code>; while capacity opens, it
+                may also return <code>503 upstream_unavailable</code>.
               </p>
             </div>
-            <p>
-              Email <a href={EARLY_ACCESS_MAILTO}>{CONTACT_EMAIL}</a> and tell us
-              what you want to run. We will reply about access and how to get
-              an API key.
-            </p>
           </li>
           <li>
             <span className="step-number">03</span>
