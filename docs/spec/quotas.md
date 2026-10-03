@@ -166,7 +166,7 @@ Both appear in `product-design.md`; this spec decides **403**.
   companion `Retry-After` says how long. For a quota neither holds: a 4-GPU
   job against a 2-GPU limit never fits, and when a slot frees depends on
   another job's runtime, which nobody can put in a header.
-- The OpenAI SDKs our customers already point at UnifyAPI retry `429`
+- The OpenAI SDKs our customers already point at Unify API retry `429`
   automatically with backoff. A quota refusal returned as `429` would be
   retried silently a few times and then surface late, looking like
   congestion — the opposite of explicit.

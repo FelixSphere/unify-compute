@@ -632,15 +632,26 @@ Two known gaps, left for the legal review before the first live top-up
    cryptocurrency mining, abuse of GPUs, or the other uses the upstream GPU
    providers' own terms require us to prohibit and enforce.
 
-The privacy policy (`app/privacy/page.tsx`) names FelixSphere LLC, 6 Karen
-Ct, CA 94010, as the Company and data controller to match (operator decision,
-2026-10-03). The footers keep the brand's "© <year> UnifyAI" company line
-from `~/unifyai-brand-kit/UI-STANDARD.md`, which is not the legal entity.
+The privacy policy (`app/privacy/page.tsx`) names FelixSphere LLC as the
+Company and data controller, and says "Unify Compute is a UnifyAI product
+operated by FelixSphere LLC, 6 Karen Ct, CA 94010, United States." On
+2026-10-03 the operator made FelixSphere LLC (US) the legal entity for terms,
+privacy, payments and email sender across all five UnifyAI products,
+replacing the Malaysian company line of 2026-10-02; the brand stays UnifyAI
+(`~/unifyai-brand-kit/UI-STANDARD.md`, "Company and legal facts"). So:
 
-Both depart from UI-STANDARD, which allows no felixsphere.com link other than
-the contact address and no "FelixSphere LLC". The brand owner has been asked
-to allow them in Compute's legal pages; until then `check-consistency.sh`
-item 4 flags them.
+- Page footers, on the marketing site and the app host, read only
+  "© <year> UnifyAI".
+- The privacy page's footer adds "Operated by FelixSphere LLC · 6 Karen Ct,
+  CA 94010, United States".
+- Email footers end with "© UnifyAI · Operated by FelixSphere LLC · 6 Karen
+  Ct, CA 94010, United States" (`docs/spec/email/base.html`).
+
+The address has no city; it is the one published on felixsphere.com, and the
+brand owner has asked the operator for the city line before the first paid
+invoice. The standard now allows "FelixSphere LLC" in that entity line and
+the felixsphere.com Terms link, so `check-consistency.sh` no longer flags
+them.
 
 ## Open points
 
