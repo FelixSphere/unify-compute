@@ -59,7 +59,7 @@ const partials: Record<string, (arg: string) => string> = {
   brand: () => `<div class="brand">
           <img src="/brand/unifyai-lockup-horizontal-black.svg" alt="UnifyAI" width="148" height="51" loading="eager" />
           <span class="divider" aria-hidden="true"></span>
-          <span class="descriptor">Compute</span>
+          <span class="descriptor">Compute <span class="partner">&amp; Flatkey</span></span>
         </div>`,
   'form-error': () => `<div class="form-error" id="form-error" role="alert" tabindex="-1" hidden>${ALERT}<p></p></div>`,
   toggle: (id) =>
@@ -86,7 +86,7 @@ const partials: Record<string, (arg: string) => string> = {
       <a class="brand" href="/" aria-label="Unify Compute overview">
         <img src="/brand/unifyai-lockup-horizontal-black.svg" alt="UnifyAI" width="148" height="51" loading="eager" />
         <span class="divider" aria-hidden="true"></span>
-        <span class="descriptor">Compute</span>
+        <span class="descriptor">Compute <span class="partner">&amp; Flatkey</span></span>
       </a>
       <a class="mark" href="/" aria-label="Unify Compute overview"><img src="/brand/unifyai-mark-black.svg" alt="UnifyAI" width="32" height="32" loading="eager" /></a>
       <div class="header-actions">
