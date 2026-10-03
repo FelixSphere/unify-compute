@@ -183,7 +183,7 @@ connect and 0.66 s for a cold TLS request. compute-api's bridge timeout is
 10 s. `api-edge.unifyapi.ai` (CloudFront) is the wrong choice: its origin is
 the stopped us-east-1 stack.
 
-The console side belongs to the UnifyAPI release owner. Its procedure is the
+The console side belongs to the Unify API release owner. Its procedure is the
 same-image swap (`infra/scripts/console-swap.sh` in FelixSphere/unifyapi):
 add the variable to `/opt/unifyapi/.env` and the compose file, then swap to the
 image already running. That way the instance is never stopped and started (no
@@ -217,7 +217,7 @@ per-IP global limiter deliberately does not cover these routes. There is no
 money risk: a starved call is `console_unavailable`, and no hold is placed or
 settled. It is an availability risk to fix in the console (verify first, or
 limit per IP before the shared bucket) before compute takes paying traffic.
-It is reported to UnifyAPI.
+It is reported to Unify API.
 
 ## GPU workers and SkyPilot
 
