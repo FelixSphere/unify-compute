@@ -1,0 +1,89 @@
+/* Placeholder for the app host until the dashboard export replaces this
+   directory (plan task A7b). An external file because the app host's CSP
+   allows no inline style. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--u-bg);
+  color: var(--u-text);
+  font-family: var(--u-font-body);
+  font-size: var(--u-text-md);
+  line-height: 1.5;
+}
+
+.page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+  gap: 16px;
+}
+
+.card {
+  width: 100%;
+  max-width: 400px;
+  background: var(--u-surface);
+  border: var(--u-rule);
+  border-radius: var(--u-radius);
+  padding: 32px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.brand img {
+  display: block;
+  height: 34px;
+  width: auto;
+}
+
+.divider {
+  width: 1px;
+  height: 24px;
+  background: var(--u-border);
+}
+
+.descriptor {
+  font-family: var(--u-font-display);
+  font-weight: 500;
+  font-size: 17px;
+}
+
+h1 {
+  font-family: var(--u-font-display);
+  font-weight: 700;
+  font-size: var(--u-h2);
+  line-height: 1.25;
+  margin: 0 0 12px;
+}
+
+p {
+  margin: 0 0 12px;
+  color: var(--u-text-2);
+}
+
+a {
+  color: var(--u-text);
+}
+
+a:focus-visible {
+  outline: none;
+  box-shadow: var(--u-focus);
+  border-radius: 2px;
+}
+
+.legal {
+  font-size: var(--u-text-xs);
+  color: var(--u-text-muted);
+}

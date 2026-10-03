@@ -12,8 +12,10 @@ here, in the commit that adds it. Permissive licences only (ADR-0002).
 | [github.com/jackc/pgpassfile](https://github.com/jackc/pgpassfile) v1.0.0 | MIT | Transitive, via pgx: `.pgpass` lookup. |
 | [github.com/jackc/pgservicefile](https://github.com/jackc/pgservicefile) v0.0.0-20240606120523-5a60cdf6a761 | MIT | Transitive, via pgx: `pg_service.conf` lookup. |
 | [github.com/jackc/puddle/v2](https://github.com/jackc/puddle) v2.2.2 | MIT | Transitive, via `pgxpool`: the connection pool. |
+| [golang.org/x/crypto](https://pkg.go.dev/golang.org/x/crypto) v0.42.0 | BSD-3-Clause | Direct, `internal/accounts`: argon2id password hashing (`argon2`, ADR-0011 §8). v0.42.0 is the newest release whose `go.mod` accepts Go 1.24 without raising `golang.org/x/text` past the version pgx already uses. |
 | [golang.org/x/sync](https://pkg.go.dev/golang.org/x/sync) v0.17.0 | BSD-3-Clause | Transitive, via puddle (`semaphore`). |
-| [golang.org/x/text](https://pkg.go.dev/golang.org/x/text) v0.29.0 | BSD-3-Clause | Transitive, via pgx: SASLprep for SCRAM passwords. |
+| [golang.org/x/sys](https://pkg.go.dev/golang.org/x/sys) v0.36.0 | BSD-3-Clause | Transitive, via `x/crypto/blake2b` (inside argon2): CPU feature detection (`cpu`). |
+| [golang.org/x/text](https://pkg.go.dev/golang.org/x/text) v0.29.0 | BSD-3-Clause | Transitive via pgx (SASLprep for SCRAM passwords), and direct in `internal/accounts`: NFC normalisation of email addresses (`unicode/norm`). |
 
 The modules above are what `go list -deps ./...` reaches; `go.mod` lists
 nothing else. pgx's own test dependencies (testify and friends) are not in

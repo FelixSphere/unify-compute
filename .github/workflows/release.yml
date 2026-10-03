@@ -359,6 +359,8 @@ jobs:
         env:
           ORIGIN: ${{ vars.PUBLIC_ORIGIN }}
           API_ORIGIN: ${{ vars.API_ORIGIN }}
+          # Optional: set once the app host is applied (terraform output app_origin).
+          APP_ORIGIN: ${{ vars.APP_ORIGIN }}
           EXPECT_BUILD: ${{ needs.plan.outputs.build }}
         run: |
           set -euo pipefail

@@ -20,10 +20,19 @@ first, always.
 | `staging.compute.unifyai.us` | compute-api (`/compute/v1/*`, `/healthz`) | ALB host rule → port 8080 |
 | `site.staging.compute.unifyai.us` | marketing site container (`/healthz`) | ALB host rule → port 8081 |
 | `console.staging.compute.unifyai.us` | staging Unify API console (SPA, `/api`, `/v1`) | ALB host rule → port 3000 |
+| `app.staging.compute.unifyai.us` | customer app (ADR-0011): pages from the site container's app host block; `/dashboard/v1/*` from compute-api | ALB host + path rule (priority 15) → port 8080 for `/dashboard/v1/*`; the site rule → port 8081 for the rest |
 
-All three are children of `compute.unifyai.us`, which stays a CNAME to OpenAI
+All four are children of `compute.unifyai.us`, which stays a CNAME to OpenAI
 Sites for the marketing page until the production cutover in ADR-0009. One
-certificate covers all three names. Any other Host gets a fixed `404`.
+certificate covers all four names. Any other Host gets a fixed `404`.
+
+The app host is **defined, not applied** (plan task A7a, 2026-10-03). Until it
+is, the name has no DNS record; after it is, it answers with a placeholder
+page until the app pages ship (A7b). Production's equivalent is
+`app.compute.unifyai.us`, a new record that the production stack manages from
+its first apply, independent of the `compute.unifyai.us` cutover. The app
+host's pages carry an enforced CSP with no third-party origin
+(`deploy/site/Caddyfile`); the job API (`/compute/v1/*`) is not routed there.
 
 ## What runs on the instance
 
@@ -174,7 +183,7 @@ connect and 0.66 s for a cold TLS request. compute-api's bridge timeout is
 10 s. `api-edge.unifyapi.ai` (CloudFront) is the wrong choice: its origin is
 the stopped us-east-1 stack.
 
-The console side belongs to the UnifyAPI release owner. Its procedure is the
+The console side belongs to the Unify API release owner. Its procedure is the
 same-image swap (`infra/scripts/console-swap.sh` in FelixSphere/unifyapi):
 add the variable to `/opt/unifyapi/.env` and the compose file, then swap to the
 image already running. That way the instance is never stopped and started (no
@@ -208,7 +217,7 @@ per-IP global limiter deliberately does not cover these routes. There is no
 money risk: a starved call is `console_unavailable`, and no hold is placed or
 settled. It is an availability risk to fix in the console (verify first, or
 limit per IP before the shared bucket) before compute takes paying traffic.
-It is reported to UnifyAPI.
+It is reported to Unify API.
 
 ## GPU workers and SkyPilot
 
@@ -453,6 +462,69 @@ If `check-imds.sh` ever fails on a locked-down host, the rule was removed
 behind the unit's back. Find out how before re-running step 1. That is what
 host.sh's refusal is for.
 
+## SES identity for compute.unifyai.us (ADR-0011, not yet applied)
+
+compute-api's account email (verification codes, resets) goes out through
+SES as `Unify Compute <no-reply@compute.unifyai.us>` from both environments.
+Two pieces, both **defined and not applied**:
+
+- `deploy/aws/shared/ses-compute`, one stack for both environments: the
+  domain identity with Easy DKIM (2048-bit), MAIL FROM
+  `bounce.compute.unifyai.us`, `_dmarc.compute.unifyai.us` (`p=none`,
+  reports to `dmarc_report_email`), and the configuration set
+  `unify-compute` as the identity's default, with reputation metrics and a
+  CloudWatch event destination. Seven Route53 records, all new names under
+  `compute.unifyai.us`; the `compute.unifyai.us` A alias and every other
+  record are untouched, and Route53 refuses to overwrite a record that
+  already exists.
+- `modules/compute-stack/ses.tf`, in each environment: an instance-role
+  policy granting `ses:SendEmail`/`ses:SendRawEmail` on the identity **and**
+  the configuration set, only when the From address is
+  `no-reply@compute.unifyai.us`, plus three SSM String parameters,
+  `/<name>/ses_identity`, `ses_configuration_set` and `ses_sender`. Nothing on
+  the host reads them yet (plan tasks A2 and A8 do).
+
+No sandbox exit: account 871376691052 has SES production access in us-east-1
+(checked 2026-10-03). A suspension earned by any product in the account stops
+these sends too.
+
+```bash
+# 0. DMARC reports to an address outside unifyai.us are dropped unless that
+#    domain authorises them. For felixsphere.com (Cloudflare DNS, not this
+#    repository's), add once:
+#      compute.unifyai.us._report._dmarc.felixsphere.com  TXT  "v=DMARC1"
+#    Absent on 2026-10-03. Without it the record still applies p=none; only
+#    the reports are lost.
+
+# 1. the identity. Read-only plan on 2026-10-03: 10 to add, 0 to change,
+#    0 to destroy (identity, mail-from attributes, configuration set, event
+#    destination, 3 DKIM CNAMEs, MX + SPF TXT on bounce, DMARC TXT).
+terraform -chdir=deploy/aws/shared/ses-compute init
+terraform -chdir=deploy/aws/shared/ses-compute plan -out=ses.tfplan \
+  -var dmarc_report_email=<operator address>
+terraform -chdir=deploy/aws/shared/ses-compute apply ses.tfplan
+
+# 2. wait for verification (DKIM usually within minutes, up to 72 h):
+aws sesv2 get-email-identity --email-identity compute.unifyai.us \
+  --query '{v:VerifiedForSendingStatus,dkim:DkimAttributes.Status,mf:MailFromAttributes.MailFromDomainStatus,cs:ConfigurationSetName}'
+#    expect true, SUCCESS, SUCCESS, unify-compute.
+
+# 3. staging, then production. Read-only plans on 2026-10-03, each: 4 to add,
+#    0 to change, 0 to destroy (aws_iam_role_policy.instance_ses and the three
+#    SSM parameters). Nothing touches aws_instance.this; anything that does is
+#    a stop.
+terraform -chdir=deploy/aws/envs/staging plan -out=staging.tfplan
+terraform -chdir=deploy/aws/envs/staging apply staging.tfplan
+```
+
+What to exercise: from the staging host, a send to
+`success@simulator.amazonses.com` with the instance role, From
+`no-reply@compute.unifyai.us`, must succeed; the same with From
+`other@compute.unifyai.us` must be `AccessDenied`. The real path is the
+mailer in A8; until it exists, `aws sesv2 send-email` over SSM proves the
+policy. A send denied on `configuration-set/unify-compute` means the second
+ARN is missing.
+
 ## Acceptance
 
 Staging is healthy when all of these hold, checked by `scripts/smoke.sh`:
@@ -572,7 +644,10 @@ the environment's `API_ORIGIN` and the site at its `PUBLIC_ORIGIN`:
 `/compute/v1/skus` 200 JSON with at least one priced SKU;
 `/compute/v1/jobs` without a key 401 with compute-api's `missing_key`;
 `/` 200 with `<title>Unify Compute`; `/privacy` 200; `/icon-v4.svg` 200 with
-`Cache-Control: max-age` of at least an hour (the Caddyfile's value). Smoke failing does **not** roll back
+`Cache-Control: max-age` of at least an hour (the Caddyfile's value). When the
+environment sets `APP_ORIGIN`, also the app host: `/` 200 with the enforced
+CSP and no HubSpot, `/dashboard/v1/session` answered by compute-api rather
+than the site, and `/compute/v1/skus` not served there. Smoke failing does **not** roll back
 automatically, because by then the host has passed its own checks and the
 fault may be in front of it. The summary prints the rollback command.
 
@@ -627,7 +702,7 @@ Assumptions this pipeline makes; a mismatch is a variable at the top of
 
 | Where | What |
 |---|---|
-| GitHub environments `staging`, `production` | secret `AWS_DEPLOY_ROLE_ARN`; variables `PUBLIC_ORIGIN` (the site origin smoke probes), `API_ORIGIN` (compute-api's origin), `AWS_REGION` (default `us-east-1`); production also `DNS_CUTOVER` (`done` after the cutover) and optionally `ALB_DNS_NAME`. Both restricted to `main`. Required reviewers were wanted on production; GitHub refused them on this repository's plan (HTTP 422, 2026-10-02), so the release owner rule is the only gate |
+| GitHub environments `staging`, `production` | secret `AWS_DEPLOY_ROLE_ARN`; variables `PUBLIC_ORIGIN` (the site origin smoke probes), `API_ORIGIN` (compute-api's origin), optionally `APP_ORIGIN` (the app host, the `app_origin` output; set it only after the app host is applied), `AWS_REGION` (default `us-east-1`); production also `DNS_CUTOVER` (`done` after the cutover) and optionally `ALB_DNS_NAME`. Both restricted to `main`. Required reviewers were wanted on production; GitHub refused them on this repository's plan (HTTP 422, 2026-10-02), so the release owner rule is the only gate |
 | Deploy role | trusts `token.actions.githubusercontent.com` with `sub` = `repo:FelixSphere@164092079/unify-compute@1364156790:environment:<env>` (this repo issues immutable OIDC subjects; see ADR-0009); may `ec2:DescribeInstances`, `ssm:SendCommand` on `AWS-RunShellScript` and on instances tagged for its env only, `ssm:GetCommandInvocation`; ECR push and read on `unify-compute-api` and `unify-compute-site` (the copy from GHCR) |
 | Instance | tag `Name=unify-compute-<env>`; SSM agent; `docker compose`, `flock`, `aws`, `curl`, `iptables`, `nsenter`; the IMDS lockdown (`/usr/local/sbin/unify-compute-imds-firewall`) |
 | Compose | `/opt/unify-compute/compose/docker-compose.yml` and `.env`, with the systemd unit's `WorkingDirectory` set to that directory; services `compute-api` (port 8080 on the host), `site`, `postgres` (user `unify`); the image keys `COMPUTE_API_IMAGE` and `SITE_IMAGE` |

@@ -1,6 +1,13 @@
 # One certificate per environment covering every hostname it serves, validated
 # in Route53, and an alias record per hostname — except the site's, which
 # production leaves alone until the cutover (var.manage_site_dns).
+#
+# Adding a hostname replaces the certificate (subject_alternative_names forces
+# a new one). create_before_destroy makes that safe on a live listener: the
+# new certificate is issued and validated, the HTTPS listener is updated in
+# place to point at it, and only then is the old one deleted. Validation
+# records are per name and ACM reuses them across certificates in the
+# account, so the existing names keep theirs and only the new name adds one.
 
 data "aws_route53_zone" "this" {
   name         = var.hosted_zone
@@ -13,6 +20,7 @@ locals {
   cert_sans = concat(
     [for k, a in local.apps : a.domain if k != "api"],
     var.site_aliases,
+    [var.app_domain],
   )
 
   # Keyed by hostname so a site alias and the site's own record are separate
@@ -21,6 +29,7 @@ locals {
   dns_records = merge(
     { for k, a in local.apps : a.domain => k if k != "site" || var.manage_site_dns },
     { for h in var.site_aliases : h => "site" },
+    { (var.app_domain) = "site" },
   )
 }
 

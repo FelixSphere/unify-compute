@@ -1,4 +1,7 @@
-# Serves the static export of the marketing site (compute.unifyai.us).
+# Serves the static export of the marketing site (compute.unifyai.us) and the
+# customer app's pages (app.compute.unifyai.us, ADR-0011 section 5) from one
+# container. The ALB forwards both names to this port; the app host's
+# /dashboard/v1/* never reaches here, the ALB sends it to compute-api.
 #
 # Plain HTTP on :8080. The ALB terminates TLS and owns the http -> https
 # redirect, so nothing here looks at X-Forwarded-Proto. There is no admin API
@@ -31,16 +34,103 @@
 	Content-Security-Policy-Report-Only "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self' https://*.hsforms.com https://*.hubspot.com; script-src 'self' 'unsafe-inline' https://*.hs-scripts.com https://*.hs-analytics.net https://*.hs-banner.com https://*.usemessages.com https://*.hubspot.com https://*.hscollectedforms.net https://*.hsadspixel.net https://*.hsforms.net https://*.hsforms.com https://*.hsleadflows.net https://static.hsappstatic.net; connect-src 'self' https://*.hubspot.com https://*.hubapi.com https://*.hs-banner.com https://*.hscollectedforms.net https://*.hsforms.com https://*.hs-analytics.net https://*.usemessages.com wss://*.hubspot.com; img-src 'self' data: https://*.hubspot.com https://*.hubspot.net https://*.hsforms.com https://*.hsforms.net https://*.hs-banner.com https://*.hubspotusercontent-na1.net https://*.hubspotusercontent.com https://track.hubspot.com; frame-src https://*.hubspot.com https://*.hsforms.net https://*.hsforms.com https://*.usemessages.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; media-src 'self' https://*.hubspot.com https://*.hubspot.net; worker-src 'self' blob:; manifest-src 'self'"
 }
 
-(security_headers) {
+(base_headers) {
 	-Server
 	X-Content-Type-Options nosniff
-	Referrer-Policy strict-origin-when-cross-origin
 	X-Frame-Options DENY
 	Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
 	# No Strict-Transport-Security here: the ALB sets it (see ADR-0009). TLS
 	# and HSTS belong to the layer that terminates TLS, and setting it here
 	# too would send the header twice.
+}
+
+(security_headers) {
+	import base_headers
+	Referrer-Policy strict-origin-when-cross-origin
 	import csp
+}
+
+(app_security_headers) {
+	import base_headers
+	# Enforced from the start, unlike the marketing site's: the app host loads
+	# nothing from a third party. No HubSpot (it would see account pages), and
+	# no challenges.cloudflare.com because Turnstile is off (ADR-0011 D5);
+	# turning it on adds that origin to script-src and frame-src here.
+	#
+	# No 'unsafe-inline' anywhere. The placeholder needs none. The dashboard
+	# export (plan task A7b) must fit this policy or change it here, in review:
+	# if vinext's inline flight-payload scripts come with it, the choice is
+	# per-build hashes or 'unsafe-inline' with the reason written down, not a
+	# quiet loosening.
+	#
+	# connect-src 'self' covers /dashboard/v1/*, which is this same origin.
+	# form-action 'self' keeps a forged form from posting credentials away.
+	Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'"
+	# Verification codes and reset tokens arrive in URLs; never hand them to
+	# the next site through Referer.
+	Referrer-Policy no-referrer
+	Cross-Origin-Opener-Policy same-origin
+	Cross-Origin-Resource-Policy same-origin
+}
+
+# Content types and cache lifetimes both hosts share.
+(static_types) {
+	# Go's built-in MIME table has none of these, and the alpine image may not
+	# ship /etc/mime.types; a manifest served as text/plain is ignored by
+	# browsers, and nosniff makes a wrong type fatal.
+	@webmanifest path *.webmanifest
+	header @webmanifest Content-Type application/manifest+json
+	@ico path *.ico
+	header @ico Content-Type image/x-icon
+	@woff2 path *.woff2
+	header @woff2 Content-Type font/woff2
+	@woff path *.woff
+	header @woff Content-Type font/woff
+
+	# Content-hashed by Vite: a new build is a new file name.
+	@hashed path /_next/static/*
+	header @hashed Cache-Control "public, max-age=31536000, immutable"
+
+	# The export writes /privacy as privacy.html. A trailing slash has no file
+	# behind it; redirect rather than serve the 404 for a URL people type.
+	@trailing path_regexp trailing ^(.+)/$
+	redir @trailing {re.trailing.1} 308
+}
+
+# The customer app. Host-matched blocks win over the catch-all :8080 below, so
+# the app names never see the marketing pages (or HubSpot) and the marketing
+# names never see the app. Both environments' names are listed because one
+# image serves both. Health checks arrive by IP and stay on the catch-all.
+#
+# Cookies are compute-api's (a host-only __Host- cookie, ADR-0011); nothing on
+# this host sets one, so nothing here can widen it to a parent domain.
+http://app.compute.unifyai.us:8080, http://app.staging.compute.unifyai.us:8080 {
+	# APP_ROOT exists so the Caddyfile can be tested against a local build.
+	root * {$APP_ROOT:/srv-app}
+	encode zstd gzip
+
+	header {
+		import app_security_headers
+	}
+
+	import static_types
+
+	handle {
+		header ?Cache-Control no-cache
+		try_files {path} {path}.html
+		file_server {
+			hide .*
+		}
+	}
+
+	handle_errors 404 {
+		rewrite * /404.html
+		header {
+			import app_security_headers
+			Cache-Control no-cache
+		}
+		file_server
+	}
 }
 
 :8080 {
@@ -68,26 +158,7 @@
 	# A tab left open across a release notices the new build from a version
 	# id inside the payload and falls back to a full page load.
 
-	# The export writes /privacy as privacy.html. A trailing slash has no file
-	# behind it; redirect rather than serve the 404 for a URL people type.
-	@trailing path_regexp trailing ^(.+)/$
-	redir @trailing {re.trailing.1} 308
-
-	# Go's built-in MIME table has none of these, and the alpine image may not
-	# ship /etc/mime.types; a manifest served as text/plain is ignored by
-	# browsers, and nosniff makes a wrong type fatal.
-	@webmanifest path *.webmanifest
-	header @webmanifest Content-Type application/manifest+json
-	@ico path *.ico
-	header @ico Content-Type image/x-icon
-	@woff2 path *.woff2
-	header @woff2 Content-Type font/woff2
-	@woff path *.woff
-	header @woff Content-Type font/woff
-
-	# Content-hashed by Vite: a new build is a new file name.
-	@hashed path /_next/static/*
-	header @hashed Cache-Control "public, max-age=31536000, immutable"
+	import static_types
 
 	# Fixed names that are versioned by hand (-v3) when the artwork changes,
 	# plus favicon.ico and apple-touch-icon.png, which clients fetch by fixed

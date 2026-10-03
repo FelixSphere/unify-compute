@@ -1,6 +1,6 @@
-// Package awsv4test is an in-process fake of the STS and S3 calls
+// Package awsv4test is an in-process fake of the STS, S3 and SES calls
 // compute-api makes, for tests. It checks every request's SigV4 signature
-// (header or presigned) against the secret it issued, and it enforces two
+// (header or presigned) against the secret it issued, and it enforces the
 // rules the real account enforces through IAM:
 //
 //   - the instance key may read and list, and may not write (the instance
@@ -8,7 +8,9 @@
 //     artifacts bucket);
 //   - a key issued by AssumeRole may only PutObject on the resources its
 //     session policy names, and AssumeRole refuses more than one hour, as
-//     AWS does for role chaining.
+//     AWS does for role chaining;
+//   - only the instance key may call SES SendEmail (the instance role has
+//     ses:SendEmail, deploy/aws/modules/compute-stack; job sessions do not).
 //
 // It is not an IAM evaluator: it reads the session policy's Resource
 // patterns (trailing "*" only) and nothing else.
@@ -46,6 +48,14 @@ type Assumed struct {
 	Duration    time.Duration
 }
 
+// Email is one SES v2 SendEmail request the fake accepted.
+type Email struct {
+	From             string
+	To               []string
+	ConfigurationSet string
+	Raw              []byte
+}
+
 type Fake struct {
 	Server   *httptest.Server
 	Region   string
@@ -57,6 +67,10 @@ type Fake struct {
 	objects  map[string]Object
 	sessions map[string]session // access key id → session
 	Assumes  []Assumed
+	Emails   []Email
+	// SESError, when set, is the error type SES answers every SendEmail
+	// with (e.g. "MessageRejected"), as a 400.
+	SESError string
 	n        int
 }
 
@@ -83,7 +97,8 @@ func New(t *testing.T, bucket string) *Fake {
 
 // Client is an awsv4.Client pointed at the fake.
 func (f *Fake) Client() *awsv4.Client {
-	return &awsv4.Client{Region: f.Region, S3Endpoint: f.Server.URL, STSEndpoint: f.Server.URL + "/sts/", HTTP: f.Server.Client(), Now: f.Now}
+	return &awsv4.Client{Region: f.Region, S3Endpoint: f.Server.URL, STSEndpoint: f.Server.URL + "/sts/",
+		SESEndpoint: f.Server.URL + "/ses", HTTP: f.Server.Client(), Now: f.Now}
 }
 
 func (f *Fake) Put(key string, body []byte) {
@@ -126,6 +141,10 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.HasPrefix(r.URL.Path, "/sts/") {
 		f.assumeRole(w, r, key, body)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/ses/") {
+		f.sendEmail(w, r, key, body)
 		return
 	}
 	rest, ok := strings.CutPrefix(r.URL.Path, "/"+f.Bucket+"/")
@@ -272,6 +291,48 @@ func (f *Fake) assumeRole(w http.ResponseWriter, r *http.Request, key string, bo
 		`</Credentials></AssumeRoleResult></AssumeRoleResponse>`, id, s.secret, s.token, exp.Format(time.RFC3339))
 }
 
+func sesErr(w http.ResponseWriter, status int, typ, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Amzn-Errortype", typ+":http://internal.amazon.com/coral/com.amazonaws.sesv2/")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"message": msg})
+}
+
+func (f *Fake) sendEmail(w http.ResponseWriter, r *http.Request, key string, body []byte) {
+	if r.Method != http.MethodPost || r.URL.Path != "/ses/v2/email/outbound-emails" {
+		sesErr(w, http.StatusNotFound, "NotFoundException", r.Method+" "+r.URL.Path)
+		return
+	}
+	if key != f.Instance.AccessKeyID {
+		sesErr(w, http.StatusForbidden, "AccessDeniedException", "not authorized to perform ses:SendEmail")
+		return
+	}
+	var req struct {
+		FromEmailAddress string
+		Destination      struct{ ToAddresses []string }
+		Content          struct {
+			Raw *struct{ Data []byte }
+		}
+		ConfigurationSetName string
+	}
+	if err := json.Unmarshal(body, &req); err != nil || req.Content.Raw == nil || len(req.Destination.ToAddresses) == 0 {
+		sesErr(w, http.StatusBadRequest, "BadRequestException", fmt.Sprintf("malformed SendEmail request: %v", err))
+		return
+	}
+	if f.SESError != "" {
+		sesErr(w, http.StatusBadRequest, f.SESError, "refused by the fake")
+		return
+	}
+	f.mu.Lock()
+	f.n++
+	f.Emails = append(f.Emails, Email{From: req.FromEmailAddress, To: req.Destination.ToAddresses,
+		ConfigurationSet: req.ConfigurationSetName, Raw: req.Content.Raw.Data})
+	id := fmt.Sprintf("0100018f-fake-%04d", f.n)
+	f.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"MessageId": id})
+}
+
 // authenticate re-signs the request with the secret of the key it claims
 // and compares signatures, so a request that would not verify on AWS (wrong
 // canonical form, a header the client did not send) fails here too.
@@ -279,6 +340,8 @@ func (f *Fake) authenticate(r *http.Request, body []byte) (string, error) {
 	service := "s3"
 	if strings.HasPrefix(r.URL.Path, "/sts/") {
 		service = "sts"
+	} else if strings.HasPrefix(r.URL.Path, "/ses/") {
+		service = "ses"
 	}
 	signer := awsv4.Signer{Region: f.Region, Service: service}
 	q := r.URL.Query()

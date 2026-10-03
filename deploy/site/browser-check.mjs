@@ -22,6 +22,15 @@ if (!base) {
 }
 const origin = new URL(base).origin;
 
+// The app host (ADR-0011) is the same container chosen by Host. Against a
+// local container, Chrome is told the app name resolves to the container, so
+// the page loads under its real origin and its real CSP. Against anything
+// else the name already resolves where it should, or nowhere, so skip it.
+const baseUrl = new URL(base);
+const APP_HOST = 'app.compute.unifyai.us';
+const appLocal = ['127.0.0.1', 'localhost'].includes(baseUrl.hostname);
+const appOrigin = `${baseUrl.protocol}//${APP_HOST}${baseUrl.port ? `:${baseUrl.port}` : ''}`;
+
 const chromePath =
   process.env.CHROME ||
   [
@@ -46,6 +55,14 @@ const chrome = spawn(
     '--no-first-run',
     '--no-default-browser-check',
     '--window-size=1280,900',
+    // A system proxy would resolve the app name itself and never see the
+    // mapping; a local container needs no proxy.
+    ...(appLocal
+      ? [
+          `--host-resolver-rules=MAP ${APP_HOST} ${baseUrl.hostname}`,
+          '--no-proxy-server',
+        ]
+      : []),
     // Ubuntu 24.04 runners restrict the user namespaces Chrome's sandbox uses.
     ...(process.env.CI ? ['--no-sandbox'] : []),
     'about:blank',
@@ -126,7 +143,10 @@ const page = (method, params) => send(method, params, sessionId);
 // Third-party scripts (HubSpot) may log or throw on their own; only errors
 // raised by this origin's code or requests count.
 const errors = [];
-const ours = (url) => typeof url === 'string' && url.startsWith(origin);
+let cspProbed = false;
+const ours = (url) =>
+  typeof url === 'string' &&
+  (url.startsWith(origin) || (appLocal && url.startsWith(appOrigin)));
 listeners.add((msg) => {
   if (msg.sessionId !== sessionId) return;
   const p = msg.params;
@@ -179,7 +199,7 @@ const waitFor = async (expression, what, ms = 10_000) => {
   fail(`timed out waiting for ${what}`);
   return false;
 };
-const load = async (path) => {
+const load = async (path, at = base) => {
   const loaded = new Promise((resolve) => {
     const fn = (msg) => {
       if (msg.sessionId === sessionId && msg.method === 'Page.loadEventFired') {
@@ -189,7 +209,7 @@ const load = async (path) => {
     };
     listeners.add(fn);
   });
-  await page('Page.navigate', { url: base + path });
+  await page('Page.navigate', { url: at + path });
   await loaded;
 };
 
@@ -422,6 +442,51 @@ try {
     '404 page',
     '404 page not rendered',
   );
+
+  if (appLocal) {
+    await load('/', appOrigin);
+    check(
+      (await evaluate('document.title')) === 'Unify Compute',
+      `${APP_HOST} serves the app placeholder`,
+      `${APP_HOST} title is "${await evaluate('document.title')}"`,
+    );
+    // The tokens and the stylesheet are external files; under a CSP with no
+    // 'unsafe-inline' this proves both loaded and applied (--u-paper).
+    const bg = await evaluate('getComputedStyle(document.body).backgroundColor');
+    check(
+      bg === 'rgb(250, 250, 247)',
+      `${APP_HOST} styles applied under its CSP`,
+      `${APP_HOST} body background is ${bg}; the stylesheets did not apply`,
+    );
+    check(
+      await evaluate(
+        `document.querySelector('.brand img')?.complete && document.querySelector('.brand img').naturalWidth > 0`,
+      ),
+      `${APP_HOST} lockup loaded`,
+      `${APP_HOST} lockup image did not load`,
+    );
+    check(
+      (await evaluate(`document.querySelectorAll('#hs-script-loader').length`)) === 0,
+      `${APP_HOST} has no HubSpot loader`,
+      `${APP_HOST} loads HubSpot`,
+    );
+    // The policy is enforced, not report-only: an injected inline script must
+    // not run. Its violation message is expected, so it is not an error.
+    cspProbed = true;
+    const inlineRan = await evaluate(`new Promise((resolve) => {
+      let violated = false;
+      document.addEventListener('securitypolicyviolation', () => { violated = true; }, { once: true });
+      const s = document.createElement('script');
+      s.textContent = 'window.__inlineRan = true';
+      document.head.appendChild(s);
+      setTimeout(() => resolve({ ran: window.__inlineRan === true, violated }), 200);
+    })`);
+    check(
+      !inlineRan.ran && inlineRan.violated,
+      `${APP_HOST} CSP blocks inline script`,
+      `${APP_HOST} CSP did not block an inline script (ran=${inlineRan.ran}, violation=${inlineRan.violated})`,
+    );
+  }
 } catch (e) {
   // A broken router can leave the page somewhere the next step cannot run;
   // the errors collected so far are the useful part.
@@ -431,7 +496,18 @@ try {
 // Let late prefetches and their errors land before judging.
 await new Promise((r) => setTimeout(r, 1000));
 // The 404 document's own status is expected to show up as a resource error.
-const unexpected = errors.filter((e) => !e.includes('/does-not-exist'));
+// Chrome ignores COOP on a plain-http origin that is not localhost, which the
+// mapped app name is here; on AWS it is served over HTTPS.
+const unexpected = errors.filter(
+  (e) =>
+    !e.includes('/does-not-exist') &&
+    !(appLocal && e.includes('Cross-Origin-Opener-Policy header has been ignored')) &&
+    !(
+      cspProbed &&
+      e.includes('Refused to execute inline script') &&
+      !e.includes('[Report Only]')
+    ),
+);
 if (unexpected.length)
   fail(`errors from ${origin}:\n  ${unexpected.join('\n  ')}`);
 else ok('no console errors or failed requests from the site');
