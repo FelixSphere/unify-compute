@@ -347,7 +347,7 @@ Where the implementations stand against this revision:
 
 | Item | compute-api client | `consoletest` fake | Console (unifyapi-console) |
 |---|---|---|---|
-| `sku` required on settle | the ledger, now the only settle caller, always sends the hold's `sku` | **not yet**: a missing `sku` is still `409 sku_mismatch`; an existing test pins that and changing it needs the operator's approval | **not yet**: a missing `sku` is still accepted and the hold's SKU is used; existing tests settle without one and changing them needs the operator's approval |
+| `sku` required on settle | the ledger, now the only settle caller, always sends the hold's `sku` | a missing or empty `sku` is `400 invalid_request`, checked after the hold lookup | **not yet on `main`**: a missing `sku` is still accepted and the hold's SKU is used; the fix is in review (FelixSphere/unifyapi-console, branch `fix/compute-settle-sku-required`) |
 | `internal_error` | `CodeInternalError` | a forced `500` answers `internal_error` | already on every unexpected-error path; a handler panic now answers it too instead of the server-wide panic body |
 | `413 payload_too_large` | `CodePayloadTooLarge`; refuses locally above 32 KiB, sends nothing | implemented, before the signature | implemented, before the timestamp and signature |
 | Per-process limiter | surfaces a `429` as `*Error` and does not expose `Retry-After`. The ledger treats a `429` as unavailable and retries on its next tick (300 s), which honours any `Retry-After` shorter than that without reading it. `verify` is not retried: a `429` there answers the customer `503 console_unavailable` | single process | documented in `docs/compute-bridge.md` |
