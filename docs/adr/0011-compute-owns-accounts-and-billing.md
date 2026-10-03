@@ -1,6 +1,6 @@
 # ADR-0011 — Unify Compute owns its accounts, keys, balance and payments
 
-- **Status:** Proposed
+- **Status:** Accepted (operator, 2026-10-03; decisions recorded under "Operator decisions" below)
 - **Date:** 2026-10-03
 - **Supersedes, once accepted:** [ADR-0001](0001-unifyapi-owns-accounts-and-billing.md)
   (Unify API owns accounts, keys and the balance).
@@ -557,3 +557,20 @@ The real cost is engineering time and the legal and tax review.
 | D6 | Terms, acceptable use (no mining), refund policy for prepaid credit, privacy-policy processors, record retention | Legal review before the first live top-up |
 | D7 | Job link in emails moves to `app.compute.unifyai.us/jobs/{id}` | Yes |
 | D8 | Session lifetime: 12 h idle, 7 days absolute | As proposed |
+
+
+## Operator decisions (2026-10-03)
+
+Recorded from the operator's answers in the coordinating session. Where they
+differ from the recommendations above, these win.
+
+| # | Decision |
+|---|---|
+| D1 | **Stripe directly** (Checkout), not a merchant of record. |
+| D2 | **FelixSphere LLC (US)** contracts with customers and owns the Stripe account. Where it registers for tax, and business-only vs consumers, are still for an accountant before live mode (O5). Consequence: Compute's terms and privacy policy must name FelixSphere LLC as the contracting entity and data controller, which differs from the "UnifyAI · Petaling Jaya" company line chosen for the brand on 2026-10-02 — reconcile the privacy page and footer wording before the first live top-up (A9/O5). |
+| D3 | `compute_enabled` **off by default**; enabled by hand per account. |
+| D4 | Top-up limits **as proposed** (USD 10–100 per top-up, balance cap 200, 3 a day). |
+| D5 | **No Turnstile for now.** Bot defence at launch is the honeypot field, per-IP and per-email rate limits, and the emailed verification code; signups cannot spend until D3's switch is turned on by hand. Revisit (Turnstile or proof-of-work) before self-serve signup is opened publicly. The privacy policy does not list Cloudflare as a processor while Turnstile is off. This departs from UI-STANDARD's "Turnstile above the primary"; the brand owner has been told. |
+| D6 | Legal review still required before the first live top-up (unchanged). |
+| D7 | Job links in emails move to `app.compute.unifyai.us/jobs/{id}` (as proposed). |
+| D8 | Sessions: 12 h idle, 7 days absolute (as proposed). |
