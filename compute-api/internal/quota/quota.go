@@ -47,7 +47,11 @@ func (e *ExceededError) Error() string {
 	parts := make([]string, 0, len(e.Violations))
 	for _, v := range e.Violations {
 		name := v.Limit
-		if v.Tier != "" {
+		if v.Limit == LimitPlatformActiveJobs {
+			name = "platform-wide active jobs"
+		} else if v.Limit == LimitPlatformGPUs {
+			name = "platform-wide GPUs"
+		} else if v.Tier != "" {
 			name = fmt.Sprintf("%s GPUs", v.Tier)
 		} else if v.Limit == LimitActiveJobs {
 			name = "active jobs"
@@ -56,8 +60,21 @@ func (e *ExceededError) Error() string {
 		}
 		parts = append(parts, fmt.Sprintf("%s: %d of %d in use, this job needs %d, headroom %d", name, v.Used, v.Max, v.Requested, v.Headroom))
 	}
+	if e.platform() {
+		return fmt.Sprintf("sku %q would exceed the platform's current capacity or this account's quota (%s). Nothing was submitted or held; the platform-wide limits are shared by every account, so retry once an active job ends.",
+			e.SKU, strings.Join(parts, "; "))
+	}
 	return fmt.Sprintf("sku %q would exceed this account's quota (%s). Nothing was submitted or held; wait for or cancel an active job, choose a smaller SKU, or ask support to raise the limit.",
 		e.SKU, strings.Join(parts, "; "))
+}
+
+func (e *ExceededError) platform() bool {
+	for _, v := range e.Violations {
+		if v.Limit == LimitPlatformActiveJobs || v.Limit == LimitPlatformGPUs {
+			return true
+		}
+	}
+	return false
 }
 
 // ErrUnknownActiveSKU means the owner has an active job on a SKU the
@@ -108,6 +125,10 @@ type Enforcer struct {
 	Config    *Config
 	Catalogue *sku.Catalogue
 	Usage     UsageReader
+	// Platform, when set, also caps what every owner together may have
+	// active. Admission then goes through AdmitPlatform and
+	// store.CreateAdmittedPlatform, which see usage across all owners.
+	Platform *Platform
 }
 
 // Check is the preflight the submit handler runs before it holds anything.
@@ -138,6 +159,36 @@ func (e *Enforcer) Admit(owner string, item sku.SKU, then func(context.Context) 
 	return func(ctx context.Context, rows []store.SKUUsage) error {
 		if err := e.decide(owner, item, rows); err != nil {
 			return err
+		}
+		if then == nil {
+			return nil
+		}
+		return then(ctx)
+	}
+}
+
+// AdmitPlatform is Admit with the platform-wide limits as well: it returns a
+// store.PlatformAdmitFunc for store.CreateAdmittedPlatform, which reads both
+// the owner's and the whole platform's usage under one lock. Every limit the
+// submit would exceed, the owner's and the platform's, is reported in one
+// refusal, and nothing reaches then unless all pass.
+func (e *Enforcer) AdmitPlatform(owner string, item sku.SKU, then func(context.Context) error) store.PlatformAdmitFunc {
+	return func(ctx context.Context, ownerRows, platformRows []store.SKUUsage) error {
+		var vs []Violation
+		if err := e.decide(owner, item, ownerRows); err != nil {
+			var ex *ExceededError
+			if !errors.As(err, &ex) {
+				return err
+			}
+			vs = ex.Violations
+		}
+		pu, err := Tally(e.Catalogue, platformRows)
+		if err != nil {
+			return err
+		}
+		vs = append(vs, EvaluatePlatform(e.Platform, pu, item)...)
+		if len(vs) > 0 {
+			return &ExceededError{Owner: owner, SKU: item.ID, Violations: vs}
 		}
 		if then == nil {
 			return nil

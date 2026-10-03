@@ -5,7 +5,7 @@
   contract the rest must meet.
 - Task C8 in [`product-design.md`](../product-design.md). Code:
   `compute-api/internal/quota/`, `compute-api/internal/ratelimit/`,
-  `compute-api/config/quotas.json`.
+  `compute-api/config/quotas.json`, `compute-api/config/platform.json`.
 
 ## The rule
 
@@ -50,6 +50,34 @@ already taken its hold, so it is committed spend.
 The defaults are deliberately conservative. Raising one for an account is a
 one-line override and a review (below); lowering one after customers have
 built on it is a broken promise. Start small.
+
+### Platform-wide limits
+
+Per-owner limits say how much of the platform one account may take. They do
+not bound the total: ten accounts at the default could have twenty jobs in
+flight. While there are no customers the operator wants that total small and
+fixed ([ADR-0010](../adr/0010-gpu-workers-in-the-shared-account.md), "Start
+small", 2026-10-03), so `compute-api/config/platform.json` adds limits over
+every owner together:
+
+| Limit | Counts | Value | Why |
+|---|---|---|---|
+| `platform_max_active_jobs` | Every owner's jobs in `queued`, `provisioning` or `running` | **1** | One g5.xlarge is the whole fleet: the AWS quota requested is 4 vCPU, and the budget's overshoot bound assumes one worker at a time. |
+| `platform_max_gpus` | Sum of `gpu_count` over every owner's active jobs, all tiers | **1** | The same cap in GPUs, so a multi-GPU SKU cannot slip under the job count. Tiers are summed: the cap is on spend in flight, not on one upstream. |
+| `max_runtime_seconds` | The ceiling on any job's `max_runtime_seconds` (upstreams.md R9) | **14400** (4 h) | Bounds one job's cost at about USD 4.80 at the placeholder price, and an orphaned worker's at about USD 5 (the reaper's age is this plus 1 h, read from the same file). |
+
+The file is required and validated at boot like `quotas.json`: every field
+present, no unknown fields, no negative limits, and the ceiling in
+`(0, 86400]`. 86400 is the API contract's maximum, and a deployment may
+only lower it. `max_active_jobs: 0` is legal and is the off switch: nothing
+new is admitted anywhere. A change is reviewed like a price change, together
+with the AWS quota and the GPU budget.
+
+With these at 1, the per-owner defaults below cannot bind: the effective
+per-owner limit is one job and one GPU. They stay at 2 because existing tests
+pin the shipped defaults and the end-to-end test runs two jobs from that
+file. They become the binding limit again when the platform limits are
+raised.
 
 ### Where limits live
 
@@ -113,14 +141,17 @@ entry per limit exceeded.
 
 | Field | Meaning |
 |---|---|
-| `limit` | `max_active_jobs`, `max_queued_jobs` or `max_gpus` |
+| `limit` | `max_active_jobs`, `max_queued_jobs` or `max_gpus`, or the platform-wide `platform_max_active_jobs` or `platform_max_gpus` |
 | `tier` | For `max_gpus` only |
-| `max` | The owner's limit after overrides |
+| `max` | The owner's limit after overrides, or the platform's |
 | `used` | Current usage the decision saw |
 | `requested` | What this submit adds (1 job, or the SKU's `gpu_count`) |
 | `headroom` | `max − used`, never below 0 (a lowered limit can leave an owner above it) |
 
-There is no `Retry-After`.
+There is no `Retry-After`. A refusal that includes a platform limit says so
+in `message` ("would exceed the platform's current capacity or this
+account's quota ..."). Owner and platform violations are listed together, so
+one refusal names everything the submit would exceed.
 
 ### Why 403 and not 429
 
@@ -162,6 +193,18 @@ a lost race. The cost is that one owner's submits are serialised across the
 hold call, bounded by the console client's timeout, and a pooled connection
 is held for that time. At 60 submits per key per hour that is not a
 throughput limit.
+
+With platform-wide limits, `store.CreateAdmittedPlatform` takes one more
+transaction-scoped advisory lock **before** the owner's, shared by every
+submit (`pg_advisory_xact_lock(platform class, 0)`). It reads the owner's
+usage and every owner's usage, and calls `quota.Enforcer.AdmitPlatform`, so
+two accounts cannot both take the platform's last slot. Lock order is always
+platform then owner. The per-owner-only `CreateAdmitted` never waits on the
+platform lock while holding an owner's, so the two cannot deadlock. The
+cost is that every submit is serialised across the console hold. At one
+active job platform-wide, that is no limit. An active job anywhere on a SKU
+the catalogue no longer lists fails every submit closed, for the same reason
+as for one owner.
 
 An `Idempotency-Key` already bound to a live job is checked under the same
 lock **before** the quota decision and replays the original job. A client
@@ -206,6 +249,7 @@ second). Over budget is `429`, `type`/`code` `rate_limited`, with
 | Race-free admission (`store.CreateAdmitted` + `quota.Enforcer.Admit`) | Built, tested against Postgres, including concurrent submits for one slot |
 | Submit is quota-checked in a deployment | Built and enabled wherever the binary has a job store (`DATABASE_URL`): the owner comes from `verify` |
 | Handler uses `CreateAdmitted` with the hold inside the admission | Built (`internal/jobs`): quota, then the console hold, then the insert, in one transaction under the owner's lock. The dark build keeps the lock-free `Enforcer.Check` before its `501`, as nothing is persisted there |
+| Platform-wide limits and the runtime ceiling (`config/platform.json`, `store.CreateAdmittedPlatform`, `quota.Enforcer.AdmitPlatform`) | Built, tested against Postgres with concurrent submits from many owners for one slot; enabled wherever the binary has a job store |
 | Per-key rate limits | Built and enabled on every authenticated route except cancel |
 | `GET /compute/v1/quotas` (limits + usage for the caller) | Not built; see open questions |
 

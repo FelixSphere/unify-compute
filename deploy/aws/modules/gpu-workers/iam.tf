@@ -303,6 +303,34 @@ data "aws_iam_policy_document" "launch" {
     }
   }
 
+  # On-demand only. The spot SKU is unavailable and the spot quota is 0, but
+  # RunInstances with InstanceMarketOptions needs no permission beyond
+  # RunInstances itself, so the quota alone would be the only thing refusing
+  # a spot launch. Spot needs its own decision (ADR-0010).
+  #
+  # Plain StringEquals, not IfExists: the key is absent on the request's
+  # other resources (subnet, image), and IfExists would deny those, i.e.
+  # every launch.
+  statement {
+    sid       = "DenySpot"
+    effect    = "Deny"
+    actions   = ["ec2:RunInstances"]
+    resources = [local.instance_arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "ec2:InstanceMarketType"
+      values   = ["spot"]
+    }
+  }
+
+  statement {
+    sid       = "DenyOtherWaysToLaunch"
+    effect    = "Deny"
+    actions   = ["ec2:RequestSpotInstances", "ec2:RequestSpotFleet", "ec2:CreateFleet"]
+    resources = ["*"]
+  }
+
   statement {
     sid       = "DenyLaunchingIntoAnotherVpc"
     effect    = "Deny"

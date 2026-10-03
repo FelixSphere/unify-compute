@@ -32,7 +32,7 @@ customers run under a name they trust, and is reviewed like a price change.
 | `command` | Full argv run inside the image (the image's entrypoint is not used) |
 | `env` | Defaults; keys are shell identifiers. Never secrets |
 | `sku` | Default SKU; must exist in `skus.json` |
-| `max_runtime_seconds` | Default; in `(0, 86400]` |
+| `max_runtime_seconds` | Default; in `(0, ceiling]`, the deployment's ceiling from `config/platform.json` (14400 today; never above 86400) |
 | `inputs`, `outputs` | Declared mounts: absolute, clean, non-overlapping paths with a description of what the command expects there or writes there |
 | `overridable` | Which request fields a submit may set (below) |
 | `available`, `unavailable_reason` | Declared availability; `false` requires a reason |
@@ -43,7 +43,7 @@ The process refuses to start, as it does for a bad `skus.json`, when a
 template has: an unknown field (a typo in `overridable` must not mean "no
 overrides"), a non-slug or duplicate id, no title or description, an image
 that is not digest-pinned or is tagged `latest`, a default SKU not in the
-catalogue, a runtime outside `(0, 86400]`, a bad env key, a relative, `/`,
+catalogue, a runtime outside `(0, ceiling]`, a bad env key, a relative, `/`,
 unclean or overlapping mount, an `overridable` entry outside the allowed set or
 listed twice, `available: true` without an image or command, or
 `available: false` without a reason.
@@ -124,7 +124,7 @@ Validated in this order, after the body parses and before anything
 5. The resolved spec then meets **exactly** the checks a hand-written spec does
    (`missing_sku`, `unknown_sku`, `sku_unavailable`, `missing_max_runtime`,
    `runtime_over_ceiling`, `provider_not_offered`, `503 upstream_unavailable`).
-   An overridden runtime of 86401 fails as `runtime_over_ceiling`, not as a
+   An overridden runtime above the ceiling (14401 today) fails as `runtime_over_ceiling`, not as a
    template error.
 
 What survives is a full spec (`image`, `command`, `env`, `inputs`, `outputs`,

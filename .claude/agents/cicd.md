@@ -110,7 +110,11 @@ account. Two consequences:
   attempted `CreateSecurityGroup` and was refused (by design); check which
   group the first real worker gets. The GPU budget is not applied: there is no alert
   email, and the stack refuses a null one. The operator set it to USD 50/month,
-  not 300. The operator handles the quota case; agents do not request quota.
+  not 300. Since #50 that is the stack's default, and a Budgets action
+  denies RunInstances/StartInstances to the launch role at 100% (ADR-0010,
+  "Start small"); apply it after staging and before any launch. The
+  operator handles the quota case (4 vCPU now, not 8); agents do not
+  request quota.
 - **Console:** production `app.unifyapi.ai` belongs to the UnifyAPI CI/CD agent.
   Staging runs its own console container, the UnifyAPI CI/CD trial build
   `e3cef17…@sha256:c48c638b…` (#47; bridge routes on, `compute_*` tables),
