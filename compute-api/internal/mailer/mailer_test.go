@@ -166,7 +166,7 @@ func TestEveryMessageMatchesItsGoldenFiles(t *testing.T) {
 					t.Errorf("image %q is not hosted on compute.unifyai.us/email/", s[1])
 				}
 			}
-			for _, want := range []string{"Unify Compute · compute.unifyai.us", "UnifyAI · Lebuh Bandar Utama PJU 6, 47800 Petaling Jaya, Selangor, Malaysia"} {
+			for _, want := range []string{"Unify Compute · compute.unifyai.us", "© UnifyAI · Operated by FelixSphere LLC · 6 Karen Ct, CA 94010, United States"} {
 				if !strings.Contains(p.text, want) {
 					t.Errorf("text part lacks %q", want)
 				}
