@@ -92,7 +92,7 @@ Current status (say what exists rather than describing targets as shipped):
   request for 8 is open (`d81c8fcd…`). Production has the module behind
   `gpu_workers_enabled = false`. The GPU budget
   (`deploy/aws/shared/gpu-budget`) is **not applied**: it needs an alert
-  email.
+  email. When it is applied, it is USD 50/month, the operator's limit.
 
 ## Licence boundary — the expensive mistake
 

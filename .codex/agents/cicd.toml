@@ -73,6 +73,20 @@ account. Two consequences:
   each apply. `release.yml` refuses a host where the rule is missing; if
   that ever happens, treat it as an incident (see "Before you ship
   anything").
+- **Staging's GPU path is live up to the quota (2026-10-03).** Terraform
+  applied (workers VPC 10.73/16, launch role, reaper, artifacts buckets);
+  t4g.medium. SkyPilot runs on the host (`SKYPILOT_SETUP_DONE all`). The
+  host's `.env` carries ADR-0005's artifacts lines and the trial console
+  `e3cef17`, added over SSM under the ops lock as ADR-0005 "Apply" 3
+  allows. Previous files are in
+  `/data/backups/20261003T031225Z-manual-adr0005-env/`. A rebuild would
+  render the same values from user-data. A job with the test key
+  (`/unify-compute-staging/test_api_key`) is accepted and held, then fails
+  `capacity_exhausted` (AWS `VcpuLimitExceeded`, quota 0). Open: SkyPilot
+  attempted `CreateSecurityGroup` and was refused (by design); check which
+  group the first real worker gets. The GPU budget is not applied: there is no alert
+  email, and the stack refuses a null one. The operator set it to USD 50/month,
+  not 300. The operator handles the quota case; agents do not request quota.
 - **Console:** production `app.unifyapi.ai` belongs to the UnifyAPI CI/CD agent.
   Staging runs its own console container, the UnifyAPI CI/CD trial build
   `e3cef17…@sha256:c48c638b…` (#47; bridge routes on, `compute_*` tables),
