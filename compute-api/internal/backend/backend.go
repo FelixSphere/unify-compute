@@ -5,7 +5,8 @@
 // metering keys off. The design and the wire contract are
 // docs/spec/backend.md.
 //
-// It is not yet wired to the HTTP submit handler; submit still answers 501.
+// compute-api's jobs package wires it to the submit handler, the ledger and
+// the event log.
 package backend
 
 import (
@@ -30,6 +31,8 @@ type Config struct {
 	Task TaskOptions
 	// Logf receives errors the poll loop recovers from. Nil discards them.
 	Logf func(format string, args ...any)
+	// Now is the clock edges are timed by; nil is time.Now.
+	Now func() time.Time
 }
 
 var (
@@ -95,7 +98,11 @@ type Backend struct {
 }
 
 func New(api *Client, st Store, sink Sink, cfg Config) *Backend {
-	return &Backend{api: api, store: st, sink: sink, cfg: cfg, now: time.Now, attempts: map[string]*attempt{}}
+	now := cfg.Now
+	if now == nil {
+		now = time.Now
+	}
+	return &Backend{api: api, store: st, sink: sink, cfg: cfg, now: now, attempts: map[string]*attempt{}}
 }
 
 func (b *Backend) logf(format string, args ...any) {
@@ -413,6 +420,15 @@ func (b *Backend) stepUp(ctx context.Context, a *attempt) error {
 	}
 	if !now.Before(deadline) {
 		finish(EndMaxRuntime, now, store.StatusFailed, nil)
+		return nil
+	}
+	// Only now is the attempt known to be still the customer's at `now`: the
+	// cluster is UP and the job has not ended. Reporting UP earlier in the
+	// step could let metering run past an exit this same step discovers.
+	if o, ok := b.sink.(UpObserver); ok {
+		if err := o.ObservedUp(ctx, a.job.ID, a.job.Attempt, now); err != nil {
+			b.logf("backend: %s: report up: %v", a.job.ID, err)
+		}
 	}
 	return nil
 }
@@ -523,6 +539,17 @@ func (b *Backend) confirmDown(a *attempt, ri RequestInfo) {
 // accepted the customer's cancel, which is where GPU billing stops (B11), not
 // when the instance is confirmed down — and starts teardown.
 func (b *Backend) Cancel(ctx context.Context, jobID string, acceptedAt time.Time) error {
+	return b.stop(ctx, jobID, acceptedAt, nil)
+}
+
+// Stop is Cancel on compute-api's own initiative (metering.md B12, B13: the
+// hold can no longer cover the job): the job ends cancelled at `at` with f as
+// its error, so the customer sees why.
+func (b *Backend) Stop(ctx context.Context, jobID string, at time.Time, f *Failure) error {
+	return b.stop(ctx, jobID, at, f)
+}
+
+func (b *Backend) stop(ctx context.Context, jobID string, acceptedAt time.Time, f *Failure) error {
 	a, ok := b.get(jobID)
 	if !ok {
 		return ErrUnknownJob
@@ -535,7 +562,7 @@ func (b *Backend) Cancel(ctx context.Context, jobID string, acceptedAt time.Time
 	if a.phase == phaseUp && acceptedAt.Before(a.upAt) {
 		acceptedAt = a.upAt
 	}
-	b.end(ctx, a, EndCancelled, acceptedAt, store.StatusCancelled, nil)
+	b.end(ctx, a, EndCancelled, acceptedAt, store.StatusCancelled, f)
 	err := b.flush(ctx, a)
 	if terr := b.stepTeardown(ctx, a); err == nil {
 		err = terr
@@ -607,16 +634,23 @@ func (b *Backend) Run(ctx context.Context, interval time.Duration) {
 			return
 		case <-t.C:
 		}
-		b.mu.Lock()
-		ids := make([]string, 0, len(b.attempts))
-		for id := range b.attempts {
-			ids = append(ids, id)
-		}
-		b.mu.Unlock()
-		for _, id := range ids {
-			if err := b.Step(ctx, id); err != nil && !errors.Is(err, ErrUnknownJob) {
-				b.logf("backend: %s: %v", id, err)
-			}
+		b.StepAll(ctx)
+	}
+}
+
+// StepAll steps every tracked attempt once, logging what fails; the attempt
+// is retried on the next call.
+func (b *Backend) StepAll(ctx context.Context) {
+	b.mu.Lock()
+	ids := make([]string, 0, len(b.attempts))
+	for id := range b.attempts {
+		ids = append(ids, id)
+	}
+	b.mu.Unlock()
+	sort.Strings(ids)
+	for _, id := range ids {
+		if err := b.Step(ctx, id); err != nil && !errors.Is(err, ErrUnknownJob) {
+			b.logf("backend: %s: %v", id, err)
 		}
 	}
 }

@@ -3,7 +3,7 @@
   "info": {
     "title": "UnifyAI Compute API",
     "version": "v1-draft",
-    "description": "Customer-facing contract for the compute job API, mirroring docs/spec/job-api.md. Draft: the job routes exist and validate, but the backend is not built, so every authenticated job route currently answers `501 not_implemented` after authentication and (for submit) validation. Responses marked *Planned* are the contract the backend will honour; they are not returned today. Authentication currently checks only the shape of the key (`Bearer sk-...`); verification against UnifyAPI is planned.",
+    "description": "Customer-facing contract for the compute job API, mirroring docs/spec/job-api.md. A build with a job store (`DATABASE_URL` set) verifies every key through the Unify API console bridge and runs jobs: submit holds balance, persists the job and launches it on SkyPilot; get, list, cancel, logs, events and artifacts serve it. A build without one (the dark build) checks only the key's shape and answers every authenticated job route with `501 not_implemented` after validation. Responses marked *Planned* are not returned by any build yet.",
     "license": {
       "name": "Proprietary",
       "identifier": "LicenseRef-Proprietary"
@@ -26,7 +26,7 @@
     },
     {
       "name": "jobs",
-      "description": "Authenticated with a UnifyAPI key."
+      "description": "Authenticated with a Unify API key."
     },
     {
       "name": "meta",
@@ -164,7 +164,7 @@
           "jobs"
         ],
         "summary": "Submit a job",
-        "description": "Validated before anything is held or persisted, in this order: body parses (`malformed_body`); if `template` is set, it is offered (`unknown_template`) and available (`template_unavailable`), every field sent is overridable (`field_not_overridable`), env keys are identifiers (`invalid_env`) and inputs bind each declared mount once (`missing_input`, `unknown_input_mount`, `duplicate_input_mount`), and the resolved spec continues through the same checks as a hand-written one: `sku` present (`missing_sku`), offered (`unknown_sku`) and sold (`sku_unavailable`), `spec.max_runtime_seconds` positive (`missing_max_runtime`) and at most 86400 (`runtime_over_ceiling`), every entry of `providers` offered by the SKU (`provider_not_offered`), at least one candidate enabled in this deployment (`503 upstream_unavailable`), and, last, the account's quotas (`403 quota_exceeded`; not enforced in a deployment until key verification and the job store are wired). A request that passes validation currently receives `501 not_implemented`. Planned flow: verify key, place a hold on the UnifyAPI balance, persist the job `queued`, hand it to SkyPilot.",
+        "description": "Validated before anything is held or persisted, in this order: body parses (`malformed_body`); if `template` is set, it is offered (`unknown_template`) and available (`template_unavailable`), every field sent is overridable (`field_not_overridable`), env keys are identifiers (`invalid_env`) and inputs bind each declared mount once (`missing_input`, `unknown_input_mount`, `duplicate_input_mount`), and the resolved spec continues through the same checks as a hand-written one: `sku` present (`missing_sku`), offered (`unknown_sku`) and sold (`sku_unavailable`), `spec.max_runtime_seconds` positive (`missing_max_runtime`) and at most 86400 (`runtime_over_ceiling`); then, in a build with a job store, the spec must be launchable as given (`metadata` at most 16 pairs, `missing_image`, `missing_command`, `invalid_env`, `reserved_env`, `invalid_input_source`, `invalid_mount`, and `501 outputs_unsupported` when the deployment has no artifact storage); every entry of `providers` offered by the SKU (`provider_not_offered`) and at least one candidate enabled in this deployment, with a SkyPilot API server to launch on (`503 upstream_unavailable`). Then, in one transaction per owner: the account's quotas (`403 quota_exceeded`) and the hold on the Unify API balance, `rate × min(max_runtime_seconds, 7200)` (`402 insufficient_balance`; `503 console_unavailable` if the console cannot answer). Only then is the job persisted `queued`, `job.queued` recorded and the job handed to SkyPilot. A refused hold persists nothing. The dark build answers a request that passes the first group of checks with `501 not_implemented`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/IdempotencyKey"
@@ -199,7 +199,7 @@
         },
         "responses": {
           "200": {
-            "description": "Idempotent replay: same Idempotency-Key and same body returns the original job. *Planned:* not returned by the current build.",
+            "description": "Idempotent replay: the same Idempotency-Key and the same body within 24 h returns the original job, unchanged; nothing is held or launched again.",
             "content": {
               "application/json": {
                 "schema": {
@@ -209,7 +209,7 @@
             }
           },
           "201": {
-            "description": "Job accepted and queued. *Planned:* not returned by the current build.",
+            "description": "Job accepted: the hold is placed, the job persisted and handed to SkyPilot. `status` reads `provisioning` once the launch is handed over, `queued` if it is still being handed over.",
             "content": {
               "application/json": {
                 "schema": {
@@ -219,7 +219,7 @@
             }
           },
           "400": {
-            "description": "Validation failed. `error.code` is one of `malformed_body`, `missing_sku`, `unknown_sku`, `sku_unavailable`, `missing_max_runtime`, `runtime_over_ceiling`, `provider_not_offered`, or with `template` also `unknown_template`, `template_unavailable`, `field_not_overridable`, `invalid_env`, `missing_input`, `unknown_input_mount`, `duplicate_input_mount`; `error.param` names the field.",
+            "description": "Validation failed. `error.code` is one of `malformed_body`, `missing_sku`, `unknown_sku`, `sku_unavailable`, `missing_max_runtime`, `runtime_over_ceiling`, `provider_not_offered`, with `template` also `unknown_template`, `template_unavailable`, `field_not_overridable`, `invalid_env`, `missing_input`, `unknown_input_mount`, `duplicate_input_mount`, and in a build with a job store also `missing_image`, `missing_command`, `invalid_env`, `reserved_env`, `invalid_input_source`, `invalid_mount`, `invalid_metadata`, `invalid_idempotency_key`; `error.param` names the field.",
             "content": {
               "application/json": {
                 "schema": {
@@ -232,7 +232,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "402": {
-            "description": "Hold refused: balance below the hold. `error.message` carries the hold amount and the estimate. *Planned:* not returned by the current build.",
+            "description": "`insufficient_balance`: the console refused the hold because the balance is below it. `error.message` carries the hold amount and the job's full ceiling (`max_runtime_seconds × rate`). Nothing was persisted.",
             "content": {
               "application/json": {
                 "schema": {
@@ -242,10 +242,42 @@
             }
           },
           "403": {
-            "$ref": "#/components/responses/QuotaExceeded"
+            "description": "`quota_exceeded`: the submit would exceed an account quota (docs/spec/quotas.md); refused whole, never a partial grant, `error.quotas` lists each limit with its headroom, no `Retry-After`. Checked after every request error, before the hold, on the resolved SKU. Or `authentication_error`/`account_disabled` or `account_suspended`: the key is valid but its account may not spend.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "error": {
+                    "type": "quota_exceeded",
+                    "code": "quota_exceeded",
+                    "param": "sku",
+                    "message": "sku \"a10g-24gb-x1\" would exceed this account's quota (active jobs: 2 of 2 in use, this job needs 1, headroom 0; hyperscaler GPUs: 2 of 2 in use, this job needs 1, headroom 0). Nothing was submitted or held; wait for or cancel an active job, choose a smaller SKU, or ask support to raise the limit.",
+                    "quotas": [
+                      {
+                        "limit": "max_active_jobs",
+                        "max": 2,
+                        "used": 2,
+                        "requested": 1,
+                        "headroom": 0
+                      },
+                      {
+                        "limit": "max_gpus",
+                        "tier": "hyperscaler",
+                        "max": 2,
+                        "used": 2,
+                        "requested": 1,
+                        "headroom": 0
+                      }
+                    ]
+                  }
+                }
+              }
+            }
           },
           "409": {
-            "description": "Idempotency-Key reused with a different body. *Planned:* not returned by the current build.",
+            "description": "`idempotency_conflict`: the Idempotency-Key was used within 24 h with a different body.",
             "content": {
               "application/json": {
                 "schema": {
@@ -258,7 +290,7 @@
             "$ref": "#/components/responses/RateLimited"
           },
           "500": {
-            "description": "`internal_error`/`placement_failed`: placement failed for a reason other than the two the API distinguishes; or `internal_error`/`template_resolution_failed`: a template could not be resolved for a reason that is not the submitter's. Not expected in normal operation. With quotas enforced, also `internal_error`/`owner_unresolved` (the key was not resolved to an account) or `internal_error`/`quota_check_failed` (usage could not be read); nothing was submitted.",
+            "description": "`internal_error`/`placement_failed`: placement failed for a reason other than the two the API distinguishes; `internal_error`/`template_resolution_failed`: a template could not be resolved for a reason that is not the submitter's; `internal_error`/`owner_unresolved` or `quota_check_failed`: the quota check could not be made; `internal_error`/`internal_error`: the job store failed. Not expected in normal operation; nothing was submitted.",
             "content": {
               "application/json": {
                 "schema": {
@@ -268,10 +300,17 @@
             }
           },
           "501": {
-            "$ref": "#/components/responses/NotImplemented"
+            "description": "The dark build (`not_implemented`), or `outputs_unsupported`: the spec has `outputs` and this deployment has no artifact storage.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           },
           "503": {
-            "description": "`upstream_unavailable`: the SKU is sound but no provider it offers (or that `providers` allows) is enabled in this deployment. Planned: `console_unavailable` when the key cannot be verified or the hold cannot be placed.",
+            "description": "`upstream_unavailable`: no provider the SKU offers (or that `providers` allows) is enabled in this deployment, or the deployment has no SkyPilot API server. `console_unavailable`: the key could not be verified or the hold could not be placed because the console did not answer; nothing was persisted.",
             "content": {
               "application/json": {
                 "schema": {
@@ -288,7 +327,7 @@
           "jobs"
         ],
         "summary": "List jobs",
-        "description": "Cursor list, newest first. Currently returns `501 not_implemented`.",
+        "description": "The calling key's owner's jobs, newest first, by keyset cursor. `next` is present when `has_more` is.",
         "parameters": [
           {
             "name": "status",
@@ -296,7 +335,7 @@
             "required": false,
             "style": "form",
             "explode": true,
-            "description": "Filter by status; repeatable.",
+            "description": "Filter by status; repeatable, any of. An unknown status is `invalid_status`.",
             "schema": {
               "type": "array",
               "items": {
@@ -308,17 +347,19 @@
             "name": "limit",
             "in": "query",
             "required": false,
-            "description": "Page size. Default and maximum are not yet specified.",
+            "description": "Page size, 1 to 100 (`invalid_limit`); default 20.",
             "schema": {
               "type": "integer",
-              "minimum": 1
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
             }
           },
           {
             "name": "after",
             "in": "query",
             "required": false,
-            "description": "Cursor: the `next` value of the previous page.",
+            "description": "Cursor: the `next` value of the previous page. Not one of your jobs is `invalid_cursor`.",
             "schema": {
               "type": "string"
             }
@@ -326,7 +367,7 @@
         ],
         "responses": {
           "200": {
-            "description": "A page of jobs. *Planned:* not returned by the current build.",
+            "description": "A page of jobs.",
             "content": {
               "application/json": {
                 "schema": {
@@ -335,89 +376,8 @@
               }
             }
           },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          },
-          "501": {
-            "$ref": "#/components/responses/NotImplemented"
-          }
-        }
-      }
-    },
-    "/compute/v1/jobs/{id}": {
-      "get": {
-        "operationId": "getJob",
-        "tags": [
-          "jobs"
-        ],
-        "summary": "Get a job",
-        "description": "Currently returns `501 not_implemented`.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/JobID"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "The job. *Planned:* not returned by the current build.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Job"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          },
-          "501": {
-            "$ref": "#/components/responses/NotImplemented"
-          }
-        }
-      }
-    },
-    "/compute/v1/jobs/{id}/cancel": {
-      "post": {
-        "operationId": "cancelJob",
-        "tags": [
-          "jobs"
-        ],
-        "summary": "Cancel a job",
-        "description": "Requests termination. GPU metering stops when the cancel is accepted, not when the instance is confirmed down. Currently returns `501 not_implemented`.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/JobID"
-          }
-        ],
-        "responses": {
-          "202": {
-            "description": "Cancel accepted; `status` may still read `running` until SkyPilot confirms. *Planned:* not returned by the current build.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Job"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "description": "The job is already terminal. *Planned:* not returned by the current build.",
+          "400": {
+            "description": "`invalid_status`, `invalid_limit` or `invalid_cursor`; `error.param` names the parameter.",
             "content": {
               "application/json": {
                 "schema": {
@@ -426,113 +386,17 @@
               }
             }
           },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          },
-          "501": {
-            "$ref": "#/components/responses/NotImplemented"
-          }
-        }
-      }
-    },
-    "/compute/v1/jobs/{id}/logs": {
-      "get": {
-        "operationId": "getJobLogs",
-        "tags": [
-          "jobs"
-        ],
-        "summary": "Job logs",
-        "description": "Plain-text stdout/stderr, retained 7 days after a terminal state. Currently returns `501 not_implemented`.",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/JobID"
-          },
-          {
-            "name": "since",
-            "in": "query",
-            "required": false,
-            "description": "Start point. Format not yet specified.",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "follow",
-            "in": "query",
-            "required": false,
-            "description": "`true` streams as `text/event-stream` (planned).",
-            "schema": {
-              "type": "boolean",
-              "default": false
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Logs. *Planned:* not returned by the current build.",
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              },
-              "text/event-stream": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          },
-          "501": {
-            "$ref": "#/components/responses/NotImplemented"
-          }
-        }
-      }
-    },
-    "/compute/v1/jobs/{id}/artifacts": {
-      "get": {
-        "operationId": "listJobArtifacts",
-        "tags": [
-          "jobs"
-        ],
-        "summary": "Job artifacts",
-        "description": "Files the job wrote under `spec.outputs[].mount`, each with a presigned download URL (ADR-0005, Proposed), owner-scoped like `GET /compute/v1/jobs/{id}`. Currently returns `501 not_implemented`: the route is built, but the binary has no job store or key-to-owner resolver until the console bridge lands, and no artifact storage until its bucket and token secret are configured. *Planned:* `402` instead of URLs while the account is in arrears (ADR-0008).",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/JobID"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Artifacts. *Planned:* not returned by the current build.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ArtifactList"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
+          "403": {
+            "$ref": "#/components/responses/AccountRefused"
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
           },
           "500": {
-            "description": "`internal_error`: the job could not be read. *Planned:* not returned by the current build.",
+            "description": "`internal_error`: the job store could not be read.",
             "content": {
               "application/json": {
                 "schema": {
@@ -545,7 +409,253 @@
             "$ref": "#/components/responses/NotImplemented"
           },
           "503": {
-            "description": "`console_unavailable`: the key could not be verified; or `storage_unavailable`: artifact storage could not be reached. *Planned:* not returned by the current build.",
+            "$ref": "#/components/responses/ConsoleUnavailable"
+          }
+        }
+      }
+    },
+    "/compute/v1/jobs/{id}": {
+      "get": {
+        "operationId": "getJob",
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Get a job",
+        "description": "The job, owner-scoped: another owner's job is `404`, like a missing one.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/JobID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The job, with `usage` read from the metering ledger.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AccountRefused"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "description": "`internal_error`: the job store could not be read.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "501": {
+            "$ref": "#/components/responses/NotImplemented"
+          },
+          "503": {
+            "$ref": "#/components/responses/ConsoleUnavailable"
+          }
+        }
+      }
+    },
+    "/compute/v1/jobs/{id}/cancel": {
+      "post": {
+        "operationId": "cancelJob",
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Cancel a job",
+        "description": "Requests termination. GPU metering stops at the moment the cancel is accepted, not when the instance is confirmed down: the customer is charged for seconds run, not for the cancel latency. A job that never ran has its hold released in full. Not rate limited.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/JobID"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Cancel accepted. `status` reads `cancelled` once the end is recorded, which is normally before this answer; teardown continues afterwards.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AccountRefused"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "`job_terminal`: the job has already ended.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "description": "`internal_error`: the cancel could not be recorded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "501": {
+            "$ref": "#/components/responses/NotImplemented"
+          },
+          "503": {
+            "$ref": "#/components/responses/ConsoleUnavailable"
+          }
+        }
+      }
+    },
+    "/compute/v1/jobs/{id}/logs": {
+      "get": {
+        "operationId": "getJobLogs",
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Job logs",
+        "description": "Plain-text stdout/stderr so far, read from the job's cluster. A job not yet launched, or whose cluster has been torn down, has an empty body: logs are not yet kept after teardown (backend.md open question 4), so the 7-day retention in job-api.md is *planned*.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/JobID"
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "description": "*Planned.* Not supported yet; ignored.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "follow",
+            "in": "query",
+            "required": false,
+            "description": "`true` would stream as `text/event-stream`; *planned*, answered `501 not_implemented`.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Logs so far (possibly empty).",
+            "content": {
+              "text/plain; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AccountRefused"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "501": {
+            "$ref": "#/components/responses/NotImplemented"
+          },
+          "503": {
+            "description": "`upstream_unavailable`/`logs_unavailable`: the cluster's logs could not be read from the SkyPilot API server; or `console_unavailable`: the key could not be verified.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/compute/v1/jobs/{id}/artifacts": {
+      "get": {
+        "operationId": "listJobArtifacts",
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Job artifacts",
+        "description": "Files the job wrote under `spec.outputs[].mount`, each with a presigned download URL (ADR-0005, Proposed), owner-scoped like `GET /compute/v1/jobs/{id}`. Answers `501 not_implemented` in the dark build and in a deployment without artifact storage. *Planned:* `402` instead of URLs while the account is in arrears (ADR-0008).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/JobID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Artifacts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/AccountRefused"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "description": "`internal_error`: the job could not be read.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "501": {
+            "$ref": "#/components/responses/NotImplemented"
+          },
+          "503": {
+            "description": "`console_unavailable`: the key could not be verified; or `storage_unavailable`: artifact storage could not be reached.",
             "content": {
               "application/json": {
                 "schema": {
@@ -564,7 +674,7 @@
           "jobs"
         ],
         "summary": "Job events",
-        "description": "The job's event log (docs/spec/events.md), oldest first, owner-scoped like `GET /compute/v1/jobs/{id}`. Pass the last id seen as `after` to receive only newer events. Currently returns `501 not_implemented`: the route is wired, but the binary has no job store or key-to-owner resolver until the console bridge lands.",
+        "description": "The job's event log (docs/spec/events.md), oldest first, owner-scoped like `GET /compute/v1/jobs/{id}`. Pass the last id seen as `after` to receive only newer events. Answers `501 not_implemented` in the dark build.",
         "parameters": [
           {
             "$ref": "#/components/parameters/JobID"
@@ -594,7 +704,7 @@
         ],
         "responses": {
           "200": {
-            "description": "A page of events. *Planned:* not returned by the current build.",
+            "description": "A page of events.",
             "content": {
               "application/json": {
                 "schema": {
@@ -604,7 +714,7 @@
             }
           },
           "400": {
-            "description": "`invalid_cursor` (`param` is `after`) or `invalid_limit` (`param` is `limit`). *Planned:* not returned by the current build.",
+            "description": "`invalid_cursor` (`param` is `after`) or `invalid_limit` (`param` is `limit`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -616,6 +726,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/AccountRefused"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
@@ -623,7 +736,7 @@
             "$ref": "#/components/responses/RateLimited"
           },
           "500": {
-            "description": "`internal_error`: the event log could not be read. *Planned:* not returned by the current build.",
+            "description": "`internal_error`: the event log could not be read.",
             "content": {
               "application/json": {
                 "schema": {
@@ -636,7 +749,7 @@
             "$ref": "#/components/responses/NotImplemented"
           },
           "503": {
-            "description": "`console_unavailable`: the key could not be verified; retry shortly. *Planned:* not returned by the current build.",
+            "description": "`console_unavailable`: the key could not be verified; retry shortly.",
             "content": {
               "application/json": {
                 "schema": {
@@ -655,7 +768,7 @@
           "internal"
         ],
         "summary": "Upload URL for one output file (job run step only)",
-        "description": "Called by the job's own run step, not by customers: one file's absolute `path`, `size` and hex `sha256` in, a presigned PUT out, valid for at most an hour, that S3 accepts only with `x-amz-checksum-sha256` set to the returned value. Currently returns `501 not_implemented`.",
+        "description": "Called by the job's own run step, not by customers: one file's absolute `path`, `size` and hex `sha256` in, a presigned PUT out, valid for at most an hour, that S3 accepts only with `x-amz-checksum-sha256` set to the returned value. Answers `501 not_implemented` in the dark build and in a deployment without artifact storage.",
         "security": [
           {
             "uploadToken": []
@@ -668,7 +781,7 @@
         ],
         "responses": {
           "200": {
-            "description": "`<base64 sha256> <url>\\n`, so bash can read it without a JSON parser. *Planned:* not returned by the current build.",
+            "description": "`<base64 sha256> <url>\\n`, so bash can read it without a JSON parser.",
             "content": {
               "text/plain": {
                 "schema": {
@@ -678,7 +791,7 @@
             }
           },
           "400": {
-            "description": "`invalid_path`, `invalid_size`, `invalid_sha256`, `no_outputs` or `malformed_body`. *Planned:* not returned by the current build.",
+            "description": "`invalid_path`, `invalid_size`, `invalid_sha256`, `no_outputs` or `malformed_body`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -688,7 +801,7 @@
             }
           },
           "401": {
-            "description": "`invalid_upload_token`. *Planned:* not returned by the current build.",
+            "description": "`invalid_upload_token`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -701,7 +814,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "`job_terminal`: the job has ended and its token with it. *Planned:* not returned by the current build.",
+            "description": "`job_terminal`: the job has ended and its token with it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -711,7 +824,7 @@
             }
           },
           "413": {
-            "description": "`file_too_large`: over 5 GiB. *Planned:* not returned by the current build.",
+            "description": "`file_too_large`: over 5 GiB.",
             "content": {
               "application/json": {
                 "schema": {
@@ -724,7 +837,7 @@
             "$ref": "#/components/responses/NotImplemented"
           },
           "503": {
-            "description": "`storage_unavailable`. *Planned:* not returned by the current build.",
+            "description": "`storage_unavailable`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -772,7 +885,7 @@
           "internal"
         ],
         "summary": "Write the output manifest (job run step only)",
-        "description": "Called by the job's own run step after its uploads: compute-api lists the job's prefix and writes `jobs/<job_id>/_manifest.json` from what S3 holds. Calling it again rewrites it. Currently returns `501 not_implemented`.",
+        "description": "Called by the job's own run step after its uploads: compute-api lists the job's prefix and writes `jobs/<job_id>/_manifest.json` from what S3 holds. Calling it again rewrites it. Answers `501 not_implemented` in the dark build and in a deployment without artifact storage.",
         "security": [
           {
             "uploadToken": []
@@ -785,7 +898,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The manifest was written. *Planned:* not returned by the current build.",
+            "description": "The manifest was written.",
             "content": {
               "application/json": {
                 "schema": {
@@ -813,7 +926,7 @@
             }
           },
           "401": {
-            "description": "`invalid_upload_token`. *Planned:* not returned by the current build.",
+            "description": "`invalid_upload_token`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -826,7 +939,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "`job_terminal`: the job has ended and its token with it. *Planned:* not returned by the current build.",
+            "description": "`job_terminal`: the job has ended and its token with it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -839,7 +952,7 @@
             "$ref": "#/components/responses/NotImplemented"
           },
           "503": {
-            "description": "`storage_unavailable`. *Planned:* not returned by the current build.",
+            "description": "`storage_unavailable`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -858,7 +971,7 @@
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "sk-...",
-        "description": "The customer's existing UnifyAPI key, the same one that calls api.unifyapi.ai/v1. Currently only the shape is checked (prefix `sk-`, at least 8 characters); verification through the console bridge, cached for at most 60 seconds, is planned."
+        "description": "The customer's existing Unify API key, the same one that calls api.unifyapi.ai/v1. A key not shaped like one (prefix `sk-`, at least 8 characters) is `401 missing_key`. Otherwise it is verified through the console bridge and the answer is cached for at most 60 seconds, so a revoked key stops working within a minute: unknown, disabled or expired is `401 invalid_key`, a disabled account or suspended organisation `403`, and a console that cannot answer `503 console_unavailable`. The dark build checks only the shape."
       },
       "uploadToken": {
         "type": "http",
@@ -880,7 +993,7 @@
         "name": "Idempotency-Key",
         "in": "header",
         "required": false,
-        "description": "Retained 24 hours. Same key and same body returns the original job with 200; same key and a different body is 409. Planned: the current build ignores it.",
+        "description": "Retained 24 hours. Same key and same body returns the original job with 200; same key and a different body is 409 `idempotency_conflict`; longer than 255 characters is 400 `invalid_idempotency_key`. Keys are per owner. The dark build ignores it.",
         "schema": {
           "type": "string",
           "minLength": 1,
@@ -890,7 +1003,7 @@
     },
     "responses": {
       "Unauthorized": {
-        "description": "Missing, malformed, revoked, or expired key. `error.type` is `authentication_error`.",
+        "description": "Missing or malformed key (`missing_key`), or a key the console does not accept: unknown, disabled or expired (`invalid_key`). `error.type` is `authentication_error`.",
         "headers": {
           "WWW-Authenticate": {
             "schema": {
@@ -908,14 +1021,14 @@
               "error": {
                 "type": "authentication_error",
                 "code": "missing_key",
-                "message": "Provide your UnifyAPI key as 'Authorization: Bearer sk-...'."
+                "message": "Provide your Unify API key as 'Authorization: Bearer sk-...'."
               }
             }
           }
         }
       },
       "NotImplemented": {
-        "description": "Current state: the route exists and the request passed authentication (and, for submit, validation), but the backend is not built.",
+        "description": "The dark build: this deployment has no job store, so the route exists and the request passed the key's shape check (and, for submit, validation) but nothing is run.",
         "content": {
           "application/json": {
             "schema": {
@@ -932,7 +1045,7 @@
         }
       },
       "NotFound": {
-        "description": "Job id unknown for the calling key's user; no existence leak across users. *Planned:* not returned by the current build.",
+        "description": "Job id unknown for the calling key's owner (`job_not_found`); another owner's job is indistinguishable from a missing one.",
         "content": {
           "application/json": {
             "schema": {
@@ -969,7 +1082,7 @@
         }
       },
       "QuotaExceeded": {
-        "description": "The submit would exceed an account quota (docs/spec/quotas.md). Refused whole, never a partial grant; `error.quotas` lists each limit exceeded with its headroom. No `Retry-After`: when a slot frees depends on other jobs' runtimes. Checked last, after every request error, on the resolved SKU (a template's default counts). Enforced only once key verification and the job store are wired; the current deployment does not return it.",
+        "description": "The submit would exceed an account quota (docs/spec/quotas.md). Refused whole, never a partial grant; `error.quotas` lists each limit exceeded with its headroom. No `Retry-After`: when a slot frees depends on other jobs' runtimes. Checked last, after every request error, on the resolved SKU (a template's default counts). Enforced by every build with a job store; the dark build does not check quotas.",
         "content": {
           "application/json": {
             "schema": {
@@ -999,6 +1112,26 @@
                   }
                 ]
               }
+            }
+          }
+        }
+      },
+      "AccountRefused": {
+        "description": "The key is valid but its account may not spend: `authentication_error`/`account_disabled` (the user is disabled) or `authentication_error`/`account_suspended` (the organisation is suspended).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "ConsoleUnavailable": {
+        "description": "`console_unavailable`: the key could not be verified because the Unify API console did not answer, or the bridge is not configured in this deployment. Retry shortly.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
             }
           }
         }
@@ -1054,7 +1187,53 @@
           ],
           "storage_unavailable": []
         },
-        "description": "`type` is the class (a closed set); `code` is the specific reason. Codes the current build emits are listed per type in `x-error-codes`; clients must tolerate codes not listed there.",
+        "x-error-codes-wired": {
+          "invalid_request": [
+            "unknown_template",
+            "template_unavailable",
+            "field_not_overridable",
+            "missing_input",
+            "missing_image",
+            "missing_command",
+            "invalid_env",
+            "reserved_env",
+            "invalid_input_source",
+            "invalid_mount",
+            "invalid_metadata",
+            "invalid_idempotency_key",
+            "invalid_status",
+            "invalid_limit",
+            "invalid_cursor"
+          ],
+          "authentication_error": [
+            "invalid_key",
+            "account_disabled",
+            "account_suspended"
+          ],
+          "insufficient_balance": [
+            "insufficient_balance"
+          ],
+          "quota_exceeded": [
+            "quota_exceeded"
+          ],
+          "not_found": [
+            "job_not_found"
+          ],
+          "conflict": [
+            "idempotency_conflict",
+            "job_terminal"
+          ],
+          "not_implemented": [
+            "outputs_unsupported"
+          ],
+          "console_unavailable": [
+            "console_unavailable"
+          ],
+          "upstream_unavailable": [
+            "logs_unavailable"
+          ]
+        },
+        "description": "`type` is the class (a closed set); `code` is the specific reason. `x-error-codes` lists, per type, the codes every build emits, including the dark build; `x-error-codes-wired` lists the further codes a build with a job store emits. Clients must tolerate codes not listed in either.",
         "properties": {
           "type": {
             "type": "string",
@@ -1362,13 +1541,14 @@
         "properties": {
           "image": {
             "type": "string",
-            "description": "Container image. Whether it is required is not yet specified; the current build does not check it."
+            "description": "Container image, pulled on the node. Required (`missing_image`), unless `template` supplies it."
           },
           "command": {
             "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "description": "Full argv run in the image; the image's entrypoint is not used. Required (`missing_command`), unless `template` supplies it."
           },
           "env": {
             "type": "object",
@@ -1380,7 +1560,8 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/JobInput"
-            }
+            },
+            "description": "Each `source` is an `https://` URL ending in a file name, public or presigned; it is downloaded into `mount` before the command runs. Other sources are refused (`invalid_input_source`)."
           },
           "outputs": {
             "type": "array",
@@ -1424,7 +1605,7 @@
             "additionalProperties": {
               "type": "string"
             },
-            "description": "At most 16 string pairs (not yet enforced)."
+            "description": "At most 16 string pairs (`invalid_metadata`). Returned on the Job."
           }
         },
         "description": "Without `template`, `sku` and `spec.max_runtime_seconds` are required. With `template`, both default from it."
@@ -1559,7 +1740,7 @@
             ]
           },
           "placement": {
-            "description": "Null until the job is running (planned, R10).",
+            "description": "Where the job landed (upstreams.md R10): written when SkyPilot first reports the cluster UP, before the job reads `running`. Null until then, and stays null for a job that never ran.",
             "oneOf": [
               {
                 "$ref": "#/components/schemas/JobPlacement"

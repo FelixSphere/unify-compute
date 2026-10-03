@@ -1,14 +1,18 @@
 // Package api serves the compute job API (docs/spec/job-api.md). Routes and
-// shapes are the v1 contract; job handling returns not_implemented until the
-// SkyPilot backend and the console bridge land.
+// shapes are the v1 contract. A Server without JobService and Verifier is the
+// dark build: keys are checked for shape only and every job route answers
+// not_implemented after validation. With both, keys are verified through the
+// console bridge and jobs run (internal/jobs).
 package api
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -16,7 +20,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/FelixSphere/unify-compute/compute-api/internal/backend"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/console"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/events"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/jobs"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/quota"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/ratelimit"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/sku"
@@ -50,6 +57,14 @@ type Server struct {
 	// 501 until both are.
 	Events EventSource
 	Owner  func(ctx context.Context, key string) (string, error)
+
+	// Verifier, when set, checks every key through the console bridge
+	// instead of its shape alone. JobService, when set, runs jobs. main sets
+	// both or neither.
+	Verifier   *Verifier
+	JobService *jobs.Service
+	// Now times cancel acceptance; nil is time.Now.
+	Now func() time.Time
 
 	mux *router
 
@@ -115,10 +130,10 @@ func New(build string, cat *sku.Catalogue, reg *upstream.Registry, log *slog.Log
 	s.mux.HandleFunc("GET /compute/v1/upstreams", s.listUpstreams)
 	s.mux.HandleFunc("GET /compute/v1/templates", s.listTemplates)
 	s.mux.Handle("POST /compute/v1/jobs", s.auth(s.limit(s.submits, http.HandlerFunc(s.submitJob))))
-	s.mux.Handle("GET /compute/v1/jobs", s.auth(s.limit(s.reads, s.notImplemented("job listing"))))
-	s.mux.Handle("GET /compute/v1/jobs/{id}", s.auth(s.limit(s.reads, s.notImplemented("job lookup"))))
-	s.mux.Handle("POST /compute/v1/jobs/{id}/cancel", s.auth(s.notImplemented("job cancel")))
-	s.mux.Handle("GET /compute/v1/jobs/{id}/logs", s.auth(s.limit(s.reads, s.notImplemented("job logs"))))
+	s.mux.Handle("GET /compute/v1/jobs", s.auth(s.limit(s.reads, s.wired("job listing", s.listJobs))))
+	s.mux.Handle("GET /compute/v1/jobs/{id}", s.auth(s.limit(s.reads, s.wired("job lookup", s.getJob))))
+	s.mux.Handle("POST /compute/v1/jobs/{id}/cancel", s.auth(s.wired("job cancel", s.cancelJob)))
+	s.mux.Handle("GET /compute/v1/jobs/{id}/logs", s.auth(s.limit(s.reads, s.wired("job logs", s.jobLogs))))
 	s.mux.Handle("GET /compute/v1/jobs/{id}/artifacts", s.auth(s.limit(s.reads, http.HandlerFunc(s.listArtifacts))))
 	s.mux.Handle("GET /compute/v1/jobs/{id}/events", s.auth(s.limit(s.reads, http.HandlerFunc(s.listEvents))))
 	// Called by a job's own run step with its upload token, not a customer
@@ -212,9 +227,10 @@ func (s *Server) listTemplates(w http.ResponseWriter, _ *http.Request) {
 // submitRequest decodes optional fields as pointers or nil-able collections so
 // a template submit can tell "not sent" from "sent as zero".
 type submitRequest struct {
-	Template  string   `json:"template"`
-	SKU       *string  `json:"sku"`
-	Providers []string `json:"providers"`
+	Template  string            `json:"template"`
+	SKU       *string           `json:"sku"`
+	Providers []string          `json:"providers"`
+	Metadata  map[string]string `json:"metadata"`
 	Spec      struct {
 		Image             *string           `json:"image"`
 		Command           []string          `json:"command"`
@@ -225,43 +241,85 @@ type submitRequest struct {
 	} `json:"spec"`
 }
 
+// submission is a submit that passed the checks the catalogue and the
+// template set can decide on their own.
+type submission struct {
+	raw       []byte
+	item      sku.SKU
+	providers []string
+	spec      backend.Spec
+	metadata  map[string]string
+}
+
 // submitJob validates everything the catalogue and registry can decide
 // without persistence: the template and its overrides, the SKU, the
 // customer's provider restriction, the runtime ceiling, and whether this
 // deployment can launch it at all. A template is resolved into a spec first
 // and that spec then meets exactly the checks a hand-written one does. The
-// quota check runs last, with Quota set, on the resolved SKU: a template's
-// default SKU counts against quota exactly as if the customer had named it.
-// What survives is what the backend will receive; until it exists the
-// answer is still 501.
+// quota check runs last, on the resolved SKU: a template's default SKU counts
+// against quota exactly as if the customer had named it.
+//
+// In the dark build what survives is answered 501. Wired, it is submitted
+// (submitWired).
 func (s *Server) submitJob(w http.ResponseWriter, r *http.Request) {
-	var raw submitRequest
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody))
-	if err := dec.Decode(&raw); err != nil {
-		invalid(w, "malformed_body", "", "Body must be a JSON object; see docs/spec/job-api.md.")
+	sub, ok := s.resolveSubmit(w, r)
+	if !ok {
 		return
+	}
+	if s.JobService != nil {
+		s.submitWired(w, r, sub)
+		return
+	}
+	if _, ok := s.place(w, sub); !ok {
+		return
+	}
+	if s.Quota != nil && !s.checkQuota(w, r, sub.item) {
+		return
+	}
+	s.notImplemented("job submission").ServeHTTP(w, r)
+}
+
+func (s *Server) resolveSubmit(w http.ResponseWriter, r *http.Request) (submission, bool) {
+	var raw submitRequest
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
+	if err == nil {
+		err = json.NewDecoder(bytes.NewReader(body)).Decode(&raw)
+	}
+	if err != nil {
+		invalid(w, "malformed_body", "", "Body must be a JSON object; see docs/spec/job-api.md.")
+		return submission{}, false
 	}
 	var (
 		skuID     string
 		providers = raw.Providers
-		runtime   int64
+		spec      backend.Spec
 	)
 	if raw.Template == "" {
 		if raw.SKU != nil {
 			skuID = *raw.SKU
 		}
+		if raw.Spec.Image != nil {
+			spec.Image = *raw.Spec.Image
+		}
+		spec.Command, spec.Env = raw.Spec.Command, raw.Spec.Env
+		for _, in := range raw.Spec.Inputs {
+			spec.Inputs = append(spec.Inputs, backend.Input{Source: in.Source, Mount: in.Mount})
+		}
+		for _, out := range raw.Spec.Outputs {
+			spec.Outputs = append(spec.Outputs, backend.Output{Mount: out.Mount})
+		}
 		if raw.Spec.MaxRuntimeSeconds != nil {
-			runtime = *raw.Spec.MaxRuntimeSeconds
+			spec.MaxRuntimeSeconds = clampRuntime(*raw.Spec.MaxRuntimeSeconds)
 		}
 	} else {
 		t, err := s.Templates.Get(raw.Template)
 		if err != nil {
 			invalid(w, "unknown_template", "template", fmt.Sprintf("template %q is not offered; see GET /compute/v1/templates", raw.Template))
-			return
+			return submission{}, false
 		}
 		if !t.Available {
 			invalid(w, "template_unavailable", "template", fmt.Sprintf("template %q is listed but not currently runnable: %s", t.ID, t.UnavailableReason))
-			return
+			return submission{}, false
 		}
 		res, err := t.Resolve(template.Overrides{
 			SKU: raw.SKU, Providers: raw.Providers, Image: raw.Spec.Image, Command: raw.Spec.Command,
@@ -271,50 +329,73 @@ func (s *Server) submitJob(w http.ResponseWriter, r *http.Request) {
 			var fe *template.FieldError
 			if errors.As(err, &fe) {
 				invalid(w, fe.Code, fe.Field, fe.Msg)
-				return
+				return submission{}, false
 			}
 			writeError(w, http.StatusInternalServerError, apiError{Type: "internal_error", Code: "template_resolution_failed", Message: err.Error()})
-			return
+			return submission{}, false
 		}
-		skuID, providers, runtime = res.SKU, res.Providers, res.Spec.MaxRuntimeSeconds
+		skuID, providers = res.SKU, res.Providers
+		spec = backend.Spec{Image: res.Spec.Image, Command: res.Spec.Command, Env: res.Spec.Env,
+			MaxRuntimeSeconds: clampRuntime(res.Spec.MaxRuntimeSeconds)}
+		for _, in := range res.Spec.Inputs {
+			spec.Inputs = append(spec.Inputs, backend.Input{Source: in.Source, Mount: in.Mount})
+		}
+		for _, out := range res.Spec.Outputs {
+			spec.Outputs = append(spec.Outputs, backend.Output{Mount: out.Mount})
+		}
 	}
 	if skuID == "" {
 		invalid(w, "missing_sku", "sku", "Choose a sku from GET /compute/v1/skus.")
-		return
+		return submission{}, false
 	}
 	item, err := s.Catalogue.Get(skuID)
 	if err != nil {
 		invalid(w, "unknown_sku", "sku", fmt.Sprintf("sku %q is not offered", skuID))
-		return
+		return submission{}, false
 	}
 	if !item.Available {
 		invalid(w, "sku_unavailable", "sku", fmt.Sprintf("sku %q is listed but not currently sold", skuID))
-		return
+		return submission{}, false
 	}
-	switch rt := runtime; {
+	switch rt := spec.MaxRuntimeSeconds; {
 	case rt <= 0:
 		invalid(w, "missing_max_runtime", "spec.max_runtime_seconds", "spec.max_runtime_seconds must be a positive integer")
-		return
-	case rt > MaxRuntimeSeconds:
+		return submission{}, false
+	case int64(rt) > MaxRuntimeSeconds:
 		invalid(w, "runtime_over_ceiling", "spec.max_runtime_seconds", fmt.Sprintf("max_runtime_seconds %d exceeds the platform ceiling of %d", rt, MaxRuntimeSeconds))
-		return
+		return submission{}, false
 	}
-	if _, _, err := s.Upstreams.Place(item, providers); err != nil {
+	return submission{raw: body, item: item, providers: providers, spec: spec, metadata: raw.Metadata}, true
+}
+
+// clampRuntime keeps an absurd runtime above the ceiling instead of letting
+// it wrap through int, so it is refused as runtime_over_ceiling.
+func clampRuntime(v int64) int {
+	if v > MaxRuntimeSeconds {
+		return int(MaxRuntimeSeconds + 1)
+	}
+	if v < 0 {
+		return -1
+	}
+	return int(v)
+}
+
+// place resolves where the job may run, writing the 400/503 itself.
+func (s *Server) place(w http.ResponseWriter, sub submission) ([]sku.Provider, bool) {
+	_, candidates, err := s.Upstreams.Place(sub.item, sub.providers)
+	if err != nil {
 		switch {
 		case errors.Is(err, sku.ErrProviderNotOffered):
-			invalid(w, "provider_not_offered", "providers", fmt.Sprintf("sku %q: %v", skuID, err))
+			invalid(w, "provider_not_offered", "providers", fmt.Sprintf("sku %q: %v", sub.item.ID, err))
 		case errors.Is(err, upstream.ErrNoEnabledProvider):
 			writeError(w, http.StatusServiceUnavailable, apiError{Type: "upstream_unavailable", Code: "upstream_unavailable",
-				Message: fmt.Sprintf("sku %q has no upstream enabled in this deployment", skuID)})
+				Message: fmt.Sprintf("sku %q has no upstream enabled in this deployment", sub.item.ID)})
 		default:
 			writeError(w, http.StatusInternalServerError, apiError{Type: "internal_error", Code: "placement_failed", Message: err.Error()})
 		}
-		return
+		return nil, false
 	}
-	if s.Quota != nil && !s.checkQuota(w, r, item) {
-		return
-	}
-	s.notImplemented("job submission").ServeHTTP(w, r)
+	return candidates, true
 }
 
 // checkQuota answers 403, not 429, for a submit over quota. 429 means "the
@@ -349,12 +430,25 @@ func (s *Server) checkQuota(w http.ResponseWriter, r *http.Request, item sku.SKU
 
 type ctxKey int
 
-const ownerKey ctxKey = 0
+const (
+	ownerKey ctxKey = iota
+	identityKey
+)
 
-// withOwner records the billing identity the caller's key resolved to. Auth
-// sets it once it verifies keys through the console bridge.
+// withOwner records the billing identity the caller's key resolved to.
 func withOwner(ctx context.Context, owner string) context.Context {
 	return context.WithValue(ctx, ownerKey, owner)
+}
+
+// withIdentity records what verify said about the caller's key, and its
+// owner.
+func withIdentity(ctx context.Context, id console.Identity) context.Context {
+	return withOwner(context.WithValue(ctx, identityKey, id), id.Owner())
+}
+
+func identityFrom(ctx context.Context) (console.Identity, bool) {
+	id, ok := ctx.Value(identityKey).(console.Identity)
+	return id, ok
 }
 
 func ownerFrom(ctx context.Context) string {
@@ -383,8 +477,10 @@ func bearer(r *http.Request) (string, bool) {
 	return strings.TrimSpace(key), ok
 }
 
-// auth only checks the credential's shape for now. Verification against the
-// console bridge replaces the body of this function; the 401 contract stays.
+// auth refuses a key that is not shaped like one with 401. With a Verifier
+// it then verifies the key through the console bridge (cached, VerifyTTL)
+// and records the caller's identity for the handler; without one, the dark
+// build, the shape is all that is checked.
 func (s *Server) auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key, ok := bearer(r)
@@ -393,11 +489,35 @@ func (s *Server) auth(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, apiError{
 				Type:    "authentication_error",
 				Code:    "missing_key",
-				Message: "Provide your UnifyAPI key as 'Authorization: Bearer sk-...'.",
+				Message: "Provide your Unify API key as 'Authorization: Bearer sk-...'.",
 			})
 			return
 		}
-		next.ServeHTTP(w, r)
+		if s.Verifier == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		id, err := s.Verifier.Verify(r.Context(), key)
+		var refused *AccountRefusedError
+		switch {
+		case err == nil:
+			next.ServeHTTP(w, r.WithContext(withIdentity(r.Context(), id)))
+		case errors.Is(err, ErrKeyRejected):
+			w.Header().Set("WWW-Authenticate", `Bearer realm="compute", error="invalid_token"`)
+			writeError(w, http.StatusUnauthorized, apiError{Type: "authentication_error", Code: "invalid_key",
+				Message: "This Unify API key was not accepted: it is unknown, disabled or expired."})
+		case errors.As(err, &refused):
+			// The credential is fine and the account is not, which is a 403,
+			// not a 401 (console-billing-bridge.md, verify).
+			code, msg := "account_disabled", "This Unify API account is disabled."
+			if refused.Status == console.AccountSuspended {
+				code, msg = "account_suspended", "This Unify API organisation is suspended."
+			}
+			writeError(w, http.StatusForbidden, apiError{Type: "authentication_error", Code: code, Message: msg})
+		default:
+			writeError(w, http.StatusServiceUnavailable, apiError{Type: "console_unavailable", Code: "console_unavailable",
+				Message: "The key could not be verified with Unify API right now; retry shortly."})
+		}
 	})
 }
 
@@ -427,21 +547,15 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = n
 	}
-	key, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	owner, err := s.Owner(r.Context(), strings.TrimSpace(key))
-	switch {
-	case errors.Is(err, ErrKeyRejected):
-		writeError(w, http.StatusUnauthorized, apiError{Type: "authentication_error", Code: "invalid_key", Message: "This key was not accepted."})
-		return
-	case err != nil:
-		writeError(w, http.StatusServiceUnavailable, apiError{Type: "console_unavailable", Code: "console_unavailable", Message: "The key could not be verified; retry shortly."})
+	owner, ok := s.owner(w, r)
+	if !ok {
 		return
 	}
 	id := r.PathValue("id")
 	page, err := s.Events.ListEvents(r.Context(), owner, id, r.URL.Query().Get("after"), limit)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
-		writeError(w, http.StatusNotFound, apiError{Type: "not_found", Code: "job_not_found", Message: fmt.Sprintf("no job %q", id)})
+		jobNotFound(w, id)
 		return
 	case errors.Is(err, store.ErrInvalidEventCursor):
 		invalid(w, "invalid_cursor", "after", "after must be the id of an event of this job")

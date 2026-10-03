@@ -7,15 +7,19 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/FelixSphere/unify-compute/compute-api/internal/api"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/artifacts"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/awsv4"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/backend"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/console"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/jobs"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/quota"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/sku"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/store"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/template"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/upstream"
 )
@@ -34,15 +38,12 @@ func main() {
 	}
 
 	// Quotas are validated at boot like the catalogue, so a bad file fails
-	// the deploy. They are not enforced yet: enforcement needs the owner a
-	// key resolves to, which arrives with the console bridge's verify, and
-	// the job store, which this binary does not open yet.
+	// the deploy. They are enforced only once the job store is open (below).
 	quotas, err := quota.Load(env("QUOTA_FILE", "config/quotas.json"))
 	if err != nil {
 		log.Error("load quotas", "err", err)
 		os.Exit(1)
 	}
-	log.Info("quotas loaded", "overrides", len(quotas.Owners), "enforced", false)
 
 	// Templates are checked against the catalogue they sell from, so a
 	// template naming a SKU that was removed fails the deploy, not a submit.
@@ -66,15 +67,22 @@ func main() {
 	}
 
 	// The bridge client is constructed at boot so a bad secret fails the
-	// deploy instead of the first job. It is not called by any route yet.
+	// deploy instead of the first job.
+	var bridge *console.Client
 	if url := os.Getenv("CONSOLE_URL"); url != "" {
-		if _, err := console.New(url, []byte(os.Getenv("COMPUTE_BRIDGE_SECRET"))); err != nil {
+		if bridge, err = console.New(url, []byte(os.Getenv("COMPUTE_BRIDGE_SECRET"))); err != nil {
 			log.Error("console bridge", "err", err)
 			os.Exit(1)
 		}
 		log.Info("console bridge configured", "url", url)
 	} else {
-		log.Warn("CONSOLE_URL unset; job routes will refuse until it is")
+		// No console to verify keys or hold balance against: every keyed
+		// job route answers 503 console_unavailable (job-api.md, Errors)
+		// once the job store is open. The client below has nowhere to send,
+		// so each call fails as an unreachable console does, and the
+		// ledger treats it that way (metering.md H5).
+		bridge = &console.Client{HTTP: &http.Client{Timeout: 10 * time.Second}, Now: time.Now}
+		log.Warn("CONSOLE_URL unset; keyed job routes answer 503 console_unavailable")
 	}
 
 	handler := api.New(Build, cat, upstreams, log)
@@ -86,6 +94,7 @@ func main() {
 	// someone creates it, and a host without one must still boot (the
 	// CONSOLE_URL crash loop of 2026-10-02 is the lesson). The routes answer
 	// 501 until the job store and owner resolution are wired as well.
+	var art *artifacts.Service
 	bucket, tokenSecret := os.Getenv("ARTIFACTS_BUCKET"), os.Getenv("ARTIFACTS_TOKEN_SECRET")
 	if bucket != "" && tokenSecret != "" {
 		region := env("AWS_REGION", "us-east-1")
@@ -93,7 +102,7 @@ func main() {
 		if c, ok := awsv4.FromEnv(); ok {
 			creds = c
 		}
-		art, err := artifacts.New(artifacts.Config{
+		art, err = artifacts.New(artifacts.Config{
 			Bucket:        bucket,
 			WriterRoleARN: os.Getenv("ARTIFACTS_WRITER_ROLE_ARN"),
 			PublicURL:     os.Getenv("PUBLIC_URL"),
@@ -111,14 +120,68 @@ func main() {
 		log.Warn("ARTIFACTS_BUCKET or ARTIFACTS_TOKEN_SECRET unset; spec.outputs cannot be uploaded and artifact routes answer 501")
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	// The job store is the switch between the dark build and a working one.
+	// Without DATABASE_URL every job route keeps answering 501 after
+	// validation, as before this was wired.
+	var svc *jobs.Service
+	if dsn := os.Getenv("DATABASE_URL"); dsn == "" {
+		log.Warn("DATABASE_URL unset; job routes answer 501 not_implemented (dark build)", "quotas_enforced", false)
+	} else {
+		st, err := openStore(ctx, log, dsn)
+		if err != nil {
+			log.Error("job store", "err", err)
+			os.Exit(1)
+		}
+		defer st.Close()
+		var sky *backend.Client
+		if url := os.Getenv("SKYPILOT_API_SERVER_URL"); url != "" {
+			sky = &backend.Client{BaseURL: url, Token: os.Getenv("SKYPILOT_SERVICE_ACCOUNT_TOKEN"), UserHash: skyPilotUser,
+				HTTP: &http.Client{Timeout: 2 * time.Minute}}
+			log.Info("skypilot api server configured", "url", url)
+		} else {
+			log.Warn("SKYPILOT_API_SERVER_URL unset; job submission answers 503 upstream_unavailable")
+		}
+		cfg := jobs.Config{
+			Store: st, Console: bridge, SkyPilot: sky, Catalogue: cat, Log: log,
+			Quota: &quota.Enforcer{Config: quotas, Catalogue: cat, Usage: st},
+		}
+		if art != nil {
+			cfg.Outputs = art
+		}
+		svc = jobs.New(cfg)
+		verifier := &api.Verifier{Console: bridge, Log: log}
+		handler.Verifier, handler.JobService = verifier, svc
+		handler.Owner, handler.Events, handler.Jobs = verifier.Owner, st, st
+		log.Info("job store open", "quotas_enforced", true, "overrides", len(quotas.Owners))
+		// Attempts live in this process's memory (backend.md open question
+		// 2), so a job that was live when the last process stopped is not
+		// observed again. Say so rather than let it look tracked.
+		if live, err := st.ActiveJobs(ctx); err != nil {
+			log.Error("read live jobs", "err", err)
+		} else if len(live) > 0 {
+			for _, j := range live {
+				log.Warn("live job from an earlier process is not resumed", "job", j.ID, "status", j.Status, "owner", j.Owner)
+			}
+		}
+	}
+
 	srv := &http.Server{
 		Addr:              env("LISTEN_ADDR", "127.0.0.1:8080"),
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
+	var workers sync.WaitGroup
+	if svc != nil {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			svc.Run(ctx)
+		}()
+	}
 	go func() {
 		log.Info("listening", "addr", srv.Addr, "build", Build, "skus", len(cat.SKUs), "templates", len(templates.Templates))
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -130,6 +193,38 @@ func main() {
 	shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shutdown)
+	// The loops stop at their next tick boundary; a step in flight finishes.
+	workers.Wait()
+}
+
+// skyPilotUser is the SkyPilot user every cluster belongs to, so any
+// compute-api process can observe and tear down any job's cluster
+// (backend.md, "Common body fields"). Changing it orphans live clusters.
+const skyPilotUser = "unifycmp"
+
+// openStore connects, retrying for a minute so a database that is still
+// starting does not fail the boot, and migrates. Migrate takes an advisory
+// lock per migration, so instances booting together apply each once.
+func openStore(ctx context.Context, log *slog.Logger, dsn string) (*store.Store, error) {
+	deadline := time.Now().Add(time.Minute)
+	for {
+		st, err := store.Open(ctx, dsn)
+		if err == nil {
+			if err := st.Migrate(ctx); err != nil {
+				st.Close()
+				return nil, err
+			}
+			return st, nil
+		}
+		if time.Now().After(deadline) || ctx.Err() != nil {
+			return nil, err
+		}
+		log.Warn("job store not reachable yet; retrying", "err", err)
+		select {
+		case <-ctx.Done():
+		case <-time.After(2 * time.Second):
+		}
+	}
 }
 
 func env(key, fallback string) string {

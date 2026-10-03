@@ -1,8 +1,11 @@
 # Compute job API — v1 contract
 
-- **Status:** Draft, implemented as `501` stubs in `compute-api/`. Shapes here
-  are what the stubs return and what tests pin; behaviour marked *planned* is
-  not built.
+- **Status:** Draft, implemented in `compute-api/`. A deployment with a job
+  store (`DATABASE_URL`) verifies keys through the console bridge and runs
+  jobs; one without (the "dark build") checks the key's shape only and
+  answers every authenticated job route `501` after validation. Behaviour
+  marked *planned* is not built in either. No job has been run on a real
+  cloud through this API yet.
 - Base URL: `https://api.compute.unifyai.us` (production, does not exist yet),
   `https://staging.compute.unifyai.us` (staging, not yet applied).
 - All paths are under `/compute/v1`.
@@ -13,6 +16,21 @@
 same key that calls `api.unifyapi.ai/v1`. compute-api verifies it through the
 console bridge (`console-billing-bridge.md` → `verify`) and caches the result
 for at most 60 seconds; a revoked key stops working within that window.
+Implemented. A key not shaped like one (`sk-` and at least 8 characters) is
+`401 missing_key` without a console call. The console's answer maps as
+follows; refusals are cached for the same 60 seconds, a console that cannot
+answer is not cached at all:
+
+| Console `verify` | compute-api |
+|---|---|
+| `200` | the key's owner is `tenant:<id>` or `user:<id>` (`quotas.md`) |
+| `401 invalid_key` (unknown, disabled or expired key) | `401 authentication_error`, `invalid_key` |
+| `403`, `data.status: "disabled"` (user disabled) | `403 authentication_error`, `account_disabled` |
+| `403`, `data.status: "suspended"` (tenant suspended) | `403 authentication_error`, `account_suspended` |
+| anything else: unreachable, `5xx`, `429`, bridge dark (bodiless `404`), or a `401` for our own signature or clock | `503 console_unavailable` |
+
+A deployment without `CONSOLE_URL` cannot verify any key, so every
+authenticated job route answers `503 console_unavailable` there.
 
 A key with `unlimited_quota` set on the console still needs a positive balance
 on its billing entity to submit a job, because compute holds against the
@@ -30,13 +48,14 @@ OpenAI-style envelope so existing client error handling carries over:
 |---|---|---|
 | 400 | `invalid_request` | Malformed body, unknown SKU, runtime over the ceiling |
 | 401 | `authentication_error` | Missing, malformed, revoked, or expired key |
+| 403 | `authentication_error` | The key is valid but its account may not spend (`account_disabled`, `account_suspended`) |
 | 402 | `insufficient_balance` | Hold refused: balance below the estimate |
 | 403 | `quota_exceeded` | Submit would exceed an account quota; `error.quotas` lists each limit with usage and headroom ([`quotas.md`](quotas.md)). Never a partial grant, no `Retry-After` |
 | 404 | `not_found` | Job id unknown *for this key* (no existence leak across users) |
 | 409 | `conflict` | Idempotency-Key reused with a different body; cancel on a terminal job |
 | 429 | `rate_limited` | Per-key submit or read rate exceeded; always with `Retry-After` |
 | 500 | `internal_error` | Placement failed for a reason the API does not distinguish (`placement_failed`); not expected in normal operation |
-| 501 | `not_implemented` | Route exists, backend not built (current state) |
+| 501 | `not_implemented` | The dark build (no job store); `spec.outputs` without artifact storage (`outputs_unsupported`); `follow=true` on logs |
 | 503 | `console_unavailable` | Key could not be verified or hold could not be placed |
 | 503 | `upstream_unavailable` | The SKU is sound but no provider it offers is enabled in this deployment |
 | 503 | `storage_unavailable` | Artifact storage could not be reached |
@@ -77,16 +96,16 @@ OpenAI-style envelope so existing client error handling carries over:
 `inputs[].source` is an `https://` URL, public or presigned by the customer.
 The run step downloads it into the `mount` directory, named after the URL's
 last path segment, before the command runs. `s3://` and other sources are
-refused by the backend when the job is launched, until customer buckets are
-read through a cross-account role (a later ADR; ADR-0005). Submit does not
-check them yet. `outputs[].mount` is a directory the job writes. Everything
+refused at submit (`400 invalid_input_source`, before anything is held),
+until customer buckets are read through a cross-account role (a later ADR;
+ADR-0005). `outputs[].mount` is a directory the job writes. Everything
 under it is uploaded when the command exits (see
 [Artifacts](#get-computev1jobsidartifacts)).
 
 `placement` is null until the job is `running` and says where it landed.
 The backend writes it from SkyPilot's cluster record when the cluster is
-first seen `UP`, before the job reads `running` ([`backend.md`](backend.md)).
-It is not served yet, because the backend is not wired to submit.
+first seen `UP`, before the job reads `running` ([`backend.md`](backend.md)),
+together with a `job.placed` event.
 
 Money is a decimal string in USD, never a float. Timestamps are Unix seconds.
 
@@ -191,25 +210,47 @@ and sold (`sku_unavailable`), `spec.max_runtime_seconds` positive
 (`missing_max_runtime`) and at most 86400 (`runtime_over_ceiling`), every
 entry of `providers` offered by the SKU (`provider_not_offered`), at
 least one candidate enabled in this deployment (`503 upstream_unavailable`),
-and, last, the account's quotas (`403 quota_exceeded`, [`quotas.md`](quotas.md);
-the check exists in the handler but is not enabled in a deployment until key
-verification and the job store are wired).
+and, last, the account's quotas (`403 quota_exceeded`, [`quotas.md`](quotas.md)).
+With a job store, three more groups of checks sit between those: after the
+runtime, the spec must be launchable as given — `metadata` at most 16 pairs
+(`invalid_metadata`), `spec.image` and `spec.command` present
+(`missing_image`, `missing_command`), env names valid and not starting
+`UNIFY_COMPUTE_` (`invalid_env`, `reserved_env`), every input an `https://`
+URL (`invalid_input_source`), mounts absolute (`invalid_mount`), and
+`spec.outputs` only where artifact storage is configured
+(`501 outputs_unsupported`); after the providers, a SkyPilot API server to
+launch on (`503 upstream_unavailable`); and an `Idempotency-Key` of at most
+255 characters (`invalid_idempotency_key`). The dark build skips those and
+answers what passes `501`.
 
-Flow (*planned*): verify key → price estimate = `max_runtime_seconds × sku rate`
-→ `hold` on the console for `sku rate × min(max_runtime_seconds, 7200)`
-([`metering.md`](metering.md) H1) → persist job `queued` → hand to SkyPilot.
-If the hold is refused the job is never persisted and `402` is returned with
-the hold amount and the estimate in `error.message`.
+Flow (implemented): verify key → in one transaction under a per-owner lock,
+quota, then `hold` on the console for `sku rate × min(max_runtime_seconds,
+7200)` ([`metering.md`](metering.md) H1), then persist the job `queued` with
+its `job.queued` event → hand to SkyPilot. An over-quota submit never reaches
+the console. If the hold is refused the job is never persisted and
+`402 insufficient_balance` is returned with the hold amount and the job's
+full ceiling (`max_runtime_seconds × rate`) in `error.message`; a console
+that cannot answer is `503 console_unavailable`, also with nothing persisted.
+A failure after the hold was placed releases it.
 
-Returns `201` with the Job.
+Returns `201` with the Job, reading `provisioning` once the launch is handed
+to SkyPilot. An idempotent replay returns `200` with the original job and
+places, persists and launches nothing.
 
 ### `GET /compute/v1/jobs/{id}`
 
-Returns the Job. `404` if it does not belong to the calling key's user.
+Returns the Job. `404` if it does not belong to the calling key's owner.
+`usage` is read from the metering ledger: `gpu_seconds` metered so far,
+`settled_cost_usd` what the console has confirmed, `hold_usd` the live hold
+(`0.0000` once released) and `estimated_cost_usd` the ceiling
+`max_runtime_seconds × rate` at the rate snapshotted at submit.
 
 ### `GET /compute/v1/jobs?status=running&limit=20&after=job_…`
 
-Cursor list, newest first. `status` filter optional, repeatable.
+Cursor list, newest first, owner-scoped. `status` filter optional,
+repeatable (`invalid_status`); `limit` 1 to 100, default 20
+(`invalid_limit`); `after` must be one of the owner's job ids
+(`invalid_cursor`). `next` is present only with `has_more`.
 
 ```json
 { "object": "list", "data": [ … ], "has_more": true, "next": "job_…" }
@@ -217,15 +258,22 @@ Cursor list, newest first. `status` filter optional, repeatable.
 
 ### `POST /compute/v1/jobs/{id}/cancel`
 
-Requests termination. Returns `202` with the Job (`status` may still read
-`running` until SkyPilot confirms). `409` on a terminal job. GPU metering
-stops when the cancel is accepted, not when the instance is confirmed down; the
-customer is charged for seconds run, not for the cancel latency.
+Requests termination. Returns `202` with the Job, which normally already
+reads `cancelled`; teardown continues afterwards. `409 job_terminal` on a
+job that has already ended. GPU metering stops when the cancel is accepted,
+not when the instance is confirmed down; the customer is charged for seconds
+run, not for the cancel latency. A job cancelled before it ran has its hold
+released in full. Implemented.
 
 ### `GET /compute/v1/jobs/{id}/logs?since=…&follow=false`
 
-Plain-text stdout/stderr. `follow=true` streams as `text/event-stream`
-(*planned*). Logs are retained 7 days after a terminal state.
+Plain-text stdout/stderr so far (`text/plain; charset=utf-8`), read from the
+job's cluster through the SkyPilot API server; `503 logs_unavailable` when
+that read fails. `since` is not supported yet and is ignored.
+`follow=true` streams as `text/event-stream` (*planned*; answered `501`).
+Logs are retained 7 days after a terminal state (*planned*: nothing keeps
+them after teardown yet, so a finished or not-yet-launched job has an empty
+body; `backend.md` open question 4).
 
 ### `GET /compute/v1/jobs/{id}/artifacts`
 
@@ -272,7 +320,7 @@ upload token rather than a customer key:
 per file) and `…/complete` (writes the manifest). Both refuse a terminal job
 with `409`. They are not part of the customer contract.
 
-## Metering and settlement (*planned*)
+## Metering and settlement (GPU implemented; storage and egress *planned*)
 
 The full rules — three meters, the billable-state table, hold sizing,
 settlement cadence, interruption and retry — are in

@@ -32,7 +32,11 @@ func (s *Server) artifactsReady() bool {
 }
 
 // owner resolves the caller's key, writing the 401/503 itself on failure.
+// A key auth already verified has its owner on the request.
 func (s *Server) owner(w http.ResponseWriter, r *http.Request) (string, bool) {
+	if o := ownerFrom(r.Context()); o != "" {
+		return o, true
+	}
 	key, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	owner, err := s.Owner(r.Context(), strings.TrimSpace(key))
 	switch {

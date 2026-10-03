@@ -88,8 +88,8 @@ account is full.
 ```
 validate body / sku / runtime / providers / upstream     (400, 503)
 → quota: owner's usage + this job ≤ every limit           (403 quota_exceeded)
-→ hold on the console                                     (402)          planned
-→ persist job queued                                                      planned
+→ hold on the console                                     (402)
+→ persist job queued
 ```
 
 ### Refusal
@@ -204,8 +204,8 @@ second). Over budget is `429`, `type`/`code` `rate_limited`, with
 | `config/quotas.json`, parsed and validated at boot | Built; a bad file stops the process |
 | Decision (`quota.Evaluate`), every violation with headroom | Built, tested |
 | Race-free admission (`store.CreateAdmitted` + `quota.Enforcer.Admit`) | Built, tested against Postgres, including concurrent submits for one slot |
-| Submit handler runs the check before its `501` | Built, **but not enabled**: `Server.Quota` is nil in the binary, because enforcement needs the owner and the binary has neither `verify` wired into auth nor a database opened. Until both land, no submit is quota-checked in a deployment. |
-| Handler uses `CreateAdmitted` with the hold inside the admission | Planned, with the backend (C4) and the console hold. Today the handler runs `Enforcer.Check`, a lock-free preflight, since nothing is persisted |
+| Submit is quota-checked in a deployment | Built and enabled wherever the binary has a job store (`DATABASE_URL`): the owner comes from `verify` |
+| Handler uses `CreateAdmitted` with the hold inside the admission | Built (`internal/jobs`): quota, then the console hold, then the insert, in one transaction under the owner's lock. The dark build keeps the lock-free `Enforcer.Check` before its `501`, as nothing is persisted there |
 | Per-key rate limits | Built and enabled on every authenticated route except cancel |
 | `GET /compute/v1/quotas` (limits + usage for the caller) | Not built; see open questions |
 
