@@ -93,7 +93,7 @@ func TestHostAndOriginChecks(t *testing.T) {
 		}
 	})
 	t.Run("unknown path is a JSON 404", func(t *testing.T) {
-		wantErr(t, f.do(req{method: http.MethodGet, path: "/keys"}), 404, "not_found", "not_found")
+		wantErr(t, f.do(req{method: http.MethodGet, path: "/no-such-route"}), 404, "not_found", "not_found")
 	})
 	for _, o := range []struct {
 		name   string

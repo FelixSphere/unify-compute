@@ -3,7 +3,7 @@
   "info": {
     "title": "Unify Compute dashboard API",
     "version": "v1-draft",
-    "description": "The /dashboard/v1 routes the dashboard pages call (ADR-0011, docs/spec/accounts.md). Served by compute-api only with ACCOUNTS_BACKEND=local and only on the app host (Host = APP_ORIGIN's host, else 404); with the console backend none of it exists. Not part of the job API contract (compute-api/internal/api/openapi.json): no API key is accepted here and no cookie there. Every non-GET needs Origin = APP_ORIGIN; session routes need the __Host-uc_session cookie and, for non-GET, X-CSRF-Token. compute-api/internal/dashboard tests hold this document's operations against the registered routes. Keys, balance, jobs and top-ups (A5, A7c, B1) are not here yet.",
+    "description": "The /dashboard/v1 routes the dashboard pages call (ADR-0011, docs/spec/accounts.md). Served by compute-api only with ACCOUNTS_BACKEND=local and only on the app host (Host = APP_ORIGIN's host, else 404); with the console backend none of it exists. Not part of the job API contract (compute-api/internal/api/openapi.json): no API key is accepted here and no cookie there. Every non-GET needs Origin = APP_ORIGIN; session routes need the __Host-uc_session cookie and, for non-GET, X-CSRF-Token. compute-api/internal/dashboard tests hold this document's operations against the registered routes. Balance, jobs and top-ups (A7c, B1) are not here yet.",
     "license": {
       "name": "Proprietary",
       "identifier": "LicenseRef-Proprietary"
@@ -988,6 +988,229 @@
           }
         }
       }
+    },
+    "/dashboard/v1/keys": {
+      "get": {
+        "operationId": "listKeys",
+        "summary": "List the account's API keys",
+        "description": "Every key of the account, revoked and expired ones included, newest first. A bare JSON array.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The keys.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Key"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: Host is not the app host. The whole prefix is 404 on any other host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createKey",
+        "summary": "Create an API key",
+        "description": "Needs the password entered in this session within the last 10 minutes (login, verify, POST /reauth or POST /password); otherwise 401 reauth_required, checked before the body. The response carries the secret, which is never returned again. The account's address gets the \"A new Unify Compute API key was created\" email, and a key_created audit event is written. At most 10 active (neither revoked nor expired) keys per account; at most 20 creations per account per hour.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "scopes"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "1 to 64 characters after trimming; no control characters, Unicode format characters or angle brackets."
+                  },
+                  "scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "jobs",
+                        "read"
+                      ]
+                    },
+                    "minItems": 1
+                  },
+                  "expires_at": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Unix seconds in the future; absent or null never expires."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedKey"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "malformed_body; invalid_name (param name); invalid_scope (param scopes): empty or unknown; invalid_expires_at (param expires_at): not in the future.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "reauth_required: the password was last entered more than 10 minutes ago; or session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "csrf_failed; account_suspended (authentication_error): a suspended account cannot create keys; key_limit_reached (permission_error): 10 active keys already.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: Host is not the app host. The whole prefix is 404 on any other host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: a throttle refused the attempt. Always with Retry-After (seconds).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/keys/{id}": {
+      "delete": {
+        "operationId": "revokeKey",
+        "summary": "Revoke an API key",
+        "description": "Effective on the job API's next request: keys are looked up on every request, never cached. Revoking a key that is already revoked is 204 and changes nothing. Writes a key_revoked audit event. No reauth needed.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked."
+          },
+          "401": {
+            "description": "session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "csrf_failed: Origin is not APP_ORIGIN (every non-GET), or X-CSRF-Token does not match the session (session routes).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no key with this id in this account (another account's key is indistinguishable from a missing one), or Host is not the app host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1084,6 +1307,93 @@
         "required": [
           "error"
         ]
+      },
+      "Key": {
+        "type": "object",
+        "description": "An API key's metadata. The secret is never part of it.",
+        "required": [
+          "id",
+          "name",
+          "display",
+          "scopes",
+          "created_at",
+          "expires_at",
+          "last_used_at",
+          "revoked_at"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "The key id; DELETE /keys/{id} takes it, and jobs record it as the key that submitted them."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "display": {
+            "type": "string",
+            "pattern": "^uck_[0-9A-Za-z]{8}$",
+            "description": "`uck_` and the first 8 characters of the secret, to recognise the key by."
+          },
+          "scopes": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "enum": [
+                "jobs",
+                "read"
+              ]
+            },
+            "description": "`jobs`: submit, cancel and read jobs, events, logs and artifacts. `read`: read only. Always in the order jobs, read."
+          },
+          "created_at": {
+            "type": "integer",
+            "description": "Unix seconds."
+          },
+          "expires_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Unix seconds; null never expires."
+          },
+          "last_used_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Unix seconds of the last job API request, to within a minute; null if never used."
+          },
+          "revoked_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Unix seconds; null while not revoked."
+          }
+        }
+      },
+      "CreatedKey": {
+        "description": "The key just created, with its secret. This is the only response that ever carries the secret.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Key"
+          }
+        ],
+        "type": "object",
+        "required": [
+          "secret"
+        ],
+        "properties": {
+          "secret": {
+            "type": "string",
+            "pattern": "^uck_[0-9A-Za-z]{40}$",
+            "description": "The whole key, for `Authorization: Bearer` on the job API. Shown once; only its SHA-256 is stored."
+          }
+        }
       }
     }
   }

@@ -8,10 +8,11 @@
   the mailer (A2), the public and session auth routes of the dashboard API
   (`internal/dashboard`, A4), and `balance_entries`, the local biller
   (`internal/billing`, migration `0006_billing.sql`) and the admin CLI's
-  `account`, `balance` and `audit` verbs (A6). All of it is behind
-  `ACCOUNTS_BACKEND=local`, which no environment sets. Keys and top-ups do
-  not exist yet; `ACCOUNTS_BACKEND=local` therefore leaves keyed job routes
-  answering `503 console_unavailable` until A5.
+  `account`, `balance` and `audit` verbs (A6), and API keys (A5: migration
+  `0007_api_keys.sql`, the dashboard's `/keys` routes, and the job API's
+  `uck_` verifier with scopes). All of it is behind `ACCOUNTS_BACKEND=local`,
+  which no environment sets. Top-ups, `GET /compute/v1/balance` and the rest
+  of the dashboard's session routes beyond `/keys` do not exist yet.
 - Task breakdown: [`plan-own-accounts.md`](../plan-own-accounts.md).
 - Depends on: [`job-api.md`](job-api.md) (error envelope, job routes),
   [`metering.md`](metering.md) (holds H1–H7, settlement R1–R6, the quota unit),
@@ -316,7 +317,9 @@ named by `param`, or in the form-level box when `param` is absent
 | 400 | `invalid_request` | `bot_check_failed` | The honeypot field (`website`) filled. While Turnstile is off (ADR-0011 D5) that is the only cause; with Turnstile, also a missing, invalid, expired or reused token |
 | 400 | `invalid_request` | `invalid_code` | Verification code wrong, expired, exhausted or superseded (one code for all four) |
 | 400 | `invalid_request` | `invalid_token` | Reset link invalid, used or expired |
+| 400 | `invalid_request` | `invalid_name` | Key name empty after trimming, over 64 characters, or containing a control character, a Unicode format character (bidi override, zero-width) or `<` `>` |
 | 400 | `invalid_request` | `invalid_scope` | Key scopes empty or unknown |
+| 400 | `invalid_request` | `invalid_expires_at` | Key `expires_at` (Unix seconds) not in the future |
 | 400 | `invalid_request` | `invalid_amount` | Top-up not a whole-cent USD amount |
 | 401 | `authentication_error` | `invalid_credentials` | Login: unknown email or wrong password (indistinguishable) |
 | 401 | `authentication_error` | `session_required` | Dashboard route without a valid session |
@@ -364,6 +367,7 @@ resend, login and forgot-password. Throttles, as built:
 | Resend per address | 1 / min and 5 / h | every accepted request, unknown addresses included |
 | Resend per IP | 20 / h | every request |
 | Forgot per IP, per address | 5 / h each | every request, unknown addresses included |
+| Key creation per account | 20 / h | every well-formed request after reauth, refusals for the key limit included: each creation sends an email |
 
 The client IP is the **last** `X-Forwarded-For` entry (the ALB appends it),
 never the first. Resend and forgot-password look the address up and send
@@ -391,9 +395,9 @@ after the response, so neither the status nor the time depends on it.
 | `POST /reauth` | `{ password }` | `204`; sets `reauth_at` |
 | `GET /balance` | — | `{ available_usd, held_usd, limits: { topup_min_usd, topup_max_usd, balance_max_usd, topups_per_day } }` |
 | `GET /transactions?after=&limit=` | — | Cursor list of balance entries, newest first: `{ id, kind, amount_usd, available_after_usd, ref, created_at, detail }` |
-| `GET /keys` | — | `[{ id, name, display, scopes, created_at, expires_at, last_used_at, revoked_at }]` |
-| `POST /keys` | `{ name, scopes, expires_at? }` | `201 { …key, secret: "uck_…" }`; the secret is never returned again. Needs reauth after 10 min |
-| `DELETE /keys/{id}` | — | `204` |
+| `GET /keys` | — | `[{ id, name, display, scopes, created_at, expires_at, last_used_at, revoked_at }]`, a bare array, newest first, revoked and expired keys included. Built (A5) |
+| `POST /keys` | `{ name, scopes, expires_at? }` | `201 { …key, secret: "uck_…" }`; the secret is never returned again. Needs reauth after 10 min (`401 reauth_required`, checked before the body). Emails "key created". Built (A5) |
+| `DELETE /keys/{id}` | — | `204`, also for a key already revoked; another account's key is `404 not_found`. Built (A5) |
 | `GET /jobs?status=&after=&limit=` | — | The job API's list, owner-scoped to the account |
 | `GET /jobs/{id}` | — | The Job object (`job-api.md`) |
 | `GET /jobs/{id}/events`, `GET /jobs/{id}/logs` | — | As the job API |

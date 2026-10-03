@@ -3,7 +3,7 @@
   "info": {
     "title": "UnifyAI Compute API",
     "version": "v1-draft",
-    "description": "Customer-facing contract for the compute job API, mirroring docs/spec/job-api.md. A build with a job store (`DATABASE_URL` set) verifies every key through the Unify API console bridge and runs jobs: submit holds balance, persists the job and launches it on SkyPilot; get, list, cancel, logs, events and artifacts serve it. A build without one (the dark build) checks only the key's shape and answers every authenticated job route with `501 not_implemented` after validation. Responses marked *Planned* are not returned by any build yet.",
+    "description": "Customer-facing contract for the compute job API, mirroring docs/spec/job-api.md. A build with a job store (`DATABASE_URL` set) authenticates every key and runs jobs: submit holds balance, persists the job and launches it on SkyPilot; get, list, cancel, logs, events and artifacts serve it. Which keys it accepts depends on `ACCOUNTS_BACKEND` (docs/spec/accounts.md): `console`, today's production, verifies Unify API `sk-` keys through the console bridge and holds the Unify API balance; `local` accepts only Unify Compute's own `uck_` keys and holds compute's own prepaid balance. A build without one (the dark build) checks only the key's shape and answers every authenticated job route with `501 not_implemented` after validation. Responses marked *Planned* are not returned by any build yet.",
     "license": {
       "name": "Proprietary",
       "identifier": "LicenseRef-Proprietary"
@@ -242,7 +242,7 @@
             }
           },
           "403": {
-            "description": "`quota_exceeded`: the submit would exceed an account quota (docs/spec/quotas.md); refused whole, never a partial grant, `error.quotas` lists each limit with its headroom, no `Retry-After`. Checked after every request error, before the hold, on the resolved SKU. Or `authentication_error`/`account_disabled` or `account_suspended`: the key is valid but its account may not spend.",
+            "description": "`quota_exceeded`: the submit would exceed an account quota (docs/spec/quotas.md); refused whole, never a partial grant, `error.quotas` lists each limit with its headroom, no `Retry-After`. Checked after every request error, before the hold, on the resolved SKU. Or `authentication_error`/`account_disabled` or `account_suspended`: the key is valid but its account may not spend. With `ACCOUNTS_BACKEND=local`, before any request check: `permission_error`/`scope_denied`, the key has the `read` scope only; and after the request checks, before quota and the hold: `authentication_error`/`account_suspended` (the account is suspended or closed) or `permission_error`/`compute_not_enabled` (job submission has not been turned on for the account yet; an operator does that by hand while the platform starts small).",
             "content": {
               "application/json": {
                 "schema": {
@@ -588,6 +588,16 @@
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "description": "`internal_error`: with `ACCOUNTS_BACKEND=local`, the key could not be looked up.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           },
           "501": {
             "$ref": "#/components/responses/NotImplemented"
@@ -970,8 +980,8 @@
       "bearerAuth": {
         "type": "http",
         "scheme": "bearer",
-        "bearerFormat": "sk-...",
-        "description": "The customer's existing Unify API key, the same one that calls api.unifyapi.ai/v1. A key not shaped like one (prefix `sk-`, at least 8 characters) is `401 missing_key`. Otherwise it is verified through the console bridge and the answer is cached for at most 60 seconds, so a revoked key stops working within a minute: unknown, disabled or expired is `401 invalid_key`, a disabled account or suspended organisation `403`, and a console that cannot answer `503 console_unavailable`. The dark build checks only the shape."
+        "bearerFormat": "sk-... or uck_...",
+        "description": "With `ACCOUNTS_BACKEND=console` (and in the dark build): the customer's existing Unify API key, the same one that calls api.unifyapi.ai/v1. A key not shaped like one (prefix `sk-`, at least 8 characters) is `401 missing_key`, and a Unify Compute `uck_` key is `401 invalid_key` without a console call. Otherwise it is verified through the console bridge and the answer is cached for at most 60 seconds, so a revoked key stops working within a minute: unknown, disabled or expired is `401 invalid_key`, a disabled account or suspended organisation `403`, and a console that cannot answer `503 console_unavailable`. The dark build checks only the shape.\n\nWith `ACCOUNTS_BACKEND=local`: a Unify Compute API key, `uck_` followed by 40 characters from `[0-9A-Za-z]`, created on the dashboard. Any other shape, `sk-` keys included, is `401 missing_key` without a database read. The key is looked up on every request, with no cache: unknown, revoked or expired is `401 invalid_key` on the very next request. A key's scopes decide what it may do: `read` only GETs; `jobs` also submits and cancels, and a `read`-only key on either is `403 permission_error`/`scope_denied`. The owner of everything the key reaches is `account:<id>`, and the per-key rate limits count per key."
       },
       "uploadToken": {
         "type": "http",
@@ -1003,7 +1013,7 @@
     },
     "responses": {
       "Unauthorized": {
-        "description": "Missing or malformed key (`missing_key`), or a key the console does not accept: unknown, disabled or expired (`invalid_key`). `error.type` is `authentication_error`.",
+        "description": "Missing or malformed key (`missing_key`), or a key that is not accepted: unknown, disabled, revoked or expired (`invalid_key`). `error.type` is `authentication_error`.",
         "headers": {
           "WWW-Authenticate": {
             "schema": {
@@ -1117,7 +1127,7 @@
         }
       },
       "AccountRefused": {
-        "description": "The key is valid but its account may not spend: `authentication_error`/`account_disabled` (the user is disabled) or `authentication_error`/`account_suspended` (the organisation is suspended).",
+        "description": "With the console bridge, the key is valid but its account may not spend: `authentication_error`/`account_disabled` (the user is disabled) or `authentication_error`/`account_suspended` (the organisation is suspended). With `ACCOUNTS_BACKEND=local`, on a non-GET route: `permission_error`/`scope_denied`, the key has the `read` scope only.",
         "content": {
           "application/json": {
             "schema": {
@@ -1188,6 +1198,10 @@
             "account_disabled",
             "account_suspended"
           ],
+          "permission_error": [
+            "scope_denied",
+            "compute_not_enabled"
+          ],
           "insufficient_balance": [
             "insufficient_balance"
           ],
@@ -1225,6 +1239,7 @@
             "enum": [
               "invalid_request",
               "authentication_error",
+              "permission_error",
               "insufficient_balance",
               "quota_exceeded",
               "not_found",

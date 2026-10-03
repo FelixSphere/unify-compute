@@ -2,7 +2,8 @@
 // shapes are the v1 contract. A Server without JobService and Verifier is the
 // dark build: keys are checked for shape only and every job route answers
 // not_implemented after validation. With both, keys are verified through the
-// console bridge and jobs run (internal/jobs).
+// console bridge and jobs run (internal/jobs). With Keys instead of Verifier
+// (ACCOUNTS_BACKEND=local), only compute's own uck_ keys are accepted.
 package api
 
 import (
@@ -20,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/FelixSphere/unify-compute/compute-api/internal/accounts"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/backend"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/console"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/events"
@@ -64,6 +66,9 @@ type Server struct {
 	// both or neither.
 	Verifier   *Verifier
 	JobService *jobs.Service
+	// Keys, when set (ACCOUNTS_BACKEND=local), replaces Verifier: only
+	// compute's own uck_ keys are accepted, and sk- keys are missing_key.
+	Keys KeyVerifier
 	// Now times cancel acceptance; nil is time.Now.
 	Now func() time.Time
 
@@ -459,23 +464,39 @@ type ctxKey int
 
 const (
 	ownerKey ctxKey = iota
-	identityKey
+	callerKey
 )
+
+// caller is what auth learned about the key: the owner string jobs and
+// quotas key on, the billing entity and key id a hold is placed against, and
+// what the per-key rate limits count on.
+type caller struct {
+	owner string
+	// billingID is the console user under the bridge, the account id with
+	// ACCOUNTS_BACKEND=local.
+	billingID int
+	tokenID   int
+	// rateKey, when set, replaces the raw key as the rate-limit bucket.
+	rateKey string
+}
 
 // withOwner records the billing identity the caller's key resolved to.
 func withOwner(ctx context.Context, owner string) context.Context {
 	return context.WithValue(ctx, ownerKey, owner)
 }
 
-// withIdentity records what verify said about the caller's key, and its
-// owner.
-func withIdentity(ctx context.Context, id console.Identity) context.Context {
-	return withOwner(context.WithValue(ctx, identityKey, id), id.Owner())
+func withCaller(ctx context.Context, c caller) context.Context {
+	return withOwner(context.WithValue(ctx, callerKey, c), c.owner)
 }
 
-func identityFrom(ctx context.Context) (console.Identity, bool) {
-	id, ok := ctx.Value(identityKey).(console.Identity)
-	return id, ok
+// withIdentity records what the console bridge's verify said about the key.
+func withIdentity(ctx context.Context, id console.Identity) context.Context {
+	return withCaller(ctx, caller{owner: id.Owner(), billingID: id.UserID, tokenID: id.TokenID})
+}
+
+func callerFrom(ctx context.Context) (caller, bool) {
+	c, ok := ctx.Value(callerKey).(caller)
+	return c, ok
 }
 
 func ownerFrom(ctx context.Context) string {
@@ -488,6 +509,9 @@ func ownerFrom(ctx context.Context) string {
 func (s *Server) limit(l *ratelimit.Limiter, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key, _ := bearer(r)
+		if c, ok := callerFrom(r.Context()); ok && c.rateKey != "" {
+			key = c.rateKey
+		}
 		if ok, wait := l.Allow(key); !ok {
 			secs := int64((wait + time.Second - 1) / time.Second)
 			w.Header().Set("Retry-After", strconv.FormatInt(max(secs, 1), 10))
@@ -504,13 +528,26 @@ func bearer(r *http.Request) (string, bool) {
 	return strings.TrimSpace(key), ok
 }
 
-// auth refuses a key that is not shaped like one with 401. With a Verifier
-// it then verifies the key through the console bridge (cached, VerifyTTL)
-// and records the caller's identity for the handler; without one, the dark
-// build, the shape is all that is checked.
+// auth refuses a key that is not shaped like one with 401. With Keys
+// (ACCOUNTS_BACKEND=local) only compute's own uck_ keys are accepted
+// (authLocal). Otherwise a uck_ key is refused as invalid without a console
+// call; with a Verifier any other key is verified through the console bridge
+// (cached, VerifyTTL) and the caller's identity recorded for the handler;
+// without one, the dark build, the shape is all that is checked.
 func (s *Server) auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key, ok := bearer(r)
+		if s.Keys != nil {
+			s.authLocal(w, r, key, ok, next)
+			return
+		}
+		if ok && strings.HasPrefix(key, accounts.KeyPrefix) {
+			// A Unify Compute key on a deployment that still authenticates
+			// through Unify API: well-formed for the product, not accepted
+			// here, which is invalid_key rather than missing_key.
+			invalidKey(w, "Unify Compute API keys (uck_) are not accepted by this deployment yet; use your Unify API key (sk-).")
+			return
+		}
 		if !ok || !strings.HasPrefix(key, "sk-") || len(key) < 8 {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="compute"`)
 			writeError(w, http.StatusUnauthorized, apiError{
@@ -530,9 +567,7 @@ func (s *Server) auth(next http.Handler) http.Handler {
 		case err == nil:
 			next.ServeHTTP(w, r.WithContext(withIdentity(r.Context(), id)))
 		case errors.Is(err, ErrKeyRejected):
-			w.Header().Set("WWW-Authenticate", `Bearer realm="compute", error="invalid_token"`)
-			writeError(w, http.StatusUnauthorized, apiError{Type: "authentication_error", Code: "invalid_key",
-				Message: "This Unify API key was not accepted: it is unknown, disabled or expired."})
+			invalidKey(w, "This Unify API key was not accepted: it is unknown, disabled or expired.")
 		case errors.As(err, &refused):
 			// The credential is fine and the account is not, which is a 403,
 			// not a 401 (console-billing-bridge.md, verify).
@@ -546,6 +581,68 @@ func (s *Server) auth(next http.Handler) http.Handler {
 				Message: "The key could not be verified with Unify API right now; retry shortly."})
 		}
 	})
+}
+
+func invalidKey(w http.ResponseWriter, msg string) {
+	w.Header().Set("WWW-Authenticate", `Bearer realm="compute", error="invalid_token"`)
+	writeError(w, http.StatusUnauthorized, apiError{Type: "authentication_error", Code: "invalid_key", Message: msg})
+}
+
+// KeyVerifier resolves compute's own uck_ keys (internal/accounts) under
+// ACCOUNTS_BACKEND=local.
+type KeyVerifier interface {
+	VerifyKey(ctx context.Context, key string) (accounts.VerifiedKey, error)
+}
+
+// authLocal is auth for ACCOUNTS_BACKEND=local (accounts.md, "Job API
+// changes"): the uck_ shape is checked without a database read, then the key
+// is looked up on every request, so a revoked key fails on the next one. A
+// key without the jobs scope may only read; everything that is not a GET
+// needs jobs. The caller is the account, owner account:<id>, and the
+// per-key rate limits count on the key id.
+func (s *Server) authLocal(w http.ResponseWriter, r *http.Request, key string, present bool, next http.Handler) {
+	if !present || !accounts.WellFormedKey(key) {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="compute"`)
+		writeError(w, http.StatusUnauthorized, apiError{Type: "authentication_error", Code: "missing_key",
+			Message: "Provide your Unify Compute API key as 'Authorization: Bearer uck_...'."})
+		return
+	}
+	vk, err := s.Keys.VerifyKey(r.Context(), key)
+	switch {
+	case errors.Is(err, accounts.ErrKeyRejected):
+		invalidKey(w, "This Unify Compute API key was not accepted: it is unknown, revoked or expired.")
+		return
+	case err != nil:
+		s.Log.Error("key lookup", "err", err)
+		writeError(w, http.StatusInternalServerError, apiError{Type: "internal_error", Code: "internal_error",
+			Message: "The key could not be checked right now; retry shortly."})
+		return
+	}
+	if r.Method != http.MethodGet && !vk.Has(accounts.ScopeJobs) {
+		writeError(w, http.StatusForbidden, apiError{Type: "permission_error", Code: "scope_denied",
+			Message: "This API key has the read scope only. Submitting and cancelling jobs need a key with the jobs scope."})
+		return
+	}
+	c := caller{owner: accounts.OwnerFor(vk.AccountID), billingID: int(vk.AccountID), tokenID: int(vk.KeyID),
+		rateKey: "key:" + strconv.FormatInt(vk.KeyID, 10)}
+	next.ServeHTTP(w, r.WithContext(withCaller(r.Context(), c)))
+}
+
+// KeyOwner adapts a KeyVerifier to Server.Owner.
+func KeyOwner(k KeyVerifier) func(ctx context.Context, key string) (string, error) {
+	return func(ctx context.Context, key string) (string, error) {
+		if !accounts.WellFormedKey(key) {
+			return "", ErrKeyRejected
+		}
+		vk, err := k.VerifyKey(ctx, key)
+		if errors.Is(err, accounts.ErrKeyRejected) {
+			return "", ErrKeyRejected
+		}
+		if err != nil {
+			return "", err
+		}
+		return accounts.OwnerFor(vk.AccountID), nil
+	}
 }
 
 func (s *Server) notImplemented(what string) http.Handler {

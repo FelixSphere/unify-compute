@@ -99,14 +99,12 @@ func main() {
 	var bridge *console.Client
 	if backendName == backendLocal {
 		// Holds are local, and so must be the identity they are placed
-		// against: a console user id is not an account id. Until the uck_
-		// key verifier exists (task A5) keyed routes answer 503
-		// console_unavailable, as with CONSOLE_URL unset.
+		// against: a console user id is not an account id. Keys are
+		// compute's own uck_ keys (below); the console is never called.
 		bridge = &console.Client{HTTP: &http.Client{Timeout: 10 * time.Second}, Now: time.Now}
 		if os.Getenv("CONSOLE_URL") != "" {
 			log.Warn("ACCOUNTS_BACKEND=local: CONSOLE_URL is ignored")
 		}
-		log.Warn("ACCOUNTS_BACKEND=local: keyed job routes answer 503 console_unavailable until compute's own keys are wired")
 	} else if url := os.Getenv("CONSOLE_URL"); url != "" {
 		if bridge, err = console.New(url, []byte(os.Getenv("COMPUTE_BRIDGE_SECRET"))); err != nil {
 			log.Error("console bridge", "err", err)
@@ -228,16 +226,23 @@ func main() {
 			cfg.Biller, cfg.Gate = local, local
 		}
 		svc = jobs.New(cfg)
-		verifier := &api.Verifier{Console: bridge, Log: log}
-		handler.Verifier, handler.JobService = verifier, svc
-		handler.Owner, handler.Events, handler.Jobs = verifier.Owner, st, st
+		handler.JobService, handler.Events, handler.Jobs = svc, st, st
+		var acc *accounts.Service
+		if backendName == backendLocal {
+			// Only uck_ keys, looked up on every request; sk- keys are
+			// missing_key and nothing reaches the console.
+			acc = accounts.New(st.Pool(), accounts.Config{ComputeEnabledDefault: os.Getenv("ACCOUNTS_COMPUTE_DEFAULT") == "true"})
+			handler.Keys, handler.Owner = acc, api.KeyOwner(acc)
+		} else {
+			verifier := &api.Verifier{Console: bridge, Log: log}
+			handler.Verifier, handler.Owner = verifier, verifier.Owner
+		}
 		log.Info("job store open", "accounts_backend", backendName, "quotas_enforced", true, "overrides", len(quotas.Owners),
 			"platform_max_active_jobs", platform.MaxActiveJobs, "platform_max_gpus", platform.MaxGPUs,
 			"max_runtime_seconds", platform.MaxRuntimeSeconds)
 		// The same switch mounts /dashboard/v1: with the console backend
 		// none of it is registered.
 		if backendName == backendLocal {
-			acc := accounts.New(st.Pool(), accounts.Config{ComputeEnabledDefault: os.Getenv("ACCOUNTS_COMPUTE_DEFAULT") == "true"})
 			dash, err = dashboard.New(dashboard.Config{Accounts: acc, Mailer: mail, AppOrigin: os.Getenv("APP_ORIGIN"), Log: log})
 			if err != nil {
 				log.Error("dashboard", "err", err)

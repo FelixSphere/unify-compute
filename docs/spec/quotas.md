@@ -28,9 +28,14 @@ whose balance the hold is placed against, so every key of one account shares
 one quota; issuing more keys does not buy more concurrency. Jobs are already
 stored under this owner (`jobs.owner`).
 
+With compute's own accounts (`ACCOUNTS_BACKEND=local`, `accounts.md`) the
+owner is `account:<account_id>`, for every `uck_` key of the account, and
+`quotas.json` overrides may name it.
+
 Rate limits are different: they are **per key**, as `job-api.md` has always
 said, because they protect the service from one runaway client, not the
-account from over-commitment.
+account from over-commitment. With `uck_` keys the bucket is the key id, not
+the raw key.
 
 ## Limits
 
@@ -103,7 +108,7 @@ An override replaces only the fields it names; a tier missing from its
 itself in review. The file is validated at boot and a bad one stops the
 process: unknown fields, unknown tiers, a default without all three tiers,
 negative values, `max_queued_jobs` above `max_active_jobs` (after applying an
-override), an owner that is not `user:<id>` or `tenant:<id>`, or an override
+override), an owner that is not `user:<id>`, `tenant:<id>` or `account:<id>`, or an override
 without a reason.
 
 ## Enforcement at submit
