@@ -19,7 +19,7 @@ first, always.
 |---|---|---|
 | `staging.compute.unifyai.us` | compute-api (`/compute/v1/*`, `/healthz`) | ALB host rule → port 8080 |
 | `site.staging.compute.unifyai.us` | marketing site container (`/healthz`) | ALB host rule → port 8081 |
-| `console.staging.compute.unifyai.us` | staging UnifyAPI console (SPA, `/api`, `/v1`) | ALB host rule → port 3000 |
+| `console.staging.compute.unifyai.us` | staging Unify API console (SPA, `/api`, `/v1`) | ALB host rule → port 3000 |
 
 All three are children of `compute.unifyai.us`, which stays a CNAME to OpenAI
 Sites for the marketing page until the production cutover in ADR-0009. One
