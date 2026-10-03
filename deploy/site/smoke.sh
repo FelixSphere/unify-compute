@@ -61,8 +61,8 @@ grep -q 'This page could not be found' "$tmp/body" \
 check "$css" 200 "Content-Type: text/css" "Cache-Control: public, max-age=31536000, immutable"
 
 check /favicon.ico 200 "Content-Type: image/x-icon" "Cache-Control: public, max-age=3600"
-check /favicon-32-v3.png 200 "Content-Type: image/png" "Cache-Control: public, max-age=3600"
-check /icon-v3.svg 200 "Content-Type: image/svg+xml" "Cache-Control: public, max-age=3600"
+check /favicon-32-v4.png 200 "Content-Type: image/png" "Cache-Control: public, max-age=3600"
+check /icon-v4.svg 200 "Content-Type: image/svg+xml" "Cache-Control: public, max-age=3600"
 check /apple-touch-icon.png 200 "Content-Type: image/png"
 check /manifest-v3.webmanifest 200 "Content-Type: application/manifest+json" "Cache-Control: public, max-age=3600"
 check /og-image-v3.png 200 "Content-Type: image/png" "Cache-Control: public, max-age=3600"

@@ -31,7 +31,7 @@ API_ORIGIN="${API_ORIGIN:-$ORIGIN}"
 API_ORIGIN="${API_ORIGIN%/}"
 EXPECT_BUILD="${EXPECT_BUILD:-}"
 WAIT_SECONDS="${WAIT_SECONDS:-150}"
-ICON_PATH="${ICON_PATH:-/icon-v3.svg}"
+ICON_PATH="${ICON_PATH:-/icon-v4.svg}"
 # The icon must be cacheable, for at least the hour deploy/site/Caddyfile
 # gives hand-versioned files (-v3) and the fixed-name icons: an hour bounds
 # how stale a missed version bump can be. This floor said a day until the
