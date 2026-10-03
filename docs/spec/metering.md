@@ -4,7 +4,8 @@
   the ledger and settlement loop (`internal/ledger`, C5) hold at submit
   (H1, H2), meter from the backend's lifecycle edges, settle every 300 s and
   at terminal (R1–R4), extend (H3), and stop a job the hold can no longer
-  cover (H4, H5), driven by `internal/jobs`. **Not built:** the storage
+  cover (H4, H5), driven by `internal/jobs`, and carry on across a
+  compute-api restart ([Restart](#restart), RS1–RS7). **Not built:** the storage
   sampler, the egress collector, the daily charges (R5) and the expired-hold
   fallback that needs them (R6). Every row in the tables below carries an ID
   (`B…`, `H…`, `R…`) so a test can be named after it.
@@ -257,6 +258,28 @@ A retry changes the job state machine in `job-api.md` (`interrupted` is
 terminal there; a retried job would return to `provisioning`). That is the
 retry task's change to make, not this spec's; B4 and B5 describe the billing
 once it exists.
+
+## Restart
+
+compute-api restarts on every release. GPU metering does not depend on the
+process that started it: `metering_attempts` keeps each attempt's `UP` time
+(`started_at`) and its last observation of `UP` (`up_through`), and
+`usage_events` how far it is metered. A restarted process (the one holding
+the worker lock, [`backend.md`](backend.md#restart)) rebuilds every live
+attempt from them and asks SkyPilot what happened meanwhile.
+
+| ID | Rule |
+|---|---|
+| RS1 | Metering continues from the ledger, never from zero and never twice: the next interval starts at the last metered `to_at`, boundaries stay every 300 s from `UP` (R1), and amounts stay cumulative (R3), so the restart is invisible in the consume log except as a later settle. |
+| RS2 | The downtime is billed only if the cluster was `UP` throughout: SkyPilot reports the same cluster `UP` now (its `launched_at` not after the attempt's `UP`) with the job still running, or the node itself recorded the process exit. Then the first observation after the restart reports `UP` at that moment and metering runs on from the last metered point (B3), or the attempt ends at the node's `end_at` (end rule 1). |
+| RS3 | Otherwise the attempt ends at `up_through`, the last time compute-api saw it `UP` (I3, end rule 4). The time nobody watched is ours. |
+| RS4 | Nothing extended the hold during the downtime. Before the first observation is reported, the hold is extended to usage accrued until now plus 3600 s (H3), in one extend. If that is refused or the console does not answer, the attempt's cap moves back to the latest second at which `hold − accrued ≥ rate × 600` (H4, H5) and the job is stopped from there with `balance_exhausted` or `billing_unavailable`. So a downtime is never billed past the hold, and the final settle fits in it. |
+| RS5 | A settle or extend whose answer was lost when the process died is re-sent with the same `event_id` / `extend_id`, persisted before the call (R3, H3), and the console applies it once. |
+| RS6 | A job never seen `UP` is billed nothing (B1, B2) and is launched only while its hold leaves time to run: at most `expires_at − 24 h − now` (the H6 grace minus a day for settlement), and not at all if that is under `min(300 s, max_runtime_seconds)`. Then it is cancelled with `queue_expired` and its hold released in full (B10). |
+| RS7 | `max_runtime_seconds` still caps billed seconds when the cap passed during the downtime: the attempt ends at exactly `UpAt + max_runtime_seconds` (B16) if it stayed `UP` that long, at `up_through` otherwise. While no process runs, the cluster runs on at our cost (`backend.md` open question 3). |
+
+`internal/jobs/resume_test.go` holds each of these against the real ledger,
+the fake console and the fake SkyPilot across a simulated restart.
 
 ## Cost breakdown on the Job (proposal)
 

@@ -234,7 +234,9 @@ that cannot answer is `503 console_unavailable`, also with nothing persisted.
 A failure after the hold was placed releases it.
 
 Returns `201` with the Job, reading `provisioning` once the launch is handed
-to SkyPilot. An idempotent replay returns `200` with the original job and
+to SkyPilot. A process that does not hold the worker lock (during a rolling
+restart, [`backend.md`](backend.md#restart)) persists the job and returns
+it `queued`; the lock holder launches it within one poll round. An idempotent replay returns `200` with the original job and
 places, persists and launches nothing.
 
 ### `GET /compute/v1/jobs/{id}`
@@ -259,7 +261,10 @@ repeatable (`invalid_status`); `limit` 1 to 100, default 20
 ### `POST /compute/v1/jobs/{id}/cancel`
 
 Requests termination. Returns `202` with the Job, which normally already
-reads `cancelled`; teardown continues afterwards. `409 job_terminal` on a
+reads `cancelled`; teardown continues afterwards. Answered by a process that
+does not hold the worker lock, or for a job whose attempt has not been taken
+up since a restart, the Job still reads its earlier status; the cancel is
+recorded and carried out at the time it was accepted. `409 job_terminal` on a
 job that has already ended. GPU metering stops when the cancel is accepted,
 not when the instance is confirmed down; the customer is charged for seconds
 run, not for the cancel latency. A job cancelled before it ran has its hold
