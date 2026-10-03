@@ -28,6 +28,31 @@ const (
 
 var tiers = map[Tier]bool{TierHyperscaler: true, TierNeocloud: true, TierMarketplace: true}
 
+// Interconnect is how a multi-GPU SKU's GPUs are wired to each other. It
+// decides whether multi-GPU training is fast or merely possible (ADR-0007),
+// so it is a promise about the SKU in the same way Tier is: every provider
+// behind the SKU must deliver it, and placement never trades it for capacity.
+type Interconnect string
+
+const (
+	InterconnectPCIe   Interconnect = "pcie"
+	InterconnectNVLink Interconnect = "nvlink"
+)
+
+var interconnects = map[Interconnect]bool{InterconnectPCIe: true, InterconnectNVLink: true}
+
+// Network is the node-to-node fabric. Multi-node jobs are P3 and nothing in
+// the service reads this yet; it is here so the first multi-node SKU is a
+// catalogue entry rather than a schema change customers can already see.
+type Network string
+
+const (
+	NetworkEthernet   Network = "ethernet"
+	NetworkInfiniBand Network = "infiniband"
+)
+
+var networks = map[Network]bool{NetworkEthernet: true, NetworkInfiniBand: true}
+
 // KnownClouds are the names SkyPilot accepts in a task's `resources.cloud`.
 // A catalogue entry naming anything else would fail at launch, so it fails
 // at boot instead.
@@ -55,20 +80,22 @@ type Provider struct {
 func (p Provider) IsCluster() bool { return clusterClouds[p.Cloud] }
 
 type SKU struct {
-	ID              string     `json:"id"`
-	Object          string     `json:"object"`
-	GPU             string     `json:"gpu"`
-	Accelerator     string     `json:"accelerator"`
-	GPUCount        int        `json:"gpu_count"`
-	GPUMemoryGB     int        `json:"gpu_memory_gb"`
-	VCPUs           int        `json:"vcpus"`
-	MemoryGB        int        `json:"memory_gb"`
-	PriceUSDPerHour string     `json:"price_usd_per_hour"`
-	Tier            Tier       `json:"tier"`
-	Interruptible   bool       `json:"interruptible"`
-	Regions         []string   `json:"regions"`
-	Providers       []Provider `json:"providers"`
-	Available       bool       `json:"available"`
+	ID              string       `json:"id"`
+	Object          string       `json:"object"`
+	GPU             string       `json:"gpu"`
+	Accelerator     string       `json:"accelerator"`
+	GPUCount        int          `json:"gpu_count"`
+	GPUMemoryGB     int          `json:"gpu_memory_gb"`
+	VCPUs           int          `json:"vcpus"`
+	MemoryGB        int          `json:"memory_gb"`
+	PriceUSDPerHour string       `json:"price_usd_per_hour"`
+	Tier            Tier         `json:"tier"`
+	Interconnect    Interconnect `json:"interconnect,omitempty"`
+	Network         Network      `json:"network,omitempty"`
+	Interruptible   bool         `json:"interruptible"`
+	Regions         []string     `json:"regions"`
+	Providers       []Provider   `json:"providers"`
+	Available       bool         `json:"available"`
 }
 
 type Catalogue struct {
@@ -120,6 +147,9 @@ func (s *SKU) validatePlacement() error {
 	if s.Tier != "" && !tiers[s.Tier] {
 		return fmt.Errorf("unknown tier %q", s.Tier)
 	}
+	if err := s.validateTopology(); err != nil {
+		return err
+	}
 	if s.Available {
 		switch {
 		case s.Tier == "":
@@ -155,6 +185,26 @@ func (s *SKU) validatePlacement() error {
 			s.Regions = append(s.Regions, r)
 		}
 		sort.Strings(s.Regions)
+	}
+	return nil
+}
+
+// validateTopology rejects a catalogue that says nothing, or something
+// meaningless, about how a multi-GPU SKU is wired. An 8-GPU box on PCIe and
+// one on NVSwitch differ by an order of magnitude on the same accelerator and
+// the same price line; silence there is the ambiguity customers pay for.
+func (s *SKU) validateTopology() error {
+	if s.Interconnect != "" && !interconnects[s.Interconnect] {
+		return fmt.Errorf("unknown interconnect %q", s.Interconnect)
+	}
+	if s.Network != "" && !networks[s.Network] {
+		return fmt.Errorf("unknown network %q", s.Network)
+	}
+	if s.Interconnect != "" && s.GPUCount <= 1 {
+		return fmt.Errorf("interconnect %q needs gpu_count > 1; it describes GPU-to-GPU wiring", s.Interconnect)
+	}
+	if s.Available && s.GPUCount > 1 && s.Interconnect == "" {
+		return errors.New("available multi-GPU sku has no interconnect")
 	}
 	return nil
 }

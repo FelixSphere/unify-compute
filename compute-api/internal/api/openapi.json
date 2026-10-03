@@ -1393,6 +1393,22 @@
               }
             ]
           },
+          "interconnect": {
+            "type": "string",
+            "enum": [
+              "pcie",
+              "nvlink"
+            ],
+            "description": "How the SKU's GPUs are wired to each other. Required on an `available` SKU with `gpu_count` > 1; absent on single-GPU SKUs, where it has no meaning. Like `tier`, it is a promise every provider behind the SKU keeps."
+          },
+          "network": {
+            "type": "string",
+            "enum": [
+              "ethernet",
+              "infiniband"
+            ],
+            "description": "Node-to-node fabric. Informational: multi-node jobs are not sold, and nothing in the service reads this yet."
+          },
           "interruptible": {
             "type": "boolean",
             "description": "Runs on spot capacity and may end `interrupted`."
