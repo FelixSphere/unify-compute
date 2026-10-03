@@ -25,6 +25,15 @@ services:
   skypilot:
     image: berkeleyskypilot/skypilot:0.13.0@sha256:3bc8bf8f4d83023bae2260b15d01f7581fa2c3e225b75983d92c7f781252662d
     restart: unless-stopped
+    # The staging host's base compose file was written by user-data at first
+    # boot, when main still carried a placeholder `skypilot` service with
+    # `profiles: ["skypilot"]` and a 127.0.0.1 host port. Compose merges
+    # overlays onto that file, so without these resets the merged service
+    # keeps the profile, `compose up` skips it, and skypilot-host-setup.sh
+    # times out waiting for a container that was never started. Harmless on
+    # a host whose base file has no such service.
+    profiles: !reset []
+    ports: !reset []
     # Local mode, not --deploy: --deploy sizes its worker pool from the whole
     # machine on the assumption that the machine is its own. This one is
     # shared with Postgres and the console. Below 2 GB (the limit set here)
