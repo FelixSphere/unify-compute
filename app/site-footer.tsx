@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { BrandLockup, CompanyLine } from './brand';
-import { CONSOLE_LOGIN, CONSOLE_REGISTER } from './links';
+import { AccountLink } from './account-link';
+import { LOG_IN_URL, SIGN_UP_URL } from './links';
 
 export function SiteFooter({ homeHref = '/', current }: { homeHref?: string; current?: '/start' | '/privacy' }) {
   const here = (href: string) => (current === href ? 'page' : undefined);
@@ -14,8 +15,8 @@ export function SiteFooter({ homeHref = '/', current }: { homeHref?: string; cur
         <Link href="/start" aria-current={here('/start')}>
           Quick start
         </Link>
-        <a href={CONSOLE_LOGIN}>Log in</a>
-        <a href={CONSOLE_REGISTER}>Sign up</a>
+        <AccountLink href={LOG_IN_URL}>Log in</AccountLink>
+        <AccountLink href={SIGN_UP_URL}>Sign up</AccountLink>
         <Link href="/privacy" aria-current={here('/privacy')}>
           Privacy
         </Link>

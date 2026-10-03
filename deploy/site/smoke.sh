@@ -58,21 +58,27 @@ grep -q '<title>Get started — Unify Compute</title>' "$tmp/body" \
   || { echo "FAIL /start: title missing"; fail=1; }
 check /start/ 308 "Location: /start"
 
-# Compute has no accounts of its own (ADR-0001): every page's header sends
-# visitors to the Unify API console, and links the quick start.
+# Log in / Sign up point at placeholders until Compute's own account pages
+# exist (app/links.ts): the early-access section of /start. They must not
+# point at the Unify API console, whose accounts Compute no longer uses.
 links_ok=1
 for page in / /start /privacy; do
   curl -s "$base$page" > "$tmp/links"
-  for href in 'https://app.unifyapi.ai/login' 'https://app.unifyapi.ai/register' '/start'; do
+  for href in '/start#early-access' '/start'; do
     grep -q "href=\"$href\"" "$tmp/links" \
       || { echo "FAIL $page: no link to $href"; fail=1; links_ok=0; }
   done
+  if grep -q 'app\.unifyapi\.ai' "$tmp/links"; then
+    echo "FAIL $page: links to the Unify API console"; fail=1; links_ok=0
+  fi
 done
 curl -s "$base/start" > "$tmp/links"
-for href in 'https://app.unifyapi.ai/console/token' 'https://api.compute.unifyai.us/compute/v1/openapi.json'; do
-  grep -q "href=\"$href\"" "$tmp/links" \
+for href in 'mailto:contactus@felixsphere.com?subject=Unify%20Compute%20early%20access' 'https://api.compute.unifyai.us/compute/v1/openapi.json'; do
+  grep -qF "href=\"$href\"" "$tmp/links" \
     || { echo "FAIL /start: no link to $href"; fail=1; links_ok=0; }
 done
+grep -q 'id="early-access"' "$tmp/links" \
+  || { echo "FAIL /start: no #early-access section for the placeholder links"; fail=1; links_ok=0; }
 [ "$links_ok" = 1 ] && echo "ok   sign-up, log-in and quick-start links"
 
 check /does-not-exist 404 "Content-Type: text/html" "Cache-Control: no-cache" "${common[@]}"

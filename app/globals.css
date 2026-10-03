@@ -214,13 +214,13 @@ footer > .copyright { width: 100%; font-size: var(--u-text-xs); padding-bottom: 
 /* /start: the post-sign-up guide. */
 .guide { max-width: 760px; padding-block: 72px 96px; color: var(--u-text-2); line-height: 1.75; }
 .guide h1 { font-size: var(--u-h1); line-height: 1.15; letter-spacing: -1px; color: var(--u-text); margin: 0 0 16px; }
-.guide-lead { font-size: var(--u-text-lg); line-height: 1.5; color: var(--u-text); margin: 0 0 32px; }
+.guide-lead { font-size: var(--u-text-lg); line-height: 1.5; color: var(--u-text); margin: 0 0 48px; }
 .guide a { color: var(--u-text); text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }
 .guide a:hover { text-decoration-thickness: 2px; }
 .guide p { margin: 0 0 16px; }
 .guide p code { font: 13px var(--u-font-mono); background: var(--u-accent-tint); color: var(--u-badge-fg); padding: 2px 4px; border-radius: var(--u-radius); }
 .badge { display: inline-block; font: 500 11px var(--u-font-mono); letter-spacing: 1px; text-transform: uppercase; background: var(--u-badge-bg); color: var(--u-badge-fg); padding: 4px 8px; border-radius: var(--u-radius); }
-.early-access { background: var(--u-surface); border: var(--u-rule); border-radius: var(--u-radius); padding: 22px 24px; margin-bottom: 48px; }
+.early-access { background: var(--u-surface); border: var(--u-rule); border-radius: var(--u-radius); padding: 22px 24px; margin-bottom: 20px; }
 .early-access .badge { margin-bottom: 12px; }
 .early-access p { margin: 0; font-size: var(--u-text-sm); }
 .guide-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 48px; }

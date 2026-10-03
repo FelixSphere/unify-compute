@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { BrandLockup } from './brand';
-import { CONSOLE_REGISTER } from './links';
+import { AccountLink } from './account-link';
+import { SIGN_UP_URL } from './links';
 import { SiteFooter } from './site-footer';
 import { SiteHeader } from './site-header';
 import { ArrowUpRight, ArrowRight, Layers3, ScanText, SlidersHorizontal, Binary, Zap } from 'lucide-react';
@@ -24,7 +25,7 @@ export default function Home() {
           <h1>Big workloads.<br/>Zero reservations.</h1>
           <p className="hero-description">On-demand inference and GPU compute for everything beyond chat.</p>
           <p className="hero-detail">Batch processing. Embeddings. Document pipelines. Fine-tuning. Built around the work you run, with consumption-based billing.</p>
-          <div className="hero-actions"><a className="button primary" href={CONSOLE_REGISTER}>Sign up <ArrowRight size={18}/></a><Link className="button ghost" href="/start">Quick start</Link><a className="text-link" href="#workloads">Explore the workloads <ArrowUpRight size={17}/></a></div>
+          <div className="hero-actions"><AccountLink className="button primary" href={SIGN_UP_URL}>Sign up <ArrowRight size={18}/></AccountLink><Link className="button ghost" href="/start">Quick start</Link><a className="text-link" href="#workloads">Explore the workloads <ArrowUpRight size={17}/></a></div>
           <div className="hero-note"><Zap size={14}/> Early access · Job execution is rolling out gradually</div>
         </div>
         <div className="compute-panel" aria-label="Conceptual workload execution diagram">

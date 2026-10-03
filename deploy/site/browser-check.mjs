@@ -226,8 +226,9 @@ const clickAndExpectSoftNav = async (selector, label) => {
 
 const START_TITLE = 'Get started — Unify Compute';
 const START_H1 = 'Get started with Unify Compute';
-const LOGIN = 'https://app.unifyapi.ai/login';
-const REGISTER = 'https://app.unifyapi.ai/register';
+// Placeholders until Compute's own account pages exist; see app/links.ts.
+const LOGIN = '/start#early-access';
+const REGISTER = '/start#early-access';
 
 const setViewport = (width, height, mobile) =>
   page('Emulation.setDeviceMetricsOverride', {
@@ -324,16 +325,15 @@ try {
     'HubSpot loader duplicated or lost by navigation',
   );
 
-  // Compute has no accounts of its own (ADR-0001); the header sends people to
-  // the Unify API console. UI-STANDARD "Marketing header": Log in, then Sign up.
+  // UI-STANDARD "Marketing header": Log in, then Sign up, on the right.
   await setViewport(1280, 900, false);
   await load('/');
   await waitFor(`!!document.querySelector(${JSON.stringify(COOKIE_LINK)})`, 'hydration at 1280');
-  for (const [href, text] of [
-    [LOGIN, 'Log in'],
-    [REGISTER, 'Sign up'],
+  for (const [href, text, cls] of [
+    [LOGIN, 'Log in', '.nav-login'],
+    [REGISTER, 'Sign up', '.button.primary'],
   ]) {
-    const sel = `header .nav-actions a[href="${href}"]`;
+    const sel = `header .nav-actions a${cls}[href="${href}"]`;
     check(
       (await evaluate(visible(sel))) &&
         (await evaluate(`document.querySelector(${JSON.stringify(sel)}).textContent.trim()`)) === text,
@@ -348,12 +348,19 @@ try {
   );
   await clickToStart('header .nav-inline a[href="/start"]', 'header "Quick start"');
   await back();
+  await clickToStart('header .nav-actions a.button.primary', 'header "Sign up"');
+  check(
+    await evaluate(`location.hash === '#early-access' && !!document.getElementById('early-access')`),
+    'header "Sign up" lands on the early-access section',
+    `header "Sign up" landed on "${await evaluate('location.hash')}", not #early-access`,
+  );
+  await back();
 
   await setViewport(375, 812, true);
   await load('/');
   await waitFor(`!!document.querySelector(${JSON.stringify(COOKIE_LINK)})`, 'hydration at 375');
   check(
-    !(await evaluate(visible(`header .nav-actions a[href="${REGISTER}"]`))),
+    !(await evaluate(visible(`header .nav-actions a.button.primary`))),
     '375: header Sign up collapsed into the menu',
     '375: header Sign up still shown outside the menu',
   );
@@ -363,15 +370,15 @@ try {
     `375: page is ${await evaluate('document.documentElement.scrollWidth')}px wide`,
   );
   await evaluate(`document.querySelector('.menu-button').click()`);
-  if (await waitFor(visible(`#site-menu a[href="${REGISTER}"]`), 'mobile menu to open')) {
+  if (await waitFor(visible(`#site-menu a.menu-signup[href="${REGISTER}"]`), 'mobile menu to open')) {
     check(
-      await evaluate(visible(`#site-menu a[href="${LOGIN}"]`)),
+      await evaluate(visible(`#site-menu a.menu-account:not(.menu-signup)[href="${LOGIN}"]`)),
       `375: menu "Log in" visible → ${LOGIN}`,
       '375: menu "Log in" missing or not visible',
     );
     check(
       await evaluate(
-        `getComputedStyle(document.querySelector('#site-menu a[href="${REGISTER}"]')).backgroundColor === 'rgb(245, 166, 35)'`,
+        `getComputedStyle(document.querySelector('#site-menu a.menu-signup')).backgroundColor === 'rgb(245, 166, 35)'`,
       ),
       `375: menu "Sign up" is the amber primary → ${REGISTER}`,
       '375: menu "Sign up" is not styled as the primary button',

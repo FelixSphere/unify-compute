@@ -5,7 +5,8 @@ import Link from 'next/link';
 import { Menu, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { BrandLockup } from './brand';
-import { CONSOLE_LOGIN, CONSOLE_REGISTER } from './links';
+import { AccountLink } from './account-link';
+import { LOG_IN_URL, SIGN_UP_URL } from './links';
 
 type NavItem = { href: string; label: string };
 
@@ -84,12 +85,12 @@ export function SiteHeader({ homeHref = '/', current }: { homeHref?: string; cur
         </Link>
       </nav>
       <div className="nav-actions">
-        <a href={CONSOLE_LOGIN} className="nav-login">
+        <AccountLink href={LOG_IN_URL} className="nav-login">
           Log in
-        </a>
-        <a href={CONSOLE_REGISTER} className="button primary">
+        </AccountLink>
+        <AccountLink href={SIGN_UP_URL} className="button primary">
           Sign up
-        </a>
+        </AccountLink>
       </div>
       <button
         ref={buttonRef}
@@ -117,12 +118,12 @@ export function SiteHeader({ homeHref = '/', current }: { homeHref?: string; cur
           <Link href="/start" aria-current={current === '/start' ? 'page' : undefined} onClick={() => close(false)}>
             Quick start
           </Link>
-          <a href={CONSOLE_LOGIN} className="menu-account">
+          <AccountLink href={LOG_IN_URL} className="menu-account" onClick={() => close(false)}>
             Log in
-          </a>
-          <a href={CONSOLE_REGISTER} className="menu-account menu-signup button primary">
+          </AccountLink>
+          <AccountLink href={SIGN_UP_URL} className="menu-account menu-signup button primary" onClick={() => close(false)}>
             Sign up
-          </a>
+          </AccountLink>
         </nav>
       </div>
     </header>
