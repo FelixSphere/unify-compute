@@ -22,7 +22,7 @@ comes after it** (wave 2), then the production cutover and the bridge's
 removal (wave 3).
 
 ```
-O1 accept ADR ─┬─ A1 schema+accounts ──┬─ A4 auth routes ──┬─ A5 keys ───────┐
+O1 accept ADR ─┬─ A1 schema+accounts ──┬─ A4 auth routes ──┬─ A5 keys ── A5b members ┐
                │                       │                   │                 │
                ├─ A2 mailer ───────────┘                   │                 ├─ A8 staging slice ── C1 prod cutover ── C2 remove bridge
                ├─ A3 SES identity (TF) ── (O4 apply) ──────┤                 │                                         C3 staging console out
@@ -144,6 +144,29 @@ on migration numbers (A1 takes `0005`, A6 takes `0006`).
   `403 key_limit_reached`; the secret appears in exactly one response; the
   "key created" email is sent; with `ACCOUNTS_BACKEND=console` every existing
   test still passes unchanged.
+
+### A5b — Members and invitations
+
+- **Depends on:** A4, A5. Required before C1 (production cutover): adding
+  roles after customers exist means migrating every account's single user to
+  `owner` under load; before, it is a default.
+- **Touches:** a new migration (`invitations`, `accounts.name`, the role
+  check on `users.role`), `compute-api/internal/accounts/` (members,
+  invitations, the last-owner rule), `compute-api/internal/dashboard/`
+  (`/members*`, `/invitations*`, `PATCH /account`, `role` and `name` in
+  `/me`), `compute-api/internal/mailer/messages.go` (three messages),
+  `compute-api/internal/accounts` key revocation (admin and owner may revoke
+  any key), `docs/spec/accounts.md` (already specifies it), `dashboard/`
+  pages `/members` and `/accept-invitation` (A7c or a follow-up).
+- **Done when:** an owner invites an address, the invitee accepts without a
+  verification code and lands logged in as `member`; the invitee's keys
+  authenticate jobs as the same `account:<id>` and draw the same balance;
+  a `member` gets `403 permission_error` on `POST /members/invitations` and
+  `POST /topups`; demoting or removing the last owner is `409 last_owner`;
+  the 21st member is `403 member_limit_reached`; an accepted, expired or
+  revoked token is `404 not_found`; an address already on another account is
+  `409 email_in_use`; the three emails pass the golden-file tests; every
+  member action writes an `audit_events` row with the acting user.
 
 ### A6 — Local biller and the admin CLI
 
