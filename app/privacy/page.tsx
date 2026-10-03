@@ -12,7 +12,7 @@ export const metadata: Metadata = {
 // contracts with customers, owns the Stripe account (ADR-0011 D2) and publishes the Terms this
 // site links to (TERMS_URL in ../links.ts). This is Compute's own copy of a policy that started
 // from FelixSphere's and no longer tracks it; edit it here. The footer's "© <year> UnifyAI"
-// line is the brand's company line (UI-STANDARD), not the legal entity.
+// line is the brand's company line (UI-STANDARD); the "Operated by" line under it on this page names the entity.
 // The contact mailbox stays on felixsphere.com until a unifyai.us mailbox exists.
 export default function PrivacyPolicy() {
   return (
@@ -70,7 +70,8 @@ export default function PrivacyPolicy() {
           <strong> Company </strong>
           (referred to as either &quot;the Company&quot;, &quot;We&quot;,
           &quot;Us&quot; or &quot;Our&quot; in this Agreement) refers to
-          FelixSphere LLC, 6 Karen Ct, CA 94010.
+          FelixSphere LLC. Unify Compute is a UnifyAI product operated by
+          FelixSphere LLC, 6 Karen Ct, CA 94010, United States.
         </p>
 
         <p>For the purpose of the GDPR, the Company is the Data Controller.</p>

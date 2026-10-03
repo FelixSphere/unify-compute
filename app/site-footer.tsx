@@ -22,7 +22,7 @@ export function SiteFooter({ homeHref = '/', current }: { homeHref?: string; cur
         </Link>
         <a href={TERMS_URL}>Terms</a>
       </nav>
-      <CompanyLine />
+      <CompanyLine legal={current === '/privacy'} />
     </footer>
   );
 }
