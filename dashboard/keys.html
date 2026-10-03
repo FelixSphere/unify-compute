@@ -29,6 +29,12 @@
             <p class="hint" id="key-name-hint">So you can tell keys apart, e.g. "nightly pipeline".</p>
             <p class="field-error" id="key-name-error" hidden></p>
           </div>
+          <div class="field">
+            <label for="key-cap">Monthly cap (USD, optional)</label>
+            <input id="key-cap" name="monthly_cap_usd" type="text" inputmode="decimal" autocomplete="off" placeholder="No cap" aria-describedby="key-cap-hint key-cap-error" />
+            <p class="hint" id="key-cap-hint">The most this key may spend or hold per calendar month. A job that would go past it is refused; other keys are unaffected.</p>
+            <p class="field-error" id="key-cap-error" hidden></p>
+          </div>
           <fieldset class="field">
             <legend>Access</legend>
             <label class="check"><input type="radio" name="scope" value="jobs" checked /> Submit, cancel and read jobs</label>
@@ -57,6 +63,21 @@
         <div id="keys-list" aria-live="polite"><p class="muted">Loading keys…</p></div>
       </section>
 
+      <dialog id="cap-dialog" aria-labelledby="cap-title">
+        <form method="dialog" id="cap-form" novalidate>
+          <h2 id="cap-title">Monthly cap for <code id="cap-display"></code></h2>
+          <div class="field">
+            <label for="cap-value">Cap (USD)</label>
+            <input id="cap-value" name="monthly_cap_usd" type="text" inputmode="decimal" autocomplete="off" placeholder="No cap" aria-describedby="cap-hint cap-value-error" />
+            <p class="hint" id="cap-hint">Leave empty to remove the cap. Spent so far this month: <span id="cap-spent">—</span>.</p>
+            <p class="field-error" id="cap-value-error" hidden></p>
+          </div>
+          <div class="actions">
+            <button class="primary" type="submit" value="save" id="cap-save">Save</button>
+            <button class="ghost" type="submit" value="cancel">Cancel</button>
+          </div>
+        </form>
+      </dialog>
       <dialog id="revoke-dialog" aria-labelledby="revoke-title">
         <form method="dialog" id="revoke-form">
           <h2 id="revoke-title">Revoke this key?</h2>

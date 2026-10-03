@@ -121,6 +121,7 @@ extended by later ones, and each row expires against its own window.
 | `scopes` | `text[]` | subset of `{jobs, read}`, non-empty |
 | `created_by` | `bigint` FK → users | |
 | `created_at`, `expires_at` (null = never), `last_used_at`, `revoked_at` | `timestamptz` | |
+| `monthly_cap` | `bigint` null | Spending cap per UTC calendar month, quota units; null is no cap. The local biller refuses a hold that would take the key's month (open holds at full quota, closed at what they settled) past it: `403 key_cap_exceeded` on submit. Checked under the account lock, so two submits cannot both fit. The console's per-token quota, at the key grain |
 
 Key format: `uck_` followed by 40 characters from `[0-9A-Za-z]`, from
 `crypto/rand`. Any other shape is `401 missing_key` without a database read.
@@ -420,8 +421,9 @@ after the response, so neither the status nor the time depends on it.
 | `POST /reauth` | `{ password }` | `204`; sets `reauth_at` |
 | `GET /balance` | — | `{ object: "compute.balance", currency: "USD", available_usd, held_usd, limits: { topup_min_usd, topup_max_usd, balance_max_usd, topups_per_day } }`, from the account row. Built (A7d) |
 | `GET /transactions?after=&limit=&kind=` | — | `kind` repeatable, any of the entry kinds (`400 invalid_kind` otherwise); absent is every kind.  `{ object: "list", data, has_more, next? }`, balance entries newest first, `limit` 1–100 (default 20), `after` an entry id: `{ id, object: "compute.balance_entry", kind, amount_usd, available_delta_usd, held_delta_usd, available_after_usd, held_after_usd, job_id, ref, created_at, detail }`. `amount_usd` is what a `settle` took out of held (negative), and for every other kind the change in available. `ref` is `{ type: "job" \| "topup", id }` or `null`: a hold's id is replaced by its job, and an operator adjustment's audit id and reason are never returned. `detail` holds only `sku`. Built (A7d) |
-| `GET /keys` | — | `[{ id, name, display, scopes, created_at, expires_at, last_used_at, revoked_at }]`, a bare array, newest first, revoked and expired keys included. Built (A5) |
-| `POST /keys` | `{ name, scopes, expires_at? }` | `201 { …key, secret: "uck_…" }`; the secret is never returned again. Needs reauth after 10 min (`401 reauth_required`, checked before the body). Emails "key created". Built (A5) |
+| `GET /keys` | — | `[{ id, name, display, scopes, created_at, expires_at, last_used_at, revoked_at, monthly_cap_usd, spent_this_month_usd }]`, a bare array, newest first, revoked and expired keys included. Built (A5) |
+| `POST /keys` | `{ name, scopes, expires_at?, monthly_cap_usd? }` | `201 { …key, secret: "uck_…" }`; the secret is never returned again. Needs reauth after 10 min (`401 reauth_required`, checked before the body). Emails "key created". Built (A5) |
+| `PATCH /keys/{id}` | `{ monthly_cap_usd }` (dollars, two decimals, or null) | `200 { …key }`; needs reauth after 10 min; a revoked or foreign key is `404 not_found`; `400 invalid_cap` |
 | `DELETE /keys/{id}` | — | `204`, also for a key already revoked; another account's key is `404 not_found`. Built (A5) |
 | `GET /jobs?status=&after=&limit=` | — | The job API's list, owner-scoped to the account. Built (A7d) |
 | `GET /jobs/{id}` | — | The Job object (`job-api.md`). Built (A7d) |
@@ -659,6 +661,6 @@ them.
 
 1. Decisions D1–D8 in ADR-0011.
 2. Whether `pending` users can be purged earlier than 7 days under abuse.
-3. A per-key monthly spend cap (the console's token quota) if a customer asks.
+3. ~~A per-key monthly spend cap~~ Built: `api_keys.monthly_cap`, `PATCH /keys/{id}`, `403 key_cap_exceeded`.
 4. Breached-password checking, TOTP, organisations and invitations: later.
 5. The Terms and Conditions' refund and acceptable-use gaps (above).

@@ -31,6 +31,7 @@ const (
 	ActionPasswordChanged   = "password_changed"
 	ActionKeyCreated        = "key_created"
 	ActionKeyRevoked        = "key_revoked"
+	ActionKeyCapChanged     = "key_cap_changed"
 	ActionTopupCreated      = "topup_created"
 	ActionTopupCredited     = "topup_credited"
 	ActionRefund            = "refund"

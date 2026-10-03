@@ -1174,3 +1174,9 @@ a.ghost {
 #usage-jobs-more {
   margin-top: 16px;
 }
+
+.row-actions {
+  display: inline-flex;
+  gap: 12px;
+  white-space: nowrap;
+}

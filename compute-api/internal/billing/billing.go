@@ -253,8 +253,8 @@ func (l *Local) tx(ctx context.Context, fn func(pgx.Tx) error) error {
 // Hold reserves req.Quota of the account req.UserID names. A replay of the
 // same request answers what the first answered; a different request under
 // the same hold_id is idempotency_conflict. Unlike the console there is no
-// per-key spending limit (accounts.md, open point 3), so TokenID is
-// recorded and not checked.
+// per-key spending limit (accounts.md, open point 3) is api_keys.monthly_cap,
+// applied by checkKeyCap under the account lock.
 func (l *Local) Hold(ctx context.Context, req console.HoldRequest) (*console.HoldResult, error) {
 	if req.HoldID == "" || req.Quota <= 0 {
 		return nil, refuse(http.StatusBadRequest, CodeInvalidRequest)
@@ -281,6 +281,11 @@ func (l *Local) Hold(ctx context.Context, req console.HoldRequest) (*console.Hol
 		}
 		if a.available < req.Quota {
 			return refuse(http.StatusPaymentRequired, CodeInsufficientBalance)
+		}
+		// Under the account lock, so two holds on one key cannot both fit
+		// under its cap.
+		if err := l.checkKeyCap(ctx, tx, int64(req.TokenID), req.Quota); err != nil {
+			return err
 		}
 		if err := l.move(ctx, tx, a, entry{kind: "hold", available: -req.Quota, held: req.Quota,
 			refType: "hold", refID: req.HoldID, idemp: "hold:" + req.HoldID,
@@ -772,4 +777,73 @@ func (l *Local) Entries(ctx context.Context, accountID int64) ([]Entry, error) {
 // API (accounts.md, "Units").
 func USD(q int64) string {
 	return new(big.Rat).SetFrac64(q, sku.QuotaPerUSD).FloatString(4)
+}
+
+// KeyCapError refuses a hold that would take an API key past its monthly
+// cap (accounts.md, api_keys.monthly_cap). Amounts are quota units.
+type KeyCapError struct {
+	KeyID int64
+	Cap   int64
+	Spent int64 // this UTC month: open holds at full quota, closed ones at what they settled
+	Hold  int64 // what this submit would hold
+}
+
+func (e *KeyCapError) Error() string {
+	return fmt.Sprintf("billing: key %d monthly cap %d reached: %d spent or held, hold of %d refused", e.KeyID, e.Cap, e.Spent, e.Hold)
+}
+
+// monthStart is the first instant of the UTC month containing t.
+func monthStart(t time.Time) time.Time {
+	t = t.UTC()
+	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
+}
+
+// checkKeyCap applies a key's monthly_cap to a hold about to be placed. A
+// token id that is not one of our keys (0, or a console token when the
+// bridge is in use) or a key without a cap passes.
+func (l *Local) checkKeyCap(ctx context.Context, tx pgx.Tx, keyID, hold int64) error {
+	if keyID <= 0 {
+		return nil
+	}
+	var capQuota *int64
+	err := tx.QueryRow(ctx, `SELECT monthly_cap FROM api_keys WHERE id = $1`, keyID).Scan(&capQuota)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && capQuota == nil) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var spent int64
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(sum(CASE WHEN status = 'open' THEN quota ELSE settled_quota END), 0)
+		FROM billing_holds WHERE key_id = $1 AND created_at >= $2`, keyID, monthStart(l.now())).Scan(&spent); err != nil {
+		return err
+	}
+	if spent+hold > *capQuota {
+		return &KeyCapError{KeyID: keyID, Cap: *capQuota, Spent: spent, Hold: hold}
+	}
+	return nil
+}
+
+// KeySpend is what each of an account's keys has spent or holds since from
+// (the same figure checkKeyCap compares with the cap), by key id. Keys with
+// nothing are absent.
+func (l *Local) KeySpend(ctx context.Context, accountID int64, from time.Time) (map[int64]int64, error) {
+	rows, err := l.db.Query(ctx, `
+		SELECT key_id, COALESCE(sum(CASE WHEN status = 'open' THEN quota ELSE settled_quota END), 0)::bigint
+		FROM billing_holds WHERE account_id = $1 AND key_id > 0 AND created_at >= $2
+		GROUP BY key_id`, accountID, from)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]int64{}
+	for rows.Next() {
+		var k, q int64
+		if err := rows.Scan(&k, &q); err != nil {
+			return nil, err
+		}
+		out[k] = q
+	}
+	return out, rows.Err()
 }

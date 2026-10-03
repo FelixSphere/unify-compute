@@ -75,7 +75,7 @@ OpenAI-style envelope so existing client error handling carries over:
 | 400 | `invalid_request` | Malformed body, unknown SKU, runtime over the ceiling |
 | 401 | `authentication_error` | Missing, malformed, revoked, or expired key |
 | 403 | `authentication_error` | The key is valid but its account may not spend (`account_disabled`, `account_suspended`) |
-| 403 | `permission_error` | `ACCOUNTS_BACKEND=local` only: the key lacks the `jobs` scope (`scope_denied`), or the account may not run jobs yet (`compute_not_enabled`) |
+| 403 | `permission_error` | `ACCOUNTS_BACKEND=local` only: the key lacks the `jobs` scope (`scope_denied`), the account may not run jobs yet (`compute_not_enabled`), or the job's hold would take the key past its monthly cap (`key_cap_exceeded`, set in the dashboard; nothing is submitted) |
 | 402 | `insufficient_balance` | Hold refused: balance below the estimate |
 | 403 | `quota_exceeded` | Submit would exceed an account quota or a platform-wide limit (one active job across all accounts while the platform starts small); `error.quotas` lists each limit with usage and headroom ([`quotas.md`](quotas.md)). Never a partial grant, no `Retry-After` |
 | 404 | `not_found` | Job id unknown *for this key* (no existence leak across users) |
