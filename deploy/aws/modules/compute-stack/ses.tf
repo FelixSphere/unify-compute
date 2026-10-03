@@ -9,6 +9,9 @@
 locals {
   ses_identity_arn          = "arn:aws:ses:${var.region}:${data.aws_caller_identity.current.account_id}:identity/${var.ses_identity}"
   ses_configuration_set_arn = "arn:aws:ses:${var.region}:${data.aws_caller_identity.current.account_id}:configuration-set/${var.ses_configuration_set}"
+  # The full From header: the SSM parameter below and SES_SENDER in user-data
+  # are both this, so the host and the parameter cannot disagree.
+  ses_sender = "${var.ses_sender_name} <${var.ses_from_address}>"
 }
 
 data "aws_iam_policy_document" "instance_ses" {
@@ -44,8 +47,8 @@ resource "aws_iam_role_policy" "instance_ses" {
 # Names, not secrets, like backup_bucket and artifacts_bucket: in the
 # instance's own SSM prefix, so the role reads them with the policy it already
 # has, and a host or release step can render them into .env without a
-# Terraform output. compute-api does not read them yet; the mailer (plan task
-# A2) and the staging switch to local accounts (A8) wire them in.
+# Terraform output. user-data renders SES_SENDER and SES_CONFIGURATION_SET from
+# the same values; nothing reads these parameters at boot.
 resource "aws_ssm_parameter" "ses_identity" {
   name  = "${local.ssm_prefix}/ses_identity"
   type  = "String"
@@ -64,5 +67,5 @@ resource "aws_ssm_parameter" "ses_configuration_set" {
 resource "aws_ssm_parameter" "ses_sender" {
   name  = "${local.ssm_prefix}/ses_sender"
   type  = "String"
-  value = "${var.ses_sender_name} <${var.ses_from_address}>"
+  value = local.ses_sender
 }

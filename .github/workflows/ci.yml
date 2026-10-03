@@ -338,6 +338,18 @@ jobs:
 
       - run: make tf-validate
 
+      # A variable compose passes to compute-api that user-data never writes
+      # is one a rebuilt host silently runs on compose's default. The test
+      # needs mocked values at plan time (override_during, Terraform 1.11):
+      # on 1.10 the certificate's for_each stays unknown and the mocked
+      # teardown fails. Only the test needs it; the stacks keep the 1.10
+      # floor checked above.
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.11.4"
+          terraform_wrapper: false
+      - run: make tf-test
+
       # Catches a malformed compose file before it reaches an instance, where
       # the failure mode is a boot that silently does nothing.
       - run: make compose-config

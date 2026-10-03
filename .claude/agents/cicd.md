@@ -120,9 +120,16 @@ account. Two consequences:
   request quota.
 - **Accounts (ADR-0011): both hosts on `ACCOUNTS_BACKEND=local`** (staging
   2026-10-03 17:52Z, production 18:38Z, C1). Production also has live
-  Stripe (`stripe top-ups enabled livemode=true`). Rollback and the
-  rebuild warning are in docs/staging.md, "Production on Compute's own
-  accounts". GitHub `APP_ORIGIN` is set for both environments.
+  Stripe (`stripe top-ups enabled livemode=true`). GitHub `APP_ORIGIN` is
+  set for both environments. Rollback is in docs/staging.md, "Production on
+  Compute's own accounts". **A rebuild comes back on own accounts**, with
+  Stripe in production: user-data renders the same lines from
+  `accounts_backend` and `stripe_enabled` in each env root and reads
+  `/unify-compute-production/stripe_*` at boot (a missing one leaves top-ups
+  at 503, never a failed boot). Before relying on that, diff the rendered
+  `.env` against the live host's (docs/staging.md has the commands);
+  `make tf-test` fails CI if compose passes compute-api a variable user-data
+  never writes.
 - **Accounts (ADR-0011), 2026-10-03 (staging step):** staging runs `ACCOUNTS_BACKEND=local`
   (host `.env`, set over SSM under the ops lock; previous files in
   `/data/backups/20261003T175222Z-manual-own-accounts-env/`). It also has

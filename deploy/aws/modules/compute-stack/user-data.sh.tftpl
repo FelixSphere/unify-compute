@@ -115,6 +115,16 @@ COMPUTE_BRIDGE_SECRET=
 # accept spec.outputs, which is how it behaved before ADR-0005.
 ARTIFACTS_TOKEN_SECRET=$(get_param '${ssm_artifacts_token}' 2>/dev/null || true)
 
+%{ if stripe_enabled ~}
+# Card top-ups (ADR-0011 section 4). Optional: missing leaves top-ups
+# answering 503, and compute-api boots either way, so neither may stop this.
+STRIPE_SECRET_KEY=$(get_param '${ssm_stripe_key}' 2>/dev/null || true)
+STRIPE_WEBHOOK_SECRET=$(get_param '${ssm_stripe_webhook}' 2>/dev/null || true)
+%{ else ~}
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
+%{ endif ~}
+
 # Our images come from the runtime registry (ADR-0009, "Runtime registry:
 # ECR"), with this instance's role. The token lasts 12 hours, which is enough
 # for this boot; every release logs in again before it pulls.
@@ -151,6 +161,12 @@ ARTIFACTS_BUCKET=${artifacts_bucket}
 ARTIFACTS_WRITER_ROLE_ARN=${artifacts_writer_role}
 ARTIFACTS_TOKEN_SECRET=$ARTIFACTS_TOKEN_SECRET
 PUBLIC_URL=${public_url}
+ACCOUNTS_BACKEND=${accounts_backend}
+APP_ORIGIN=${app_origin}
+SES_SENDER='${ses_sender}'
+SES_CONFIGURATION_SET=${ses_configuration_set}
+STRIPE_SECRET_KEY=$STRIPE_SECRET_KEY
+STRIPE_WEBHOOK_SECRET=$STRIPE_WEBHOOK_SECRET
 %{ if console_enabled ~}
 CONSOLE_IMAGE=${console_image}
 REDIS_PASSWORD=$REDIS_PASSWORD

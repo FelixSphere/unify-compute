@@ -42,6 +42,12 @@ module "stack" {
   console_url    = "https://app.unifyapi.ai"
   bridge_enabled = true
 
+  # Compute's own accounts (ADR-0011), and what a rebuilt host renders into
+  # .env. The running host got the same lines over SSM.
+  accounts_backend = "local"
+  # Live keys since 2026-10-03 (deploy/releases/2026-10-03-production-accounts-live.md).
+  stripe_enabled = true
+
   compute_api_image = var.compute_api_image
   site_image        = var.site_image
   ami_id            = var.ami_id

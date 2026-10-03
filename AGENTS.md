@@ -234,7 +234,7 @@ remote state with locking exists.
 ```bash
 npx oxlint app lib && npm run build
 (cd compute-api && go vet ./... && go test ./...)
-make compose-config tf-validate
+make compose-config tf-validate tf-test
 ```
 
 Anything you could not finish, say so explicitly and say what is left. A

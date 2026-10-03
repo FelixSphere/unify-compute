@@ -69,3 +69,8 @@ output "skypilot_host_setup" {
   description = "The SkyPilot setup payload for scripts/ssm-run.sh, for a host that booted before SkyPilot was enabled. Empty when it is not."
   value       = local.skypilot_host_setup
 }
+
+output "user_data" {
+  description = "The rendered first-boot script, before gzip. No secret values: the script reads those from SSM on the host. For tests/ and for diffing what a rebuild would write against a live host's .env."
+  value       = local.user_data
+}

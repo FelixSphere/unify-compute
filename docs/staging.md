@@ -543,11 +543,47 @@ Production runs `ACCOUNTS_BACKEND=local`. These are set in
 `COMPUTE_BRIDGE_SECRET` stay in `.env`; local mode ignores them. The GitHub
 production variable `APP_ORIGIN` is set, so release smoke probes the app host.
 
-**User-data does not render any of these.** A rebuild of either host (an
-instance replace) comes back on console accounts with no Stripe, and every
-`uck_` key stops working. Before any rebuild, either add them to
-`modules/compute-stack` user-data, or repeat the SSM step right after the
-first boot.
+**A rebuild comes back on own accounts.** Since the change that added
+`accounts_backend` and `stripe_enabled` to the env roots, user-data renders
+`ACCOUNTS_BACKEND`, `APP_ORIGIN` (`https://<app_domain>`), the quoted
+`SES_SENDER` and `SES_CONFIGURATION_SET` (from the same variables as the SES
+policy and SSM parameters) and `ENVIRONMENT` into a rebuilt host's `.env`,
+the same lines the hosts got over SSM. Production (`stripe_enabled = true`)
+also reads `/unify-compute-production/stripe_secret_key` and
+`stripe_webhook_secret` at boot with the instance role, which the existing
+`/<name>/*` read policy already covers. A missing one leaves the line empty
+and top-ups at 503; it never fails the bootstrap. Staging renders both empty.
+Before that change, a rebuild came back on console accounts with no Stripe,
+refusing every `uck_` key.
+
+The change planned nothing for either environment (user_data is in
+`ignore_changes`); it applies only to a host that is built from now on.
+`make tf-test` renders user-data for both shapes with a mocked provider and
+fails if `docker-compose.yml` passes compute-api a variable the `.env` never
+writes, so a new setting cannot be added to compose and forgotten here.
+
+To prove a rebuild would match a live host without rebuilding it, compare
+what Terraform renders with the host's `.env`, secrets masked on the host:
+
+```sh
+ENV=production   # or staging
+echo 'regex("(?s)<<ENV\n(.*?)\nENV\n", module.stack.user_data)[0]' \
+  | terraform -chdir=deploy/aws/envs/$ENV console | sed '1d;$d' | sort >rendered.env
+cat >/tmp/env-masked.sh <<'SH'
+sed -E 's/^(POSTGRES_PASSWORD|REDIS_PASSWORD|SESSION_SECRET|COMPUTE_BRIDGE_SECRET|ARTIFACTS_TOKEN_SECRET|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET)=.+/\1=$\1/' \
+  /opt/unify-compute/compose/.env | sort
+SH
+scripts/ssm-run.sh "$(terraform -chdir=deploy/aws/envs/$ENV output -raw instance_id)" \
+  /tmp/env-masked.sh "read .env (masked)" 60
+grep -E '^[A-Z_]+=' /tmp/env-masked.sh.out | diff rendered.env -
+```
+
+Expected differences: the image pins (user-data holds the rebuild baseline,
+the host what was released last), `COMPOSE_FILE` and any lines the IMDS and
+SkyPilot setup scripts append (they run at first boot too), and lines the
+host has that compute-api ignores, such as production's `CONSOLE_URL` and
+bridge secret. Any accounts, mail or Stripe line that differs is a defect.
+A secret shown as `NAME=` rather than `NAME=$NAME` is empty on the host.
 
 **Rollback** (one step, production host, over SSM):
 
