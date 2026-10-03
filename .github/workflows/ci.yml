@@ -284,7 +284,7 @@ jobs:
         run: |
           sudo env COMPOSE_DIR="$RUNNER_TEMP/compose" sh scripts/imds-lockdown.sh | tail -n 1 | grep -qx 'IMDS_LOCKDOWN_DONE all'
           test "$(sudo iptables -t raw -S PREROUTING | grep -c unify-compute-imds)" = 1
-          test "$(grep -o docker-compose.imds.yml "$RUNNER_TEMP/compose/.env" | wc -l)" = 1
+          test "$(sudo grep -o docker-compose.imds.yml "$RUNNER_TEMP/compose/.env" | wc -l)" = 1
 
       - name: The rule survives a Docker restart, and a lost one comes back with it
         run: |
