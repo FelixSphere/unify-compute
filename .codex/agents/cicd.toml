@@ -87,11 +87,11 @@ account. Two consequences:
   (`/unify-compute-staging/test_api_key`) is accepted and held, then fails
   `capacity_exhausted` (AWS `VcpuLimitExceeded`, quota 0). Open: SkyPilot
   attempted `CreateSecurityGroup` and was refused (by design); check which
-  group the first real worker gets. The GPU budget is not applied: there is no alert
-  email, and the stack refuses a null one. The operator set it to USD 50/month,
-  not 300. Since #50 that is the stack's default, and a Budgets action
-  denies RunInstances/StartInstances to the launch role at 100% (ADR-0010,
-  "Start small"); apply it after staging and before any launch. The
+  group the first real worker gets. The GPU budget is applied (2026-10-03): USD 50/month, and Budgets action
+  `b4302f8f-c1df-40b6-8157-d71a203ae18a` (STANDBY, automatic) denies
+  RunInstances/StartInstances to the launch role at 100% (ADR-0010, "Start
+  small"). Dry run proven. The reaper's max age is 5 h, and both hosts run
+  compute-api 5f964c1 (platform caps 1 job / 1 GPU, ceiling 4 h). The
   operator handles the quota case (4 vCPU now, not 8); agents do not
   request quota.
 - **Console:** production `app.unifyapi.ai` belongs to the UnifyAPI CI/CD agent.

@@ -26,7 +26,7 @@ variable "manage_site_dns" {
 
 variable "compute_api_image" {
   type    = string
-  default = "871376691052.dkr.ecr.us-east-1.amazonaws.com/unify-compute-api@sha256:9dfc652abae49a0b622eda994c4152aa16b3a295b830e76daeae2685b03496b8"
+  default = "871376691052.dkr.ecr.us-east-1.amazonaws.com/unify-compute-api@sha256:fdd7a67c1c72a94ae483df8eb4e1eab4ba3785288fb891c54506ff5ecac3fb34"
 }
 
 variable "site_image" {
