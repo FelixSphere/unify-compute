@@ -14,8 +14,8 @@
 # AWS credentials: the host assumes the launch role every 20 minutes into a
 # file only this container mounts; botocore re-reads it through
 # credential_process before each expiry. SkyPilot itself never needs IMDS,
-# so the day IMDS is closed to every container but compute-api (ADR-0005
-# open question 3) this keeps working unchanged.
+# which is closed to every container on the host (scripts/imds-lockdown.sh,
+# ADR-0005 amendment of 2026-10-03).
 #
 # Pinned by digest: the multi-arch index of the upstream 0.13.0 release
 # (linux/amd64 and linux/arm64), which is tag v0.13.0 of FelixSphere/skypilot

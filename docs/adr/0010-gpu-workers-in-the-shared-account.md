@@ -1,7 +1,7 @@
 # ADR-0010 — GPU workers in the shared account
 
 - **Status:** Proposed
-- **Date:** 2026-10-03
+- **Date:** 2026-10-03, amended 2026-10-03 (IMDS closed to containers)
 - **Related:** ADR-0003 (SkyPilot through its API server), ADR-0006 (upstreams
   are SkyPilot clouds), ADR-0009 (everything on AWS), `docs/spec/backend.md`
   (C4: compute-api drives SkyPilot clusters over HTTP).
@@ -78,18 +78,17 @@ How the credentials reach the SkyPilot container:
   `AWS_CONFIG_FILE` sets `credential_process = cat …`, which botocore treats
   as refreshable credentials. Role chaining caps a session at an hour, so
   there are always at least 40 minutes left. SkyPilot never uses IMDS.
-- **What this does not close.** The host's IMDS hop limit is 2, because
-  compute-api reads the instance role from its container for artifact storage
-  ([ADR-0005](0005-artifact-storage.md)). Every container on the host can
-  therefore obtain the instance role, and the instance role may assume the
-  launch role. A compromised staging console could launch workers. That is
-  ADR-0005's open question 3, and its proposed fix (a `DOCKER-USER` rule
-  that drops 169.254.169.254 from every container but compute-api) closes
-  it here too. SkyPilot is then unaffected, because it reads the file and
-  not IMDS. Until then the bound is the launch role's policy below. Such a
-  container still cannot touch another product, launch anything but a
-  tagged g5.xlarge in the workers VPC, or get past the quota, the reaper
-  and the budget. Production runs no console.
+- **Other containers cannot reach the launch role** (amended 2026-10-03).
+  As first written, the host's IMDS hop limit was 2, so every container on
+  the host could obtain the instance role, and with it assume the launch
+  role: a compromised staging console could have launched workers.
+  [ADR-0005](0005-artifact-storage.md)'s amendment of 2026-10-03 closes
+  IMDS to every container (a host rule dropping 169.254.169.254, plus hop
+  limit 1). compute-api gets the instance role from a file the host writes,
+  in the same way. SkyPilot is unaffected, because it reads the session file and
+  never IMDS. Only the host and compute-api hold the instance role now.
+  compute-api's copy can still assume the launch role (ADR-0005 open
+  question 5), and the launch role's policy below is the bound for that.
 
 The API server is reachable only by compute-api: it has no host port and no
 ALB rule. It sits on an internal compose network shared with compute-api
@@ -289,6 +288,5 @@ be unwound.
 - The quota to request. 8 vCPU (two g5.xlarge) is proposed in
   `docs/staging.md`; 4 is the minimum for one.
 - The budget amount (USD 300) and the alert address.
-- Closing IMDS to every container but compute-api (ADR-0005 open question
-  3), which would also stop a compromised console from assuming the launch
-  role.
+- ~~Closing IMDS to every container but compute-api.~~ Done by ADR-0005's
+  amendment of 2026-10-03, for compute-api too.

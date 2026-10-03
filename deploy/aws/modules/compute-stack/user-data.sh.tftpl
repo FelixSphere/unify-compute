@@ -176,6 +176,15 @@ ${postgres_init_console}
 SQL
 %{ endif ~}
 
+# No container may reach IMDS; compute-api gets the instance role from a file
+# the host refreshes (ADR-0005, amendment of 2026-10-03). Before the stack
+# first starts, so no container ever runs on this host without the rule. The
+# same script a host that predates it gets over SSM.
+cat >/opt/unify-compute/imds-lockdown.sh <<'IMDS_LOCKDOWN'
+${imds_lockdown}
+IMDS_LOCKDOWN
+PHASE=files sh /opt/unify-compute/imds-lockdown.sh
+
 %{ if skypilot_enabled ~}
 # The SkyPilot API server (ADR-0010): the overlay, its config, the launch-role
 # credential refresher and the admin password, before the stack first starts;

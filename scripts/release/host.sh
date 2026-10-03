@@ -55,6 +55,8 @@ UNIT=${UNIT:-unify-compute.service}
 LOCAL_PROBES=${LOCAL_PROBES:-http://127.0.0.1:8080/healthz}
 HEALTH_TIMEOUT=${HEALTH_TIMEOUT:-240}
 STABLE_SECONDS=${STABLE_SECONDS:-30}
+# Installed by scripts/imds-lockdown.sh. A release refuses a host without it.
+IMDS_FIREWALL=${IMDS_FIREWALL:-/usr/local/sbin/unify-compute-imds-firewall}
 # -----------------------------------------------------------------------------
 
 : "${ACTION:?}" "${ENV_NAME:?}" "${RELEASE_ID:?}" "${REGION:?}"
@@ -252,6 +254,7 @@ if [ "$ACTION" = status ]; then
   [ -f "$STATE_DIR/PREVIOUS_RELEASE" ] && print_set PREVIOUS "$(tr '\n' ' ' < "$STATE_DIR/PREVIOUS_RELEASE")"
   say "--- containers (name id restarts status)"; snapshot
   say "--- last releases"; tail -n 5 "$STATE_DIR/history.log" 2>/dev/null || say "(none)"
+  if [ -x "$IMDS_FIREWALL" ] && "$IMDS_FIREWALL" check; then say "IMDS_LOCKDOWN present"; else say "IMDS_LOCKDOWN missing"; fi
   exit 0
 fi
 
@@ -279,6 +282,19 @@ account=$(aws sts get-caller-identity --region "$REGION" --query Account --outpu
 case "$account" in [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ;; *) die "unexpected account id '$account'" ;; esac
 ECR_REGISTRY="$account.dkr.ecr.$REGION.amazonaws.com"
 validate_set "$TARGET"
+
+# Containers must not reach the instance role (ADR-0005, amendment of
+# 2026-10-03). Checked, not repaired: the rule is installed by a systemd unit
+# that re-applies it on every Docker start, so a missing rule means something
+# removed it or the host was never locked down, and either wants a person
+# before the next cutover. The fix is one idempotent command, safe in an
+# outage too: scripts/imds-lockdown.sh over SSM. A rollback is refused as
+# well, because it recreates containers on the same host.
+if [ ! -x "$IMDS_FIREWALL" ]; then
+  die "this host has no IMDS lockdown ($IMDS_FIREWALL); run scripts/imds-lockdown.sh over SSM first (docs/staging.md, \"IMDS lockdown\")"
+fi
+"$IMDS_FIREWALL" check || die "the IMDS rule is missing on this host; find out what removed it, then rerun scripts/imds-lockdown.sh over SSM"
+say "imds: container traffic to IMDS is dropped"
 
 # Refuse to start a second stack beside the first: this must be the directory
 # the systemd unit runs compose in.
