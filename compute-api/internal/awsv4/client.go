@@ -3,6 +3,7 @@ package awsv4
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -14,14 +15,15 @@ import (
 	"time"
 )
 
-// Client makes the STS and S3 calls compute-api needs, signed with the
+// Client makes the STS, S3 and SES calls compute-api needs, signed with the
 // credentials it is given per call.
 type Client struct {
 	Region string
-	// S3Endpoint and STSEndpoint replace the AWS endpoints (tests). With
-	// S3Endpoint set, buckets are addressed path-style under it.
+	// S3Endpoint, STSEndpoint and SESEndpoint replace the AWS endpoints
+	// (tests). With S3Endpoint set, buckets are addressed path-style under it.
 	S3Endpoint  string
 	STSEndpoint string
+	SESEndpoint string
 	HTTP        *http.Client
 	Now         func() time.Time
 }
@@ -106,6 +108,15 @@ func (c *Client) do(ctx context.Context, cr Credentials, service, method string,
 			if e.Code == "" {
 				e.Code, e.Message = x.Error.Code, x.Error.Message
 			}
+		} else {
+			// The JSON services (SES v2) put the code in a header, as
+			// "Code:namespace", and only the message in the body.
+			var j struct {
+				Message string `json:"message"`
+			}
+			_ = json.Unmarshal(b, &j)
+			e.Code, _, _ = strings.Cut(resp.Header.Get("X-Amzn-Errortype"), ":")
+			e.Message = j.Message
 		}
 		return resp, b, e
 	}
@@ -227,4 +238,49 @@ func (c *Client) Put(ctx context.Context, cr Credentials, bucket, key, contentTy
 // Presign signs a URL for key; headers must then be sent exactly as given.
 func (c *Client) Presign(cr Credentials, method, bucket, key string, headers http.Header, expires time.Duration) string {
 	return Signer{Region: c.Region, Service: "s3"}.Presign(method, c.ObjectURL(bucket, key), cr, headers, expires, c.now())
+}
+
+// SendRawEmail sends one complete MIME message through SES v2 SendEmail
+// and returns the message id SES assigned. from must be an identity the
+// credentials may send as; configurationSet may be empty.
+func (c *Client) SendRawEmail(ctx context.Context, cr Credentials, from string, to []string, raw []byte, configurationSet string) (string, error) {
+	type rawContent struct {
+		Data []byte `json:"Data"` // encoding/json writes []byte as base64, which is what SES expects
+	}
+	req := struct {
+		FromEmailAddress string `json:"FromEmailAddress"`
+		Destination      struct {
+			ToAddresses []string `json:"ToAddresses"`
+		} `json:"Destination"`
+		Content struct {
+			Raw rawContent `json:"Raw"`
+		} `json:"Content"`
+		ConfigurationSetName string `json:"ConfigurationSetName,omitempty"`
+	}{FromEmailAddress: from, ConfigurationSetName: configurationSet}
+	req.Destination.ToAddresses = to
+	req.Content.Raw.Data = raw
+	body, err := json.Marshal(req)
+	if err != nil {
+		return "", err
+	}
+	base := c.SESEndpoint
+	if base == "" {
+		base = "https://email." + c.Region + ".amazonaws.com"
+	}
+	u, err := url.Parse(strings.TrimRight(base, "/") + "/v2/email/outbound-emails")
+	if err != nil {
+		return "", err
+	}
+	hdr := http.Header{"Content-Type": {"application/json"}}
+	_, b, err := c.do(ctx, cr, "ses", http.MethodPost, u, hdr, body)
+	if err != nil {
+		return "", err
+	}
+	var r struct {
+		MessageId string `json:"MessageId"`
+	}
+	if err := json.Unmarshal(b, &r); err != nil || r.MessageId == "" {
+		return "", fmt.Errorf("ses SendEmail response: %q", b)
+	}
+	return r.MessageId, nil
 }

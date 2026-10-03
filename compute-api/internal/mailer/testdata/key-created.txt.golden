@@ -1,0 +1,20 @@
+API KEY
+
+A new API key was created.
+
+An API key was created for your Unify Compute account. Anyone holding it can use it within its scopes until it is revoked or expires.
+
+Review keys:
+https://app.compute.unifyai.us/keys
+
+Name: training laptop
+Key: uck_AbCd1234
+Scopes: jobs, read
+Created: 2026-10-03 14:05 UTC
+
+If you didn't create this key, revoke it on the Keys page and reset your password at https://app.compute.unifyai.us/forgot-password.
+
+-- 
+Unify Compute · compute.unifyai.us
+You're receiving this because this address is registered for a Unify Compute account.
+UnifyAI · Lebuh Bandar Utama PJU 6, 47800 Petaling Jaya, Selangor, Malaysia
