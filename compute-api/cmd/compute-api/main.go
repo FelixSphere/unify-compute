@@ -80,10 +80,14 @@ func main() {
 	handler := api.New(Build, cat, upstreams, log)
 	handler.Templates = templates
 
-	// Artifact storage (ADR-0005). Built at boot so a half-configured
-	// environment fails the deploy rather than the first upload. The routes
-	// still answer 501 until the job store and owner resolution are wired.
-	if bucket := os.Getenv("ARTIFACTS_BUCKET"); bucket != "" {
+	// Artifact storage (ADR-0005). Built at boot so a bad configuration
+	// fails the deploy rather than the first upload. The token secret is the
+	// switch: hosts get the bucket from Terraform but the secret only once
+	// someone creates it, and a host without one must still boot (the
+	// CONSOLE_URL crash loop of 2026-10-02 is the lesson). The routes answer
+	// 501 until the job store and owner resolution are wired as well.
+	bucket, tokenSecret := os.Getenv("ARTIFACTS_BUCKET"), os.Getenv("ARTIFACTS_TOKEN_SECRET")
+	if bucket != "" && tokenSecret != "" {
 		region := env("AWS_REGION", "us-east-1")
 		var creds awsv4.CredentialSource = &awsv4.IMDS{}
 		if c, ok := awsv4.FromEnv(); ok {
@@ -93,7 +97,7 @@ func main() {
 			Bucket:        bucket,
 			WriterRoleARN: os.Getenv("ARTIFACTS_WRITER_ROLE_ARN"),
 			PublicURL:     os.Getenv("PUBLIC_URL"),
-			TokenSecret:   []byte(os.Getenv("ARTIFACTS_TOKEN_SECRET")),
+			TokenSecret:   []byte(tokenSecret),
 			Creds:         creds,
 			Client:        &awsv4.Client{Region: region},
 		})
@@ -104,7 +108,7 @@ func main() {
 		handler.Artifacts = art
 		log.Info("artifact storage configured", "bucket", bucket)
 	} else {
-		log.Warn("ARTIFACTS_BUCKET unset; spec.outputs cannot be uploaded and artifact routes answer 501")
+		log.Warn("ARTIFACTS_BUCKET or ARTIFACTS_TOKEN_SECRET unset; spec.outputs cannot be uploaded and artifact routes answer 501")
 	}
 
 	srv := &http.Server{

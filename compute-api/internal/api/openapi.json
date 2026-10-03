@@ -219,7 +219,7 @@
             }
           },
           "400": {
-            "description": "Validation failed. `error.code` is one of `malformed_body`, `missing_sku`, `unknown_sku`, `sku_unavailable`, `missing_max_runtime`, `runtime_over_ceiling`, `provider_not_offered`, `unsupported_input_source` (`param` is `spec.inputs[i].source`), or with `template` also `unknown_template`, `template_unavailable`, `field_not_overridable`, `invalid_env`, `missing_input`, `unknown_input_mount`, `duplicate_input_mount`; `error.param` names the field.",
+            "description": "Validation failed. `error.code` is one of `malformed_body`, `missing_sku`, `unknown_sku`, `sku_unavailable`, `missing_max_runtime`, `runtime_over_ceiling`, `provider_not_offered`, or with `template` also `unknown_template`, `template_unavailable`, `field_not_overridable`, `invalid_env`, `missing_input`, `unknown_input_mount`, `duplicate_input_mount`; `error.param` names the field.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1336,11 +1336,11 @@
         "properties": {
           "source": {
             "type": "string",
-            "description": "An `https://` URL, public or presigned by you. Anything else is refused with `400 unsupported_input_source` until customer buckets are read through a cross-account role (ADR-0005)."
+            "description": "An `https://` URL, public or presigned by you (ADR-0005). Other sources, such as `s3://`, are refused by the backend when the job is launched; submit does not check them yet."
           },
           "mount": {
             "type": "string",
-            "description": "Absolute path of the file the run step downloads `source` to, before the command runs."
+            "description": "Absolute directory. The run step downloads `source` into it, named after the URL's last path segment, before the command runs."
           }
         }
       },
