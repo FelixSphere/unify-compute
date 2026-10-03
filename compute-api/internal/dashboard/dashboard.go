@@ -1,7 +1,8 @@
 // Package dashboard serves the dashboard API, /dashboard/v1 on the app host
 // (ADR-0011 §5 and §8, docs/spec/accounts.md "Dashboard API"): signup,
 // verification, login, sessions, password reset and change, API keys, the
-// balance and its history, monthly usage, and the account's jobs. It is mounted
+// balance and its history, monthly usage, the account's jobs, card top-ups
+// and the Stripe webhook that credits them. It is mounted
 // only with ACCOUNTS_BACKEND=local; with the console backend compute-api
 // registers none of it.
 //
@@ -15,6 +16,9 @@
 //     same-origin POST, so a missing one is refused, not waved through.
 //  3. Session routes need the __Host-uc_session cookie, and a non-GET also
 //     needs X-CSRF-Token equal to the session's token.
+//
+// The one exception to 2 and 3 is POST /stripe/webhook, which Stripe calls
+// with neither; it is authenticated by its Stripe-Signature alone.
 //
 // No API key is read here and no cookie is read on /compute/v1.
 package dashboard
@@ -36,6 +40,7 @@ import (
 
 	"github.com/FelixSphere/unify-compute/compute-api/internal/accounts"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/mailer"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/payments"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/ratelimit"
 )
 
@@ -72,6 +77,10 @@ type Config struct {
 	// main sets both.
 	Jobs   JobRoutes
 	Ledger Ledger
+	// Payments serves /topups and the Stripe webhook (internal/payments).
+	// Nil answers them 503 topups_unavailable; main sets it with
+	// ACCOUNTS_BACKEND=local, with or without Stripe keys.
+	Payments *payments.Service
 }
 
 type Handler struct {
@@ -83,6 +92,7 @@ type Handler struct {
 	now    func() time.Time
 	jobs   JobRoutes
 	ledger Ledger
+	pay    *payments.Service
 	reads  *ratelimit.Limiter
 
 	mux      *http.ServeMux
@@ -102,7 +112,7 @@ func New(cfg Config) (*Handler, error) {
 		return nil, fmt.Errorf("APP_ORIGIN %q: the dashboard needs the app's origin, e.g. https://app.compute.unifyai.us (http only for localhost)", cfg.AppOrigin)
 	}
 	h := &Handler{acc: cfg.Accounts, mail: cfg.Mailer, origin: strings.ToLower(origin), host: strings.ToLower(u.Host),
-		log: cfg.Log, now: cfg.Now, jobs: cfg.Jobs, ledger: cfg.Ledger, reads: ratelimit.New(readBurst, readWindow), mux: http.NewServeMux()}
+		log: cfg.Log, now: cfg.Now, jobs: cfg.Jobs, ledger: cfg.Ledger, pay: cfg.Payments, reads: ratelimit.New(readBurst, readWindow), mux: http.NewServeMux()}
 	if h.now == nil {
 		h.now = time.Now
 	}
@@ -129,6 +139,10 @@ func New(cfg Config) (*Handler, error) {
 	h.handle("GET /jobs/{id}/events", h.session(h.read(h.job(JobRoutes.Events))))
 	h.handle("GET /jobs/{id}/logs", h.session(h.read(h.job(JobRoutes.Logs))))
 	h.handle("GET /jobs/{id}/artifacts", h.session(h.read(h.job(JobRoutes.Artifacts))))
+	h.handle("POST /topups", h.session(h.createTopup))
+	h.handle("GET /topups", h.session(h.read(h.listTopups)))
+	h.handle("GET /topups/{id}", h.session(h.read(h.getTopup)))
+	h.handle("POST "+webhookPath, h.stripeWebhook)
 	h.mux.HandleFunc(Prefix+"/", func(w http.ResponseWriter, _ *http.Request) { notFound(w) })
 	return h, nil
 }
@@ -164,7 +178,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		notFound(w)
 		return
 	}
-	if r.Method != http.MethodGet && r.Method != http.MethodHead && !strings.EqualFold(r.Header.Get("Origin"), h.origin) {
+	// Stripe's webhook is a server-to-server POST with no Origin and no
+	// session; its Stripe-Signature is its credential (topups.go).
+	isWebhook := r.Method == http.MethodPost && r.URL.Path == Prefix+webhookPath
+	if r.Method != http.MethodGet && r.Method != http.MethodHead && !isWebhook && !strings.EqualFold(r.Header.Get("Origin"), h.origin) {
 		csrfFailed(w)
 		return
 	}

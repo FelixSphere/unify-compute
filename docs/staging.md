@@ -532,6 +532,97 @@ mailer in A8; until it exists, `aws sesv2 send-email` over SSM proves the
 policy. A send denied on `configuration-set/unify-compute` means the second
 ARN is missing.
 
+## Stripe top-ups (ADR-0011 §4, task B1; nothing configured yet)
+
+Card top-ups use the Stripe account **Unify API already runs production
+on** (operator, 2026-10-03: KYC, bank details and receipts are done there).
+Compute shares the account, not the keys and not the endpoint: it has its
+own restricted keys (test for staging, live for production) and its own
+webhook endpoint, and leaves Unify API's keys, endpoints, products and
+customers alone. Everything compute creates in Stripe carries
+`metadata.product = unify-compute`, `account_id` and `environment`; its
+webhook answers every event that is not its own with `200` and stores
+nothing (`spec/accounts.md`, "Stripe webhook").
+
+State on 2026-10-03: no compute key or endpoint exists in Stripe, no SSM
+parameter exists, and no host passes the keys to compute-api. Without them
+`POST /dashboard/v1/topups` and the webhook answer `503
+topups_unavailable` and `/billing` keeps its "contact us" card, so the code
+can ship before any of this is done.
+
+Staging, in Stripe's **test mode** (production waits for O5 and O6, below):
+
+```text
+# 1. Restricted key (Developers → API keys → Create restricted key), test
+#    mode, named "unify-compute-staging". Permissions, everything else None:
+#      Checkout Sessions  Write   create, expire and read sessions
+#      Customers          Write   one Customer per compute account
+#      PaymentIntents     Read    the receipt lookup after a credit
+#      Charges            Read    ...which expands latest_charge (receipt_url)
+#    B2 (refunds, disputes) will add Refunds Write and Disputes Read.
+#    Do not reuse or edit Unify API's keys.
+
+# 2. Webhook endpoint (Developers → Webhooks → Add endpoint), test mode:
+#      URL          https://app.staging.compute.unifyai.us/dashboard/v1/stripe/webhook
+#      API version  2024-06-20   (compute-api parses events in this version)
+#      Description  Unify Compute staging
+#      Events       checkout.session.completed
+#                   checkout.session.async_payment_succeeded
+#                   checkout.session.async_payment_failed
+#                   checkout.session.expired
+#                   charge.refunded
+#                   charge.dispute.created
+#                   charge.dispute.closed
+#    Copy its signing secret (whsec_…). Do not add these events to, or
+#    change, Unify API's endpoints. Every test-mode Checkout event on the
+#    account reaches this endpoint; compute answers the others 200 ignored.
+```
+
+```bash
+# 3. SSM, SecureString, under the stack's prefix (the instance role already
+#    reads /unify-compute-staging/*). Read from stdin so the values stay out
+#    of shell history:
+aws ssm put-parameter --region us-east-1 --type SecureString \
+  --name /unify-compute-staging/stripe_secret_key --value "$(cat)"       # rk_test_…, then Ctrl-D
+aws ssm put-parameter --region us-east-1 --type SecureString \
+  --name /unify-compute-staging/stripe_webhook_secret --value "$(cat)"   # whsec_…, then Ctrl-D
+```
+
+4. **Host environment.** compute-api reads `STRIPE_SECRET_KEY` and
+   `STRIPE_WEBHOOK_SECRET`, which `deploy/compose/docker-compose.yml` passes
+   through from the host's `.env`. Nothing renders them into that `.env`
+   yet, exactly as for `ACCOUNTS_BACKEND`, `APP_ORIGIN` and `SES_SENDER`:
+   whoever turns accounts on for staging (A8, the CI/CD agent) adds the two
+   lines from these parameters in the same step, with `ENVIRONMENT=staging`,
+   and `docker compose up -d compute-api`. compute-api logs `stripe top-ups
+   enabled` with `livemode=false`; a live key on staging logs `stripe keys
+   refused` and top-ups stay off.
+
+What to exercise once it is on (plan B1, "Done when"): a USD 10 top-up with
+`4242 4242 4242 4242` credits exactly USD 10.0000 once (one `topup` entry,
+`admin audit` clean); `stripe events resend <evt>` answers `duplicate` and
+changes nothing; a forged signature is `400`; `4000 0000 0000 0002`
+(declined) credits nothing; backing out of Checkout and starting again
+expires the first session; 9.99, 100.01, a balance over 200 and a fourth
+top-up in 24 h are `403 topup_limit_exceeded`; the return page credits
+nothing on its own (stop the webhook endpoint and the top-up stays `open`).
+The endpoint's delivery log in Stripe shows each `outcome`.
+
+Account-wide settings are shared with Unify API and are not compute's to
+change alone: Radar rules (ADR-0011 wanted "block if CVC or postal code
+check fails"), the statement descriptor (compute's charges show the
+account's), and the receipt branding. Ask Unify API's owner before changing
+any of them.
+
+**Production (O6, after O5's legal review and B1/B2 on staging):** the same
+in live mode: a restricted key `rk_live_…` named "unify-compute-production"
+with the same permissions, an endpoint at
+`https://app.compute.unifyai.us/dashboard/v1/stripe/webhook` with the same
+version and events, and `/unify-compute-production/stripe_secret_key`,
+`/unify-compute-production/stripe_webhook_secret` with
+`ENVIRONMENT=production`. compute-api refuses a test key there and a live
+key anywhere else.
+
 ## Acceptance
 
 Staging is healthy when all of these hold, checked by `scripts/smoke.sh`:

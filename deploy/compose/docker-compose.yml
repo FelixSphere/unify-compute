@@ -62,6 +62,11 @@ services:
       SES_SENDER: ${SES_SENDER:-}
       SES_CONFIGURATION_SET: ${SES_CONFIGURATION_SET:-}
       MAIL_OUTBOX_DIR: ${MAIL_OUTBOX_DIR:-}
+      # Card top-ups (ADR-0011 §4). Both empty: top-ups answer 503 and the
+      # billing page keeps "contact us". A live key outside
+      # ENVIRONMENT=production, or a test key in it, is refused the same way.
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
     depends_on:
       postgres:
         condition: service_healthy

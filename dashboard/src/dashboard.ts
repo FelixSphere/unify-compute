@@ -28,7 +28,22 @@ type Me = {
   account: { id: number; status: 'active' | 'suspended' | 'closed'; compute_enabled: boolean };
   csrf_token: string;
 };
-type Balance = { available_usd: string; held_usd: string; currency?: 'USD' };
+type Balance = {
+  available_usd: string;
+  held_usd: string;
+  currency?: 'USD';
+  limits?: { topup_min_usd: string; topup_max_usd: string; balance_max_usd: string; topups_per_day: number };
+};
+type Topup = {
+  id: string;
+  amount_usd: string;
+  status: string;
+  created_at: number;
+  paid_at: number | null;
+  receipt_url: string | null;
+  refunded_usd: string;
+};
+type TopupList = { data: Topup[]; topups_enabled?: boolean };
 type Key = {
   id: number | string;
   name: string;
@@ -321,7 +336,7 @@ async function withReauth<T>(action: () => Promise<Result<T>>): Promise<Result<T
 
 // ---------------------------------------------------------------- balance
 
-async function showBalance() {
+async function showBalance(): Promise<Balance | null> {
   const r = await get<Balance>('/balance');
   if (r.ok) {
     setText('balance-available', r.data.available_usd);
@@ -331,11 +346,13 @@ async function showBalance() {
         ? 'Nothing is held for running jobs.'
         : `USD ${r.data.held_usd} more is held for running jobs and comes back when they finish.`,
     );
+    return r.data;
   } else if (notBuilt(r.error)) {
     setText('balance-sub', 'Your balance will show here once billing is live in the dashboard.');
   } else {
     setText('balance-sub', r.error.message);
   }
+  return null;
 }
 
 // ---------------------------------------------------------------- pages
@@ -816,10 +833,30 @@ function refCell(ref: Entry['ref']): Child {
   return id.startsWith('job_') ? jobLink(id) : mono(id);
 }
 
+const TOPUP_STATUS: Record<string, [string, Tone]> = {
+  open: ['Awaiting payment', 'muted'],
+  credited: ['Added', 'success'],
+  expired: ['Not completed', 'muted'],
+  failed: ['Failed', 'danger'],
+  refunded: ['Refunded', 'muted'],
+  partially_refunded: ['Partly refunded', 'muted'],
+  disputed: ['Disputed', 'warning'],
+  lost: ['Dispute lost', 'danger'],
+};
+
+// Same rule as compute-api (internal/payments ParseAmount): dollars with at
+// most two decimals.
+function cents(usd: string): number | null {
+  const m = /^(0|[1-9]\d{0,6})(?:\.(\d{1,2}))?$/.exec(usd.trim());
+  return m ? Number(m[1]) * 100 + Number((m[2] ?? '').padEnd(2, '0')) : null;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 async function billing() {
   const me = await shell();
   if (!me) return;
-  void showBalance();
+  const balance = showBalance();
   const more = $<HTMLButtonElement>('history-more')!;
   let rows: Entry[] = [];
   let cursor: string | undefined;
@@ -854,7 +891,115 @@ async function billing() {
     );
   }
   more.addEventListener('click', () => void load(true));
-  await load(false);
+
+  // --- Card top-ups (B1). The page never credits anything: it sends the
+  // browser to Stripe's Checkout page and, on the way back, waits for the
+  // webhook to have done it.
+  const openButton = $<HTMLButtonElement>('topup-open')!;
+  const contact = $('contact-primary')!;
+  const card = $('topup')!;
+  const off = $('topup-off')!;
+  const form = $<HTMLFormElement>('topup-form')!;
+  const amount = input('amount_usd')!;
+  const status = $('topup-status')!;
+  let min = 1000;
+  let max = 10000;
+
+  async function loadTopups(): Promise<TopupList | null> {
+    const r = await get<TopupList>('/topups');
+    if (!r.ok) return null;
+    const list = r.data.data;
+    $('topups-section')!.hidden = list.length === 0;
+    fill(
+      'topups',
+      table(
+        'Card top-ups',
+        [{ text: 'Date' }, { text: 'Amount (USD)', num: true }, { text: 'Status' }, { text: 'Receipt' }],
+        list.map((t) => [
+          when(t.created_at),
+          mono(t.amount_usd),
+          state(...(TOPUP_STATUS[t.status] ?? [t.status, 'muted'])),
+          t.receipt_url && t.receipt_url.startsWith('https://') ? h('a', { href: t.receipt_url, rel: 'noopener noreferrer', target: '_blank' }, 'View receipt') : '—',
+        ]),
+      ),
+    );
+    return r.data;
+  }
+
+  const closeForm = () => {
+    card.hidden = true;
+    openButton.hidden = false;
+  };
+  openButton.addEventListener('click', () => {
+    form.reset();
+    clearFieldError('amount_usd');
+    card.hidden = false;
+    // One primary per view: the form's own replaces this one.
+    openButton.hidden = true;
+    amount.focus();
+  });
+  $('topup-cancel')!.addEventListener('click', () => {
+    closeForm();
+    openButton.focus();
+  });
+
+  onSubmit(form, async () => {
+    const c = cents(amount.value);
+    if (c === null) {
+      setFieldError('amount_usd', 'Enter an amount in US dollars, like 20 or 20.00.');
+      return focusFirstInvalid(form);
+    }
+    if (c < min || c > max) {
+      setFieldError('amount_usd', `Enter an amount from USD ${(min / 100).toFixed(2)} to ${(max / 100).toFixed(2)}.`);
+      return focusFirstInvalid(form);
+    }
+    busy(form, true);
+    const r = await send<{ id: string; checkout_url: string }>('POST', '/topups', { amount_usd: (c / 100).toFixed(2) });
+    if (!r.ok) return showApiError(r.error);
+    if (!r.data.checkout_url.startsWith('https://')) return setFormError(GENERIC);
+    // A full navigation to Stripe's hosted page: no Stripe script runs here,
+    // and the CSP stays as strict as on every other page.
+    busy(form, true);
+    location.assign(r.data.checkout_url);
+  });
+
+  // Back from Checkout: /billing?topup=tu_…&checkout=success|cancelled.
+  async function returned(id: string, outcome: string | null) {
+    history.replaceState(null, '', '/billing');
+    if (outcome === 'cancelled') {
+      status.textContent = 'Payment cancelled. Nothing was charged.';
+      return;
+    }
+    status.textContent = 'Payment received by Stripe. Adding it to your balance…';
+    for (let i = 0; i < 15; i++) {
+      const r = await get<Topup>(`/topups/${encodeURIComponent(id)}`);
+      if (r.ok && r.data.status !== 'open') {
+        status.textContent =
+          r.data.status === 'credited' ? `USD ${r.data.amount_usd} added to your balance.` : 'This payment did not go through. Nothing was charged.';
+        void showBalance();
+        void loadTopups();
+        void load(false);
+        return;
+      }
+      if (!r.ok && r.error.status === 404) break;
+      await sleep(2000);
+    }
+    status.textContent = 'Your payment is still being confirmed. It will appear in your balance within a few minutes; refresh this page to check.';
+  }
+
+  const q = new URLSearchParams(location.search);
+  const back = q.get('topup');
+  const [list] = await Promise.all([loadTopups(), load(false)]);
+  if (list?.topups_enabled) {
+    const b = await balance;
+    min = cents(b?.limits?.topup_min_usd ?? '') ?? min;
+    max = cents(b?.limits?.topup_max_usd ?? '') ?? max;
+    setText('amount_usd-hint', `USD ${(min / 100).toFixed(2)} to ${(max / 100).toFixed(2)} per top-up. Your balance can hold up to USD ${b?.limits?.balance_max_usd ?? '200.00'}.`);
+    off.hidden = true;
+    contact.hidden = true;
+    openButton.hidden = false;
+  }
+  if (back && /^tu_[0-9A-Z]{26}$/.test(back)) await returned(back, q.get('checkout'));
 }
 
 async function account() {

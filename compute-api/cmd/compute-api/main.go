@@ -24,6 +24,7 @@ import (
 	"github.com/FelixSphere/unify-compute/compute-api/internal/dashboard"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/jobs"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/mailer"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/payments"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/quota"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/sku"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/store"
@@ -190,6 +191,7 @@ func main() {
 	var svc *jobs.Service
 	var dash *dashboard.Handler
 	var sweepAccounts *accounts.Service
+	var pay *payments.Service
 	if dsn := os.Getenv("DATABASE_URL"); dsn == "" {
 		if backendName == backendLocal {
 			log.Error("ACCOUNTS_BACKEND=local needs DATABASE_URL: the balance, accounts and sessions live in the job store")
@@ -244,8 +246,9 @@ func main() {
 		// The same switch mounts /dashboard/v1: with the console backend
 		// none of it is registered.
 		if backendName == backendLocal {
+			pay = paymentsService(log, st, acc, local)
 			dash, err = dashboard.New(dashboard.Config{Accounts: acc, Mailer: mail, AppOrigin: os.Getenv("APP_ORIGIN"), Log: log,
-				Jobs: handler.AccountJobs(), Ledger: local})
+				Jobs: handler.AccountJobs(), Ledger: local, Payments: pay})
 			if err != nil {
 				log.Error("dashboard", "err", err)
 				os.Exit(1)
@@ -296,6 +299,9 @@ func main() {
 		// Reset links and codes queued after a response still go out.
 		dash.Wait()
 	}
+	if pay != nil {
+		pay.Wait()
+	}
 	// The loops stop at their next tick boundary; a step in flight finishes.
 	workers.Wait()
 }
@@ -321,6 +327,26 @@ func sweepAccountsHourly(ctx context.Context, log *slog.Logger, acc *accounts.Se
 		case <-t.C:
 		}
 	}
+}
+
+// paymentsService builds top-ups (ADR-0011 §4). Without Stripe keys, or with
+// keys that do not belong in this environment, the service still boots and
+// lists top-ups, while creating one and the webhook answer 503: a host must
+// not crash-loop over a payment setting (the CONSOLE_URL lesson of
+// 2026-10-02), and a live key on staging must never take money.
+func paymentsService(log *slog.Logger, st *store.Store, acc *accounts.Service, local *billing.Local) *payments.Service {
+	set := payments.SettingsFromEnv(os.Getenv)
+	cfg := payments.Config{DB: st.Pool(), Accounts: acc, Billing: local, Settings: set, AppOrigin: os.Getenv("APP_ORIGIN"), Log: log}
+	switch err := set.Check(); {
+	case !set.Configured():
+		log.Warn("STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET unset; top-ups answer 503 topups_unavailable")
+	case err != nil:
+		log.Error("stripe keys refused; top-ups answer 503 topups_unavailable", "err", err, "environment", set.Environment)
+	default:
+		cfg.Stripe = &payments.Stripe{Key: set.SecretKey, HTTP: &http.Client{Timeout: 20 * time.Second}}
+		log.Info("stripe top-ups enabled", "livemode", set.Livemode(), "environment", set.Environment)
+	}
+	return payments.New(cfg)
 }
 
 // skyPilotUser is the SkyPilot user every cluster belongs to, so any
