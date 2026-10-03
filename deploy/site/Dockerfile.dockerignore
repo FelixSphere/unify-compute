@@ -1,0 +1,16 @@
+# BuildKit reads this instead of a root .dockerignore when building with
+# -f deploy/site/Dockerfile, so the compute-api build is unaffected.
+# Allowlist: only what `npm run build` reads, plus the Caddyfile.
+*
+!package.json
+!package-lock.json
+!next.config.ts
+!vite.config.ts
+!tsconfig.json
+!components.json
+!app/
+!components/
+!hooks/
+!lib/
+!public/
+!deploy/site/Caddyfile

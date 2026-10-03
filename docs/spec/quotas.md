@@ -185,9 +185,10 @@ second). Over budget is `429`, `type`/`code` `rate_limited`, with
 - Applied after the key's shape is checked, so an anonymous request is `401`
   and spends nobody's budget. Every authenticated submit counts, including
   ones refused later for validation or quota.
-- Reads are `GET /jobs`, `GET /jobs/{id}`, `/logs`, `/artifacts`. Cancel is
-  in neither budget (open question below). Public routes (`/skus`,
-  `/upstreams`, `/healthz`) are not limited here.
+- Reads are `GET /jobs`, `GET /jobs/{id}`, `/logs`, `/artifacts`, `/events`.
+  Cancel is in neither budget (open question below). Public routes (`/skus`,
+  `/upstreams`, `/templates`, `/openapi.json`, `/healthz`) are not limited
+  here.
 - Buckets are in process memory, keyed by a SHA-256 of the key. With several
   replicas each enforces its own budget, so the effective limit is the
   per-process limit times the replica count. Staging runs one.

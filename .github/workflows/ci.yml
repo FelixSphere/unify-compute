@@ -1,6 +1,8 @@
 # The machine checks for this repository. There are no credentials here and no
-# deploy job: releases are the CI/CD agent's (.claude/agents/cicd.md), and the
-# marketing site ships through OpenAI Sites, not from this workflow.
+# deploy job: releases are the CI/CD agent's (.claude/agents/cicd.md). The
+# marketing site is moving from OpenAI Sites to the `site` container
+# (deploy/site/, ADR-0009); this workflow builds and exercises that image but
+# never pushes it — publish-image.yml does, and release.yml deploys it.
 name: CI
 
 on:
@@ -35,6 +37,29 @@ jobs:
           grep -q 'AGENTS.md' .cursor/rules/agents.mdc
           grep -q 'AGENTS.md' .github/copilot-instructions.md
 
+  # One record per release under deploy/releases/, in the shape the README
+  # defines, and every successful release.yml run older than a day cited by
+  # one. A run nobody wrote down is found later by whoever needed to know what
+  # shipped. Also lints the release scripts, which `infra-checks` does not
+  # reach (it globs scripts/*.sh only); the host script is POSIX sh because
+  # SSM runs it with `sh`.
+  release-records:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Release records
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/release/check-records.sh
+      - name: shellcheck the release scripts
+        run: |
+          shellcheck -s sh scripts/release/host.sh
+          shellcheck scripts/release/*.sh
+
   site:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -50,6 +75,62 @@ jobs:
       # AGENTS.md. Formatting is not checked yet: app/ predates .oxfmtrc.json.
       - run: npx oxlint app lib
       - run: npm run build
+
+  # The site container, run for real: every route the export must answer, the
+  # content types browsers enforce under nosniff, and the cache headers a
+  # release depends on. One arch is enough here; publish-image.yml builds and
+  # asserts arm64.
+  site-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/site/Dockerfile
+          load: true
+          push: false
+          provenance: false
+          build-args: SITE_BUILD_ID=${{ github.sha }}
+          tags: unify-compute-site:ci
+          cache-from: type=gha,scope=site
+          cache-to: type=gha,scope=site,mode=max
+      - name: Run
+        run: |
+          docker run -d --name site -p 8080:8080 unify-compute-site:ci
+          for _ in $(seq 1 30); do
+            curl -fs http://127.0.0.1:8080/healthz >/dev/null && exit 0
+            sleep 1
+          done
+          docker logs site; exit 1
+      - name: Runs unprivileged
+        run: test "$(docker exec site id -u)" = 65534
+      # The image's HEALTHCHECK (and compose's, which reuses it) shells out to
+      # busybox wget. Prove the binary is there and the check goes healthy,
+      # rather than learning it from an instance that never turns healthy.
+      - name: Docker healthcheck goes healthy
+        run: |
+          docker exec site wget -q -O /dev/null http://127.0.0.1:8080/healthz
+          # First probe runs one --interval (30s) after start.
+          for _ in $(seq 1 30); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' site)
+            [ "$status" = healthy ] && exit 0
+            sleep 2
+          done
+          echo "health status: $status"; docker inspect -f '{{json .State.Health}}' site; exit 1
+      - run: deploy/site/smoke.sh http://127.0.0.1:8080
+      # smoke.sh proves the navigation payloads are served; this clicks the
+      # links in headless Chrome (preinstalled on the runner) and proves the
+      # router uses them. Node 22 for the built-in WebSocket it drives CDP with.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node deploy/site/browser-check.mjs http://127.0.0.1:8080
+      - if: failure()
+        run: docker logs site
 
   compute-api:
     runs-on: ubuntu-latest
@@ -121,17 +202,35 @@ jobs:
       - name: shellcheck
         run: |
           sudo apt-get update -q && sudo apt-get install -y -q shellcheck
-          shellcheck scripts/*.sh
+          shellcheck scripts/*.sh deploy/site/*.sh
 
-  # Every image this repository pins must exist in the registry AND carry a
-  # linux/arm64 manifest. Both staging and UnifyAPI production are Graviton
-  # (t4g.small); an amd64-only image fails as a container that never starts,
-  # long after `terraform apply` has reported success.
+  # Every image this repository pins must be pinned BY DIGEST, exist in the
+  # registry, AND carry a linux/arm64 manifest. Every hosted environment is
+  # Graviton (t4g.small); an amd64-only image fails as a container that never
+  # starts, long after `terraform apply` has reported success. A tag is not a
+  # pin: it can move under a running environment, and the instance re-pulls on
+  # every rebuild.
   #
   # This job exists because on 11 Sep 2026 the pinned
   # ghcr.io/felixsphere/unify-compute-api did not exist in the registry at all
-  # (NAME_UNKNOWN) while variables.tf pinned it as the default. A first apply
-  # would have booted a host that could never pull.
+  # (NAME_UNKNOWN) while the staging stack pinned it as the default. A first
+  # apply would have booted a host that could never pull.
+  #
+  # It is expected to be RED until compute-api and the site image are
+  # published and their digests pinned in deploy/aws/envs/*/variables.tf.
+  # That is the truthful state — neither environment can boot yet — and
+  # weakening the check to make it green would hide exactly that.
+  #
+  # Our own pins are ECR refs (<acct>.dkr.ecr.<region>.amazonaws.com/
+  # unify-compute-{api,site}@sha256:D), the hosts' runtime registry. CI has no
+  # AWS credentials and must keep it that way, so it cannot read ECR. What it
+  # checks instead is the source of that copy: the same digest D at
+  # ghcr.io/felixsphere/<same repository>, where publish-image.yml pushed it
+  # and from which release.yml copies it into ECR, unchanged and verified,
+  # before any host is cut over. A digest is the content, so "D exists on
+  # GHCR with arm64" is the property the ECR copy inherits. Whether a given
+  # digest has been copied yet is a release-time fact (release.yml), not a
+  # repository one.
   pinned-images:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -147,19 +246,44 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Every pinned image exists and runs on arm64
+      - name: Every pinned image is a digest, exists, and runs on arm64
         run: |
           set -euo pipefail
-          # Defaults declared in the staging stack. Pins live in exactly one
-          # place; if that stops being true this grep is the thing to update.
-          images=$(grep -oE 'ghcr\.io/[a-z0-9._/-]+[:@][A-Za-z0-9._:-]+' \
-            deploy/aws/staging/variables.tf | sort -u)
+          # Pins live in two places: the environment roots' variable defaults
+          # (our images and the console), and literal image lines in the
+          # compose files (Postgres, Redis). `${...}` lines in compose are
+          # filled from the former. If pins move, this is what to update.
+          images=$( {
+            grep -hoE 'ghcr\.io/[a-z0-9._/-]+(:[A-Za-z0-9._-]+)?(@sha256:[0-9a-f]{64})?' \
+              deploy/aws/envs/*/variables.tf
+            grep -hoE '[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/[a-z0-9._/-]+(:[A-Za-z0-9._-]+)?(@sha256:[0-9a-f]{64})?' \
+              deploy/aws/envs/*/variables.tf
+            grep -hE '^[[:space:]]*image:[[:space:]]*[^$[:space:]]' deploy/compose/docker-compose*.yml \
+              | sed -E 's/^[[:space:]]*image:[[:space:]]*//'
+          } | sort -u)
           [ -n "$images" ] || { echo "::error::found no pinned images to check"; exit 1; }
 
           fail=0
           for ref in $images; do
             echo "--- $ref"
-            if ! docker buildx imagetools inspect "$ref" --raw > m.json 2>err.txt; then
+            case "$ref" in
+              *@sha256:*) ;;
+              *) echo "::error::$ref is not pinned by digest (expected name[:tag]@sha256:<64 hex>)"; fail=1 ;;
+            esac
+            # name:tag@digest is valid for docker pull (the tag is ignored); the
+            # inspection uses the digest alone so it checks exactly that.
+            inspect_ref=$(printf '%s' "$ref" | sed -E 's/:[A-Za-z0-9._-]+@/@/')
+            case "$inspect_ref" in
+              *.dkr.ecr.*)
+                if [[ ! "$inspect_ref" =~ ^871376691052\.dkr\.ecr\.us-east-1\.amazonaws\.com/(unify-compute-(api|site))@sha256:[0-9a-f]{64}$ ]]; then
+                  echo "::error::$ref is not one of our ECR repositories (871376691052.dkr.ecr.us-east-1.amazonaws.com/unify-compute-{api,site}@sha256:<digest>)"
+                  fail=1; continue
+                fi
+                inspect_ref="ghcr.io/felixsphere/${BASH_REMATCH[1]}@${inspect_ref#*@}"
+                echo "    ECR pin; checking its source $inspect_ref"
+                ;;
+            esac
+            if ! docker buildx imagetools inspect "$inspect_ref" --raw > m.json 2>err.txt; then
               echo "::error::$ref is not pullable: $(head -c 300 err.txt)"
               fail=1; continue
             fi
@@ -167,7 +291,7 @@ jobs:
               arches=$(jq -r '[.manifests[] | select(.platform.os=="linux") | .platform.architecture] | sort | join(",")' m.json)
             else
               # Single-platform image: read the config's architecture.
-              arches=$(docker buildx imagetools inspect "$ref" --format '{{.Image.Architecture}}' 2>/dev/null || echo unknown)
+              arches=$(docker buildx imagetools inspect "$inspect_ref" --format '{{.Image.Architecture}}' 2>/dev/null || echo unknown)
             fi
             echo "    linux arches: $arches"
             case ",$arches," in

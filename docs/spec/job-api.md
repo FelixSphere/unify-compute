@@ -9,7 +9,7 @@
 
 ## Authentication
 
-`Authorization: Bearer sk-…` with the customer's existing UnifyAPI key. The
+`Authorization: Bearer sk-…` with the customer's existing Unify API key. The
 same key that calls `api.unifyapi.ai/v1`. compute-api verifies it through the
 console bridge (`console-billing-bridge.md` → `verify`) and caches the result
 for at most 60 seconds; a revoked key stops working within that window.
@@ -35,6 +35,7 @@ OpenAI-style envelope so existing client error handling carries over:
 | 404 | `not_found` | Job id unknown *for this key* (no existence leak across users) |
 | 409 | `conflict` | Idempotency-Key reused with a different body; cancel on a terminal job |
 | 429 | `rate_limited` | Per-key submit or read rate exceeded; always with `Retry-After` |
+| 500 | `internal_error` | Placement failed for a reason the API does not distinguish (`placement_failed`); not expected in normal operation |
 | 501 | `not_implemented` | Route exists, backend not built (current state) |
 | 503 | `console_unavailable` | Key could not be verified or hold could not be placed |
 | 503 | `upstream_unavailable` | The SKU is sound but no provider it offers is enabled in this deployment |
@@ -72,8 +73,10 @@ OpenAI-style envelope so existing client error handling carries over:
 }
 ```
 
-`placement` is null until the job is `running` and says where it landed
-(*planned*; the backend fills it from SkyPilot's cluster record).
+`placement` is null until the job is `running` and says where it landed.
+The backend writes it from SkyPilot's cluster record when the cluster is
+first seen `UP`, before the job reads `running` ([`backend.md`](backend.md)).
+It is not served yet, because the backend is not wired to submit.
 
 Money is a decimal string in USD, never a float. Timestamps are Unix seconds.
 
@@ -135,6 +138,13 @@ regions. See [`upstreams.md`](upstreams.md) and ADR-0006.
 
 ## Endpoints
 
+The machine-readable form of this contract is
+[`openapi.json`](openapi.json) (OpenAPI 3.1), served by every build at
+`GET /compute/v1/openapi.json` (public). The canonical file is
+`compute-api/internal/api/openapi.json`, embedded in the binary; the copy here
+is kept byte-identical by a test, and a test fails if a route is registered
+without an entry there. A change to an endpoint below changes both.
+
 ### `GET /compute/v1/skus`
 
 Lists offered SKUs. Public (no auth) so the pricing page can render from it.
@@ -157,6 +167,13 @@ same key + different body is `409`).
 Body: the `spec` object above plus `sku` (required), optional `providers`
 (a subset of the SKU's provider clouds, to pin placement; default all), and
 optional `metadata` (≤ 16 string pairs). Server fills everything else.
+
+Optional `template`: the id of a template from `GET /compute/v1/templates`.
+The template supplies the spec and the default `sku`; the body may then set
+only the fields that template lists as overridable, and binds a `source` to
+each of its input mounts. The resolved spec goes through the validation below
+unchanged. Rules and the template error codes are in
+[`templates.md`](templates.md).
 
 Validated before anything is held or persisted, in this order: body parses
 (`malformed_body`), `sku` present (`missing_sku`) and offered (`unknown_sku`)
@@ -234,7 +251,8 @@ settlement cadence, interruption and retry — are in
 ## Rate limits
 
 Per key: 60 submits/hour, 600 reads/minute (`GET` on `/jobs`, `/jobs/{id}`,
-`/logs`, `/artifacts`). Returned as `429` with `Retry-After` in seconds.
+`/logs`, `/artifacts`, `/events`). Returned as `429` with `Retry-After` in
+seconds.
 Enforced per process, in memory; details and limits of that in
 [`quotas.md`](quotas.md#per-key-rate-limits). Cancel is not limited yet.
 

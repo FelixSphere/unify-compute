@@ -14,6 +14,7 @@ import (
 	"github.com/FelixSphere/unify-compute/compute-api/internal/console"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/quota"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/sku"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/template"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/upstream"
 )
 
@@ -41,6 +42,14 @@ func main() {
 	}
 	log.Info("quotas loaded", "overrides", len(quotas.Owners), "enforced", false)
 
+	// Templates are checked against the catalogue they sell from, so a
+	// template naming a SKU that was removed fails the deploy, not a submit.
+	templates, err := template.Load(env("TEMPLATE_FILE", "config/templates.json"), cat, api.MaxRuntimeSeconds)
+	if err != nil {
+		log.Error("load templates", "err", err)
+		os.Exit(1)
+	}
+
 	// Which clouds this deployment may launch into (ADR-0006). Empty is
 	// legal and means every submit is refused with 503 until it is set.
 	upstreams, err := upstream.Parse(os.Getenv("UPSTREAMS"))
@@ -66,16 +75,18 @@ func main() {
 		log.Warn("CONSOLE_URL unset; job routes will refuse until it is")
 	}
 
+	handler := api.New(Build, cat, upstreams, log)
+	handler.Templates = templates
 	srv := &http.Server{
 		Addr:              env("LISTEN_ADDR", "127.0.0.1:8080"),
-		Handler:           api.New(Build, cat, upstreams, log),
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	go func() {
-		log.Info("listening", "addr", srv.Addr, "build", Build, "skus", len(cat.SKUs))
+		log.Info("listening", "addr", srv.Addr, "build", Build, "skus", len(cat.SKUs), "templates", len(templates.Templates))
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("serve", "err", err)
 			os.Exit(1)
