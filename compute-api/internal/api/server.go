@@ -4,16 +4,21 @@
 package api
 
 import (
+	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/FelixSphere/unify-compute/compute-api/internal/events"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/sku"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/store"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/template"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/upstream"
 )
@@ -32,12 +37,56 @@ type Server struct {
 	// serves an empty list and refuses every `template` on submit.
 	Templates *template.Set
 	Log       *slog.Logger
-	mux       *http.ServeMux
+
+	// Events and Owner are unset until the binary opens the job store and
+	// the console bridge resolves keys to owners; the events route answers
+	// 501 until both are.
+	Events EventSource
+	Owner  func(ctx context.Context, key string) (string, error)
+
+	mux *router
 }
 
+type EventSource interface {
+	ListEvents(ctx context.Context, owner, jobID, after string, limit int) (store.EventPage, error)
+}
+
+// ErrKeyRejected is what an Owner resolver returns for a key the console
+// refused; any other error means the key could not be checked at all.
+var ErrKeyRejected = errors.New("api: key rejected")
+
+// router is an http.ServeMux that remembers what was registered on it, so a
+// test can hold the route table against the OpenAPI document. Registering
+// through s.mux is the only way to add a route, which is what makes the
+// check complete.
+type router struct {
+	*http.ServeMux
+	patterns []string
+}
+
+func newRouter() *router { return &router{ServeMux: http.NewServeMux()} }
+
+func (r *router) Handle(pattern string, h http.Handler) {
+	r.patterns = append(r.patterns, pattern)
+	r.ServeMux.Handle(pattern, h)
+}
+
+func (r *router) HandleFunc(pattern string, h func(http.ResponseWriter, *http.Request)) {
+	r.Handle(pattern, http.HandlerFunc(h))
+}
+
+// openAPIDoc is the customer-facing contract. This file is canonical; the copy
+// in docs/spec/openapi.json is kept byte-identical by a test. It lives here
+// because go:embed cannot reach outside the module, and the image is built
+// from compute-api/ alone.
+//
+//go:embed openapi.json
+var openAPIDoc []byte
+
 func New(build string, cat *sku.Catalogue, reg *upstream.Registry, log *slog.Logger) *Server {
-	s := &Server{Build: build, Catalogue: cat, Upstreams: reg, Log: log, mux: http.NewServeMux()}
+	s := &Server{Build: build, Catalogue: cat, Upstreams: reg, Log: log, mux: newRouter()}
 	s.mux.HandleFunc("GET /healthz", s.health)
+	s.mux.HandleFunc("GET /compute/v1/openapi.json", s.openAPI)
 	s.mux.HandleFunc("GET /compute/v1/skus", s.listSKUs)
 	s.mux.HandleFunc("GET /compute/v1/upstreams", s.listUpstreams)
 	s.mux.HandleFunc("GET /compute/v1/templates", s.listTemplates)
@@ -47,6 +96,7 @@ func New(build string, cat *sku.Catalogue, reg *upstream.Registry, log *slog.Log
 	s.mux.Handle("POST /compute/v1/jobs/{id}/cancel", s.auth(s.notImplemented("job cancel")))
 	s.mux.Handle("GET /compute/v1/jobs/{id}/logs", s.auth(s.notImplemented("job logs")))
 	s.mux.Handle("GET /compute/v1/jobs/{id}/artifacts", s.auth(s.notImplemented("job artifacts")))
+	s.mux.Handle("GET /compute/v1/jobs/{id}/events", s.auth(http.HandlerFunc(s.listEvents)))
 	return s
 }
 
@@ -90,6 +140,13 @@ func invalid(w http.ResponseWriter, code, param, msg string) {
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "service": "compute-api", "build": s.Build})
+}
+
+// openAPI is public: clients and the CLI generate from it before they hold
+// a key.
+func (s *Server) openAPI(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(openAPIDoc)
 }
 
 func (s *Server) listSKUs(w http.ResponseWriter, _ *http.Request) {
@@ -252,4 +309,55 @@ func (s *Server) notImplemented(what string) http.Handler {
 			Message: what + " is not available yet; see docs/spec/job-api.md for the contract.",
 		})
 	})
+}
+
+// listEvents serves docs/spec/events.md. Oldest first; next is always the
+// last id returned so a poller can resume from the tail.
+func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
+	if s.Events == nil || s.Owner == nil {
+		s.notImplemented("job events").ServeHTTP(w, r)
+		return
+	}
+	limit := 0
+	if v := r.URL.Query().Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > store.MaxEventLimit {
+			invalid(w, "invalid_limit", "limit", fmt.Sprintf("limit must be an integer from 1 to %d", store.MaxEventLimit))
+			return
+		}
+		limit = n
+	}
+	key, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	owner, err := s.Owner(r.Context(), strings.TrimSpace(key))
+	switch {
+	case errors.Is(err, ErrKeyRejected):
+		writeError(w, http.StatusUnauthorized, apiError{Type: "authentication_error", Code: "invalid_key", Message: "This key was not accepted."})
+		return
+	case err != nil:
+		writeError(w, http.StatusServiceUnavailable, apiError{Type: "console_unavailable", Code: "console_unavailable", Message: "The key could not be verified; retry shortly."})
+		return
+	}
+	id := r.PathValue("id")
+	page, err := s.Events.ListEvents(r.Context(), owner, id, r.URL.Query().Get("after"), limit)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		writeError(w, http.StatusNotFound, apiError{Type: "not_found", Code: "job_not_found", Message: fmt.Sprintf("no job %q", id)})
+		return
+	case errors.Is(err, store.ErrInvalidEventCursor):
+		invalid(w, "invalid_cursor", "after", "after must be the id of an event of this job")
+		return
+	case err != nil:
+		s.Log.Error("list events", "job", id, "err", err)
+		writeError(w, http.StatusInternalServerError, apiError{Type: "internal_error", Code: "internal_error", Message: "events could not be read"})
+		return
+	}
+	data := make([]events.Object, len(page.Events))
+	for i, e := range page.Events {
+		data[i] = events.ObjectOf(e)
+	}
+	out := map[string]any{"object": "list", "data": data, "has_more": page.HasMore}
+	if len(data) > 0 {
+		out["next"] = data[len(data)-1].ID
+	}
+	writeJSON(w, http.StatusOK, out)
 }

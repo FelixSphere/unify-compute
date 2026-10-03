@@ -1,0 +1,1382 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "UnifyAI Compute API",
+    "version": "v1-draft",
+    "description": "Customer-facing contract for the compute job API, mirroring docs/spec/job-api.md. Draft: the job routes exist and validate, but the backend is not built, so every authenticated job route currently answers `501 not_implemented` after authentication and (for submit) validation. Responses marked *Planned* are the contract the backend will honour; they are not returned today. Authentication currently checks only the shape of the key (`Bearer sk-...`); verification against UnifyAPI is planned.",
+    "license": {
+      "name": "Proprietary",
+      "identifier": "LicenseRef-Proprietary"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://staging.compute.unifyai.us",
+      "description": "Staging. Defined, not yet applied: this host does not resolve yet."
+    },
+    {
+      "url": "https://api.compute.unifyai.us",
+      "description": "Production. Does not exist yet."
+    }
+  ],
+  "tags": [
+    {
+      "name": "catalogue",
+      "description": "Public: what can be bought and where it runs."
+    },
+    {
+      "name": "jobs",
+      "description": "Authenticated with a UnifyAPI key."
+    },
+    {
+      "name": "meta",
+      "description": "Service metadata and health."
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/healthz": {
+      "get": {
+        "operationId": "health",
+        "tags": [
+          "meta"
+        ],
+        "security": [],
+        "summary": "Liveness and build identity",
+        "description": "Operational, not part of the customer contract under /compute/v1; listed so the route table and this document agree.",
+        "responses": {
+          "200": {
+            "description": "Process is serving.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/compute/v1/openapi.json": {
+      "get": {
+        "operationId": "getOpenAPI",
+        "tags": [
+          "meta"
+        ],
+        "security": [],
+        "summary": "This document",
+        "responses": {
+          "200": {
+            "description": "The OpenAPI 3.1 document embedded in this build.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/compute/v1/skus": {
+      "get": {
+        "operationId": "listSKUs",
+        "tags": [
+          "catalogue"
+        ],
+        "security": [],
+        "summary": "List offered SKUs",
+        "description": "Public so the pricing page can render from it. Not paginated: the whole catalogue is returned.",
+        "responses": {
+          "200": {
+            "description": "The catalogue.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SKUList"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/compute/v1/upstreams": {
+      "get": {
+        "operationId": "listUpstreams",
+        "tags": [
+          "catalogue"
+        ],
+        "security": [],
+        "summary": "List upstream clouds",
+        "description": "Every cloud the catalogue references, whether this deployment has it enabled, and which SKUs it serves. Sorted by cloud. Public, like /skus.",
+        "responses": {
+          "200": {
+            "description": "Upstreams.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpstreamList"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/compute/v1/jobs": {
+      "post": {
+        "operationId": "submitJob",
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Submit a job",
+        "description": "Validated before anything is held or persisted, in this order: body parses (`malformed_body`), `sku` present (`missing_sku`), offered (`unknown_sku`) and sold (`sku_unavailable`), `spec.max_runtime_seconds` positive (`missing_max_runtime`) and at most 86400 (`runtime_over_ceiling`), every entry of `providers` offered by the SKU (`provider_not_offered`), and at least one candidate enabled in this deployment (`503 upstream_unavailable`). A request that passes validation currently receives `501 not_implemented`. Planned flow: verify key, place a hold on the UnifyAPI balance, persist the job `queued`, hand it to SkyPilot.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitJobRequest"
+              },
+              "example": {
+                "sku": "a10g-24gb-x1",
+                "providers": [
+                  "aws"
+                ],
+                "spec": {
+                  "image": "ghcr.io/acme/embed:1.4",
+                  "command": [
+                    "python",
+                    "run.py"
+                  ],
+                  "max_runtime_seconds": 7200
+                },
+                "metadata": {
+                  "pipeline": "nightly-embed"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Idempotent replay: same Idempotency-Key and same body returns the original job. *Planned:* not returned by the current build.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Job accepted and queued. *Planned:* not returned by the current build.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed. `error.code` is one of `malformed_body`, `missing_sku`, `unknown_sku`, `sku_unavailable`, `missing_max_runtime`, `runtime_over_ceiling`, `provider_not_offered`; `error.param` names the field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "402": {
+            "description": "Hold refused: balance below the hold. `error.message` carries the hold amount and the estimate. *Planned:* not returned by the current build.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency-Key reused with a different body. *Planned:* not returned by the current build.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "description": "`internal_error`/`placement_failed`: placement failed for a reason other than the two the API distinguishes. Not expected in normal operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "501": {
+            "$ref": "#/components/responses/NotImplemented"
+          },
+          "503": {
+            "description": "`upstream_unavailable`: the SKU is sound but no provider it offers (or that `providers` allows) is enabled in this deployment. Planned: `console_unavailable` when the key cannot be verified or the hold cannot be placed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listJobs",
+        "tags": [
+          "jobs"
+        ],
+        "summary": "List jobs",
+        "description": "Cursor list, newest first. Currently returns `501 not_implemented`.",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "style": "form",
+            "explode": true,
+            "description": "Filter by status; repeatable.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/JobStatus"
+              }
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size. Default and maximum are not yet specified.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "description": "Cursor: the `next` value of the previous page.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of jobs. *Planned:* not returned by the current build.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "501": {
+            "$ref": "#/components/responses/NotImplemented"
+          }
+        }
+      }
+    },
+    "/compute/v1/jobs/{id}": {
+      "get": {
+        "operationId": "getJob",
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Get a job",
+        "description": "Currently returns `501 not_implemented`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/JobID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The job. *Planned:* not returned by the current build.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "501": {
+            "$ref": "#/components/responses/NotImplemented"
+          }
+        }
+      }
+    },
+    "/compute/v1/jobs/{id}/cancel": {
+      "post": {
+        "operationId": "cancelJob",
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Cancel a job",
+        "description": "Requests termination. GPU metering stops when the cancel is accepted, not when the instance is confirmed down. Currently returns `501 not_implemented`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/JobID"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Cancel accepted; `status` may still read `running` until SkyPilot confirms. *Planned:* not returned by the current build.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The job is already terminal. *Planned:* not returned by the current build.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "501": {
+            "$ref": "#/components/responses/NotImplemented"
+          }
+        }
+      }
+    },
+    "/compute/v1/jobs/{id}/logs": {
+      "get": {
+        "operationId": "getJobLogs",
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Job logs",
+        "description": "Plain-text stdout/stderr, retained 7 days after a terminal state. Currently returns `501 not_implemented`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/JobID"
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "description": "Start point. Format not yet specified.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "follow",
+            "in": "query",
+            "required": false,
+            "description": "`true` streams as `text/event-stream` (planned).",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Logs. *Planned:* not returned by the current build.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "501": {
+            "$ref": "#/components/responses/NotImplemented"
+          }
+        }
+      }
+    },
+    "/compute/v1/jobs/{id}/artifacts": {
+      "get": {
+        "operationId": "listJobArtifacts",
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Job artifacts",
+        "description": "Files written under `outputs[].mount`, each with a signed download URL valid for 1 hour. Storage location is an open question (architecture.md). Currently returns `501 not_implemented`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/JobID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Artifacts. *Planned:* not returned by the current build.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "501": {
+            "$ref": "#/components/responses/NotImplemented"
+          }
+        }
+      }
+    },
+    "/compute/v1/jobs/{id}/events": {
+      "get": {
+        "operationId": "listJobEvents",
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Job events",
+        "description": "The job's event log (docs/spec/events.md), oldest first, owner-scoped like `GET /compute/v1/jobs/{id}`. Pass the last id seen as `after` to receive only newer events. Currently returns `501 not_implemented`: the route is wired, but the binary has no job store or key-to-owner resolver until the console bridge lands.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/JobID"
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "description": "Id of an event of this job; only later events are returned. An id that is not an event of this job is `400 invalid_cursor`.",
+            "schema": {
+              "type": "string",
+              "pattern": "^evt_[0-9A-HJKMNP-TV-Z]{26}$"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size. Outside 1-100 or not an integer is `400 invalid_limit`.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of events. *Planned:* not returned by the current build.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_cursor` (`param` is `after`) or `invalid_limit` (`param` is `limit`). *Planned:* not returned by the current build.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "description": "`internal_error`: the event log could not be read. *Planned:* not returned by the current build.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "501": {
+            "$ref": "#/components/responses/NotImplemented"
+          },
+          "503": {
+            "description": "`console_unavailable`: the key could not be verified; retry shortly. *Planned:* not returned by the current build.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "sk-...",
+        "description": "The customer's existing UnifyAPI key, the same one that calls api.unifyapi.ai/v1. Currently only the shape is checked (prefix `sk-`, at least 8 characters); verification through the console bridge, cached for at most 60 seconds, is planned."
+      }
+    },
+    "parameters": {
+      "JobID": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "description": "Job id, `job_` followed by a 26-character ULID.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": false,
+        "description": "Retained 24 hours. Same key and same body returns the original job with 200; same key and a different body is 409. Planned: the current build ignores it.",
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        }
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "Missing, malformed, revoked, or expired key. `error.type` is `authentication_error`.",
+        "headers": {
+          "WWW-Authenticate": {
+            "schema": {
+              "type": "string"
+            },
+            "description": "`Bearer realm=\"compute\"`"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            },
+            "example": {
+              "error": {
+                "type": "authentication_error",
+                "code": "missing_key",
+                "message": "Provide your UnifyAPI key as 'Authorization: Bearer sk-...'."
+              }
+            }
+          }
+        }
+      },
+      "NotImplemented": {
+        "description": "Current state: the route exists and the request passed authentication (and, for submit, validation), but the backend is not built.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            },
+            "example": {
+              "error": {
+                "type": "not_implemented",
+                "code": "not_implemented",
+                "message": "job lookup is not available yet; see docs/spec/job-api.md for the contract."
+              }
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Job id unknown for the calling key's user; no existence leak across users. *Planned:* not returned by the current build.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Per-key rate exceeded: 60 submits/hour, 600 reads/minute. *Planned:* not returned by the current build.",
+        "headers": {
+          "Retry-After": {
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Seconds to wait."
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "ErrorEnvelope": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/Error"
+          }
+        },
+        "description": "OpenAI-style envelope so existing client error handling carries over."
+      },
+      "Error": {
+        "type": "object",
+        "required": [
+          "type",
+          "code",
+          "message"
+        ],
+        "x-error-codes": {
+          "invalid_request": [
+            "malformed_body",
+            "missing_sku",
+            "unknown_sku",
+            "sku_unavailable",
+            "missing_max_runtime",
+            "runtime_over_ceiling",
+            "provider_not_offered"
+          ],
+          "authentication_error": [
+            "missing_key"
+          ],
+          "insufficient_balance": [],
+          "not_found": [],
+          "conflict": [],
+          "rate_limited": [],
+          "internal_error": [
+            "placement_failed"
+          ],
+          "not_implemented": [
+            "not_implemented"
+          ],
+          "console_unavailable": [],
+          "upstream_unavailable": [
+            "upstream_unavailable"
+          ]
+        },
+        "description": "`type` is the class (a closed set); `code` is the specific reason. Codes the current build emits are listed per type in `x-error-codes`; clients must tolerate codes not listed there.",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "invalid_request",
+              "authentication_error",
+              "insufficient_balance",
+              "not_found",
+              "conflict",
+              "rate_limited",
+              "internal_error",
+              "not_implemented",
+              "console_unavailable",
+              "upstream_unavailable"
+            ]
+          },
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable; not stable, do not parse."
+          },
+          "param": {
+            "type": "string",
+            "description": "The request field at fault, as a dotted path (e.g. `spec.max_runtime_seconds`). Omitted when not applicable."
+          }
+        }
+      },
+      "Health": {
+        "type": "object",
+        "required": [
+          "status",
+          "service",
+          "build"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok"
+          },
+          "service": {
+            "type": "string",
+            "const": "compute-api"
+          },
+          "build": {
+            "type": "string",
+            "description": "Git commit of the running binary; `dev` when unset."
+          }
+        }
+      },
+      "Tier": {
+        "type": "string",
+        "enum": [
+          "hyperscaler",
+          "neocloud",
+          "marketplace"
+        ],
+        "description": "Trust level of every provider behind a SKU (ADR-0006). A job is never placed outside its SKU's tier."
+      },
+      "Provider": {
+        "type": "object",
+        "required": [
+          "cloud"
+        ],
+        "description": "One place a SKU can run. Order within a SKU is preference order; SkyPilot fails over along it.",
+        "properties": {
+          "cloud": {
+            "type": "string",
+            "description": "SkyPilot cloud name, e.g. `aws`, `gcp`, `lambda`, `kubernetes`, `ssh`."
+          },
+          "instance_type": {
+            "type": "string",
+            "description": "Present for VM clouds."
+          },
+          "context": {
+            "type": "string",
+            "description": "Present for `kubernetes` and `ssh`: the kubeconfig context or node pool."
+          },
+          "regions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "SKU": {
+        "type": "object",
+        "required": [
+          "id",
+          "object",
+          "gpu",
+          "accelerator",
+          "gpu_count",
+          "gpu_memory_gb",
+          "vcpus",
+          "memory_gb",
+          "price_usd_per_hour",
+          "tier",
+          "interruptible",
+          "regions",
+          "providers",
+          "available"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string",
+            "const": "compute.sku"
+          },
+          "gpu": {
+            "type": "string",
+            "description": "Display name, e.g. `NVIDIA A10G`."
+          },
+          "accelerator": {
+            "type": "string",
+            "description": "SkyPilot accelerator name, e.g. `A10G`, `A100-80GB`. May be empty for a SKU that is not `available`."
+          },
+          "gpu_count": {
+            "type": "integer"
+          },
+          "gpu_memory_gb": {
+            "type": "integer"
+          },
+          "vcpus": {
+            "type": "integer"
+          },
+          "memory_gb": {
+            "type": "integer"
+          },
+          "price_usd_per_hour": {
+            "type": "string",
+            "pattern": "^[0-9]+\\.[0-9]+$",
+            "description": "Per hour for display; metered per second (`price_usd_per_hour / 3600`, rounded half-up to 6 decimals at settlement)."
+          },
+          "tier": {
+            "description": "Empty string only on a SKU that is not `available`.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Tier"
+              },
+              {
+                "type": "string",
+                "const": ""
+              }
+            ]
+          },
+          "interruptible": {
+            "type": "boolean",
+            "description": "Runs on spot capacity and may end `interrupted`."
+          },
+          "regions": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Union of the providers' regions."
+          },
+          "providers": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/Provider"
+            }
+          },
+          "available": {
+            "type": "boolean",
+            "description": "Listed but not sold when false; submitting it is `400 sku_unavailable`."
+          }
+        }
+      },
+      "SKUList": {
+        "type": "object",
+        "required": [
+          "object",
+          "data"
+        ],
+        "properties": {
+          "object": {
+            "type": "string",
+            "const": "list"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SKU"
+            }
+          },
+          "note": {
+            "type": "string",
+            "description": "Free-text caveat about the catalogue, e.g. that prices are placeholders. Empty when there is none."
+          }
+        }
+      },
+      "Upstream": {
+        "type": "object",
+        "required": [
+          "object",
+          "cloud",
+          "enabled",
+          "skus"
+        ],
+        "properties": {
+          "object": {
+            "type": "string",
+            "const": "compute.upstream"
+          },
+          "cloud": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether this deployment holds credentials for the cloud (`UPSTREAMS`)."
+          },
+          "skus": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "SKU ids that list this cloud as a provider."
+          }
+        }
+      },
+      "UpstreamList": {
+        "type": "object",
+        "required": [
+          "object",
+          "data"
+        ],
+        "properties": {
+          "object": {
+            "type": "string",
+            "const": "list"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Upstream"
+            }
+          }
+        }
+      },
+      "JobStatus": {
+        "type": "string",
+        "enum": [
+          "queued",
+          "provisioning",
+          "running",
+          "succeeded",
+          "failed",
+          "interrupted",
+          "cancelled"
+        ],
+        "description": "`succeeded`, `failed`, `interrupted`, `cancelled` are terminal. Allowed transitions: queued -> provisioning|cancelled; provisioning -> running|failed|interrupted|cancelled; running -> succeeded|failed|interrupted|cancelled."
+      },
+      "JobInput": {
+        "type": "object",
+        "required": [
+          "source",
+          "mount"
+        ],
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "e.g. `s3://bucket/prefix/`."
+          },
+          "mount": {
+            "type": "string"
+          }
+        }
+      },
+      "JobOutput": {
+        "type": "object",
+        "required": [
+          "mount"
+        ],
+        "properties": {
+          "mount": {
+            "type": "string"
+          }
+        }
+      },
+      "JobSpec": {
+        "type": "object",
+        "required": [
+          "max_runtime_seconds"
+        ],
+        "properties": {
+          "image": {
+            "type": "string",
+            "description": "Container image. Whether it is required is not yet specified; the current build does not check it."
+          },
+          "command": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "env": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "inputs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/JobInput"
+            }
+          },
+          "outputs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/JobOutput"
+            }
+          },
+          "max_runtime_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 86400,
+            "description": "Platform ceiling is 24 hours."
+          }
+        }
+      },
+      "SubmitJobRequest": {
+        "type": "object",
+        "required": [
+          "sku",
+          "spec"
+        ],
+        "properties": {
+          "sku": {
+            "type": "string",
+            "description": "An `id` from GET /compute/v1/skus."
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Restrict placement to a subset of the SKU's provider clouds. Default: all of them."
+          },
+          "spec": {
+            "$ref": "#/components/schemas/JobSpec"
+          },
+          "metadata": {
+            "type": "object",
+            "maxProperties": 16,
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "At most 16 string pairs (not yet enforced)."
+          }
+        }
+      },
+      "JobUsage": {
+        "type": "object",
+        "required": [
+          "gpu_seconds",
+          "estimated_cost_usd",
+          "settled_cost_usd",
+          "hold_usd"
+        ],
+        "properties": {
+          "gpu_seconds": {
+            "type": "integer"
+          },
+          "estimated_cost_usd": {
+            "type": "string",
+            "pattern": "^[0-9]+\\.[0-9]+$",
+            "description": "USD as a decimal string, never a float."
+          },
+          "settled_cost_usd": {
+            "type": "string",
+            "pattern": "^[0-9]+\\.[0-9]+$",
+            "description": "USD as a decimal string, never a float."
+          },
+          "hold_usd": {
+            "type": "string",
+            "pattern": "^[0-9]+\\.[0-9]+$",
+            "description": "USD as a decimal string, never a float."
+          }
+        }
+      },
+      "JobPlacement": {
+        "type": "object",
+        "required": [
+          "cloud",
+          "region",
+          "instance_type"
+        ],
+        "properties": {
+          "cloud": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "instance_type": {
+            "type": "string"
+          }
+        }
+      },
+      "JobError": {
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Why the job ended, e.g. `balance_exhausted`, `billing_unavailable`."
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "Job": {
+        "type": "object",
+        "required": [
+          "id",
+          "object",
+          "status",
+          "sku",
+          "created_at",
+          "started_at",
+          "finished_at",
+          "spec",
+          "usage",
+          "error",
+          "placement",
+          "metadata"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^job_[0-9A-HJKMNP-TV-Z]{26}$"
+          },
+          "object": {
+            "type": "string",
+            "const": "compute.job"
+          },
+          "status": {
+            "$ref": "#/components/schemas/JobStatus"
+          },
+          "sku": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "integer",
+            "description": "Unix seconds."
+          },
+          "started_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Unix seconds."
+          },
+          "finished_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Unix seconds."
+          },
+          "spec": {
+            "$ref": "#/components/schemas/JobSpec"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/JobUsage"
+          },
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/JobError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "placement": {
+            "description": "Null until the job is running (planned, R10).",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/JobPlacement"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "JobList": {
+        "type": "object",
+        "required": [
+          "object",
+          "data",
+          "has_more"
+        ],
+        "properties": {
+          "object": {
+            "type": "string",
+            "const": "list"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Job"
+            }
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "next": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass as `after` to fetch the next page."
+          }
+        }
+      },
+      "ArtifactList": {
+        "type": "object",
+        "required": [
+          "object",
+          "data"
+        ],
+        "properties": {
+          "object": {
+            "type": "string",
+            "const": "list"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "One file with a signed download URL valid for 1 hour. Fields not yet specified."
+            }
+          }
+        }
+      },
+      "Event": {
+        "type": "object",
+        "required": [
+          "id",
+          "object",
+          "job_id",
+          "type",
+          "created_at",
+          "data"
+        ],
+        "description": "One entry of a job's append-only event log. Also the body of a webhook delivery.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_[0-9A-HJKMNP-TV-Z]{26}$",
+            "description": "`evt_` + ULID. The deduplication key: a webhook delivered twice carries the same id."
+          },
+          "object": {
+            "type": "string",
+            "const": "compute.event"
+          },
+          "job_id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "description": "One of `job.queued`, `job.provisioning`, `job.placed`, `job.running`, `job.failover`, `job.preempted`, `job.succeeded`, `job.failed`, `job.cancelled`, `billing.hold_extended`, `billing.balance_exhausted`. Clients must tolerate types not listed here."
+          },
+          "created_at": {
+            "type": "integer",
+            "description": "Unix seconds. Several events can share a second; list order is append order."
+          },
+          "data": {
+            "type": "object",
+            "description": "Type-specific payload; `{}` when the type carries nothing. See docs/spec/events.md."
+          }
+        }
+      },
+      "EventList": {
+        "type": "object",
+        "required": [
+          "object",
+          "data",
+          "has_more"
+        ],
+        "properties": {
+          "object": {
+            "type": "string",
+            "const": "list"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Event"
+            }
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "next": {
+            "type": "string",
+            "description": "Id of the last event returned, present whenever `data` is non-empty, so a poller can always resume from it."
+          }
+        }
+      }
+    }
+  }
+}

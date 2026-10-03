@@ -9,7 +9,7 @@
 
 ## Authentication
 
-`Authorization: Bearer sk-…` with the customer's existing UnifyAPI key. The
+`Authorization: Bearer sk-…` with the customer's existing Unify API key. The
 same key that calls `api.unifyapi.ai/v1`. compute-api verifies it through the
 console bridge (`console-billing-bridge.md` → `verify`) and caches the result
 for at most 60 seconds; a revoked key stops working within that window.
@@ -34,6 +34,7 @@ OpenAI-style envelope so existing client error handling carries over:
 | 404 | `not_found` | Job id unknown *for this key* (no existence leak across users) |
 | 409 | `conflict` | Idempotency-Key reused with a different body; cancel on a terminal job |
 | 429 | `rate_limited` | Per-key submit rate exceeded |
+| 500 | `internal_error` | Placement failed for a reason the API does not distinguish (`placement_failed`); not expected in normal operation |
 | 501 | `not_implemented` | Route exists, backend not built (current state) |
 | 503 | `console_unavailable` | Key could not be verified or hold could not be placed |
 | 503 | `upstream_unavailable` | The SKU is sound but no provider it offers is enabled in this deployment |
@@ -71,8 +72,10 @@ OpenAI-style envelope so existing client error handling carries over:
 }
 ```
 
-`placement` is null until the job is `running` and says where it landed
-(*planned*; the backend fills it from SkyPilot's cluster record).
+`placement` is null until the job is `running` and says where it landed.
+The backend writes it from SkyPilot's cluster record when the cluster is
+first seen `UP`, before the job reads `running` ([`backend.md`](backend.md)).
+It is not served yet, because the backend is not wired to submit.
 
 Money is a decimal string in USD, never a float. Timestamps are Unix seconds.
 
@@ -133,6 +136,13 @@ capacity and may end `interrupted`. `regions` is the union of the providers'
 regions. See [`upstreams.md`](upstreams.md) and ADR-0006.
 
 ## Endpoints
+
+The machine-readable form of this contract is
+[`openapi.json`](openapi.json) (OpenAPI 3.1), served by every build at
+`GET /compute/v1/openapi.json` (public). The canonical file is
+`compute-api/internal/api/openapi.json`, embedded in the binary; the copy here
+is kept byte-identical by a test, and a test fails if a route is registered
+without an entry there. A change to an endpoint below changes both.
 
 ### `GET /compute/v1/skus`
 

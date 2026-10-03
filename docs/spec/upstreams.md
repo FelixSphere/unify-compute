@@ -1,8 +1,9 @@
 # Compute upstreams — functional requirements
 
 - **Status:** Requirements R1–R9 implemented in `compute-api/` (catalogue,
-  placement, validation, API exposure). R10–R15 are planned and depend on the
-  job backend, the ledger, or a process outside the code. Each item says which.
+  placement, validation, API exposure). R10 is partial (see its row).
+  R11–R15 are planned and depend on the job backend, the ledger, or a process
+  outside the code. Each item says which.
 - Decision record: [ADR-0006](../adr/0006-upstreams-are-skypilot-clouds.md).
 
 An **upstream** is a source of GPU capacity we buy from and resell by the
@@ -29,7 +30,7 @@ context, or an SSH node pool.
 | R7 | A submit may restrict placement to a subset of the SKU's providers (`"providers": ["aws"]`). Naming a provider the SKU does not offer is `400 provider_not_offered`. Naming one the deployment has not enabled is `503 upstream_unavailable`. | Implemented |
 | R8 | Placement resolves to one SkyPilot `resources` block. One candidate is emitted flat; several are emitted under `any_of` in catalogue order, and SkyPilot fails over between them on capacity. Catalogue order is therefore the preference order and is a reviewed change. | Implemented: `skypilot.ResourcesFor` |
 | R9 | `max_runtime_seconds` has a platform ceiling of 24 hours. Above it is `400 runtime_over_ceiling`. An `available: false` SKU is `400 sku_unavailable`. Both are checked before anything is persisted or held. | Implemented |
-| R10 | Once a job is running, the Job object records where it landed: `placement: {cloud, region, instance_type}`. Metering, reconciliation, and the customer's invoice line all key off this. | Planned: needs the backend |
+| R10 | Once a job is running, the Job object records where it landed: `placement: {cloud, region, instance_type}`. Metering, reconciliation, and the customer's invoice line all key off this. | Partial: the backend writes it at cluster `UP` (`store.SetPlacement`, [`backend.md`](backend.md)); not live until the backend is wired to submit |
 
 ## Money and trust
 
