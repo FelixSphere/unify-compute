@@ -83,6 +83,14 @@ type attempt struct {
 	downReq        string
 	ended          *Event
 
+	// resumed: tracked from durable state by Resume, not launched by this
+	// process. The first observation checks the cluster is still the one
+	// that was seen UP.
+	resumed bool
+	// pendingRunning: cluster_up reached the ledger but the store never
+	// moved to running; the edge's store write is redone on the next UP.
+	pendingRunning bool
+
 	outbox []*outboxItem
 }
 
@@ -329,13 +337,34 @@ func (b *Backend) observeUp(a *attempt, rec ClusterRecord) {
 	})
 }
 
+// redoClusterUp repeats a resumed attempt's cluster_up edge: the same event
+// (same ID and At, which the sink has already recorded) and the store write
+// that did not happen, placement and then running.
+func (b *Backend) redoClusterUp(a *attempt, rec ClusterRecord) {
+	p := placementFrom(rec, a.job.Candidates)
+	a.placement = &p
+	up, id := a.upAt, a.job.ID
+	a.push(Event{Kind: EventClusterUp, At: up, ObservedAt: up, UpAt: &up}, func(ctx context.Context) error {
+		if _, err := b.store.SetPlacement(ctx, id, p); err != nil && !errors.Is(err, store.ErrTerminal) {
+			return err
+		}
+		_, err := b.store.UpdateStatus(ctx, id, store.StatusRunning, nil)
+		if errors.Is(err, store.ErrInvalidTransition) {
+			b.logf("backend: %s: running: %v", id, err)
+			return nil
+		}
+		return err
+	})
+}
+
 type launchResult struct {
 	JobID *int `json:"job_id"`
 }
 
 func (b *Backend) stepUp(ctx context.Context, a *attempt) error {
 	now := b.now()
-	deadline := a.upAt.Add(time.Duration(a.job.Spec.MaxRuntimeSeconds) * time.Second)
+	limit := a.job.runtimeLimit()
+	deadline := a.upAt.Add(time.Duration(limit) * time.Second)
 	// finish ends the attempt at `at`, unless the cap came first: then it is
 	// max_runtime at exactly the cap (B16), however late this observation.
 	// The cap is checked against when things happened, not when we looked,
@@ -345,6 +374,9 @@ func (b *Backend) stepUp(ctx context.Context, a *attempt) error {
 		if at.After(deadline) {
 			reason, at, status = EndMaxRuntime, deadline, store.StatusFailed
 			f = &Failure{Code: CodeMaxRuntimeExceeded, Message: fmt.Sprintf("the job ran for its max_runtime_seconds (%d)", a.job.Spec.MaxRuntimeSeconds)}
+			if limit != a.job.Spec.MaxRuntimeSeconds {
+				f.Message = fmt.Sprintf("the job ran for the %d s its hold still covered when it was launched late after a compute-api restart (max_runtime_seconds %d)", limit, a.job.Spec.MaxRuntimeSeconds)
+			}
 		}
 		b.end(ctx, a, reason, at, status, f)
 	}
@@ -360,6 +392,12 @@ func (b *Backend) stepUp(ctx context.Context, a *attempt) error {
 	if err != nil {
 		return pastCap(err)
 	}
+	if present && a.resumed && rec.LaunchedAt > a.upAt.Unix() {
+		// Launched after we saw this attempt UP: a different cluster under
+		// the same name, so ours did not stay UP while nobody watched.
+		b.logf("backend: %s: cluster %s relaunched at %d, after its UP at %s", a.job.ID, a.cluster, rec.LaunchedAt, a.upAt.Format(time.RFC3339))
+		present = false
+	}
 	if !present || rec.Status != ClusterUp {
 		// metering.md end rule 4 / I3: the end is the last observation of
 		// UP, never when we noticed it gone. SkyPilot does not report a
@@ -372,6 +410,11 @@ func (b *Backend) stepUp(ctx context.Context, a *attempt) error {
 		return nil
 	}
 	a.lastUpAt = now
+	a.resumed = false
+	if a.pendingRunning {
+		a.pendingRunning = false
+		b.redoClusterUp(a, rec)
+	}
 
 	if !a.launchDone {
 		ri, err := b.api.RequestState(ctx, a.launchReq)

@@ -55,7 +55,8 @@ func (s *Service) statusEvent(to store.Status) func(store.Job) (*store.NewEvent,
 			return newEvent(events.JobPreempted, events.PreemptedData{Provider: provider})
 		case store.StatusCancelled:
 			reason := "customer"
-			if j.Error != nil && (j.Error.Code == string(ledger.EndBalanceExhausted) || j.Error.Code == string(ledger.EndBillingUnavailable)) {
+			if j.Error != nil && (j.Error.Code == string(ledger.EndBalanceExhausted) || j.Error.Code == string(ledger.EndBillingUnavailable) ||
+				j.Error.Code == CodeQueueExpired) {
 				reason = j.Error.Code
 			}
 			return newEvent(events.JobCancelled, events.CancelledData{Reason: reason})

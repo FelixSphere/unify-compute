@@ -23,6 +23,7 @@ import (
 	"log/slog"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/FelixSphere/unify-compute/compute-api/internal/backend"
@@ -68,8 +69,13 @@ type Config struct {
 	Quota *quota.Enforcer
 	// Outputs uploads spec.outputs (internal/artifacts); nil refuses them.
 	Outputs backend.OutputUploader
-	Now     func() time.Time
-	Log     *slog.Logger
+	// Elect makes the service drive jobs (backend loop, ledger tick, cancels)
+	// only while it holds the store's worker lock, so two processes on one
+	// database never both do. Without it the service always drives, which
+	// is what a test that owns its database wants.
+	Elect bool
+	Now   func() time.Time
+	Log   *slog.Logger
 }
 
 type Service struct {
@@ -83,6 +89,12 @@ type Service struct {
 	task      backend.TaskOptions
 	now       func() time.Time
 	log       *slog.Logger
+
+	elect bool
+	drive atomic.Bool
+	lock  *store.WorkerLock
+	// swept: this term's holder has looked for leftover clusters.
+	swept bool
 
 	mu sync.Mutex
 	// ended holds each attempt's ended edge from Emit until the status write
@@ -105,8 +117,9 @@ func New(cfg Config) *Service {
 	task := backend.TaskOptions{Outputs: cfg.Outputs, HTTPSInputsOnly: true}
 	s := &Service{
 		Store: cfg.Store, catalogue: cfg.Catalogue, quota: cfg.Quota, task: task, now: now, log: cfg.Log,
-		ended: map[string]backend.Event{}, stops: map[string]ledger.EndReason{},
+		ended: map[string]backend.Event{}, stops: map[string]ledger.EndReason{}, elect: cfg.Elect,
 	}
+	s.drive.Store(!cfg.Elect)
 	s.Ledger = ledger.New(cfg.Store.Pool(), cfg.Console, actions{s}, now)
 	if cfg.SkyPilot != nil {
 		s.Backend = backend.New(cfg.SkyPilot, backendStore{s}, sink{s}, backend.Config{
@@ -158,6 +171,10 @@ func (s *Service) Submit(ctx context.Context, sub Submission) (job store.Job, cr
 	if err != nil {
 		return store.Job{}, false, err
 	}
+	candidates, err := json.Marshal(sub.Candidates)
+	if err != nil {
+		return store.Job{}, false, err
+	}
 
 	// touched is set once the console may hold something for this job id,
 	// which a failure after that point must give back.
@@ -185,7 +202,7 @@ func (s *Service) Submit(ctx context.Context, sub Submission) (job store.Job, cr
 	tokenID := int64(sub.TokenID)
 	job, created, err = s.Store.CreateAdmitted(ctx, store.NewJob{
 		ID: id, Owner: sub.Owner, TokenID: &tokenID, SKU: sub.SKU.ID, Spec: spec, Metadata: sub.Metadata,
-		Events: []store.NewEvent{*queued},
+		Candidates: candidates, Events: []store.NewEvent{*queued},
 	}, sub.Idempotency, admit)
 	if err != nil {
 		var refused *ledger.InsufficientBalanceError
@@ -199,9 +216,13 @@ func (s *Service) Submit(ctx context.Context, sub Submission) (job store.Job, cr
 	}
 
 	// The job is accepted; from here a failure is the job's, not the
-	// request's. Launch must not die with the customer's connection.
-	if err := s.Backend.Launch(context.WithoutCancel(ctx), bj); err != nil {
-		s.log.Error("launch after persist", "job", id, "err", err)
+	// request's. Launch must not die with the customer's connection. A
+	// process without the worker lock leaves the job queued for the holder,
+	// whose Reconcile launches it (backend.md, "Restart").
+	if s.driving() {
+		if err := s.Backend.Launch(context.WithoutCancel(ctx), bj); err != nil && !errors.Is(err, backend.ErrDuplicate) {
+			s.log.Error("launch after persist", "job", id, "err", err)
+		}
 	}
 	job, err = s.Store.Get(ctx, sub.Owner, id)
 	return job, true, err
@@ -266,33 +287,33 @@ func (s *Service) Cancel(ctx context.Context, owner, id string, acceptedAt time.
 	if job.Status.Terminal() {
 		return job, ErrTerminal
 	}
-	tracked := false
-	if s.Backend != nil {
+	// Durable before anything else: if this process stops before the
+	// cancel is carried out, or does not hold the worker lock, the holder's
+	// Reconcile carries it out at acceptedAt.
+	if err := s.Store.RequestCancel(ctx, id, acceptedAt); err != nil {
+		return store.Job{}, err
+	}
+	if !s.driving() {
+		return job, nil
+	}
+	if s.Backend != nil && s.Backend.Tracked(id) {
 		err := s.Backend.Cancel(context.WithoutCancel(ctx), id, acceptedAt)
 		switch {
 		case errors.Is(err, backend.ErrAlreadyEnded):
 			return job, ErrTerminal
-		case errors.Is(err, backend.ErrUnknownJob):
 		case err != nil:
 			// The end is decided and in the backend's outbox; it becomes
 			// durable on a later step.
-			tracked = true
 			s.log.Warn("cancel: recorded, not yet durable", "job", id, "err", err)
-		default:
-			tracked = true
 		}
-	}
-	if !tracked {
-		if err := s.endUntracked(ctx, id, nil); err != nil {
-			return store.Job{}, err
-		}
+	} else if err := s.cancelLive(ctx, job, acceptedAt); err != nil {
+		return store.Job{}, err
 	}
 	return s.Store.Get(ctx, owner, id)
 }
 
-// endUntracked cancels a job the backend is not running: one whose launch
-// never started, or, after a restart, one whose attempt this process does
-// not know (backend.md open question 2).
+// endUntracked cancels a job the backend is not running and SkyPilot has no
+// cluster for: one whose launch never started, or one without a backend.
 func (s *Service) endUntracked(ctx context.Context, id string, jobErr *store.JobError) error {
 	_, err := s.Store.UpdateStatusWithEvent(ctx, id, store.StatusCancelled, jobErr, s.statusEvent(store.StatusCancelled))
 	if err != nil && !errors.Is(err, store.ErrInvalidTransition) {
@@ -321,8 +342,12 @@ func (s *Service) Logs(ctx context.Context, owner, id string, w interface{ Write
 // --- background work -------------------------------------------------------
 
 // Step runs one round of the backend loop: every attempt observed once, then
-// the ledger's pending stops carried out. Tests call it to drive time.
+// the ledger's pending stops carried out. Tests call it to drive time. A
+// process that does not hold the worker lock does nothing.
 func (s *Service) Step(ctx context.Context) {
+	if !s.driving() {
+		return
+	}
 	if s.Backend != nil {
 		s.Backend.StepAll(ctx)
 	}
@@ -330,10 +355,47 @@ func (s *Service) Step(ctx context.Context) {
 }
 
 // Run starts the background loops and returns when ctx ends and every loop
-// has stopped.
+// has stopped. Webhook delivery and the idempotency purge run in every
+// process; the loops that drive jobs run only while this process holds the
+// worker lock (Config.Elect), or always without an election.
 func (s *Service) Run(ctx context.Context) {
 	var wg sync.WaitGroup
-	every := func(name string, d time.Duration, f func(context.Context) error) {
+	every := s.every(ctx, &wg)
+	every("idempotency purge", PurgeInterval, func(ctx context.Context) error {
+		_, err := s.Store.PurgeExpiredIdempotencyKeys(ctx)
+		return err
+	})
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		s.Events.Run(ctx, DeliveryInterval)
+	}()
+	if s.elect {
+		s.runElected(ctx)
+	} else {
+		s.runWorkers(ctx)
+	}
+	wg.Wait()
+}
+
+// runWorkers runs the loops that drive jobs until ctx ends. Each backend
+// round first takes up live jobs nobody here is tracking (submitted by a
+// process without the lock, or left by an earlier holder) and carries out
+// recorded cancels.
+func (s *Service) runWorkers(ctx context.Context) {
+	var wg sync.WaitGroup
+	every := s.every(ctx, &wg)
+	every("backend step", PollInterval, func(ctx context.Context) error {
+		err := s.Reconcile(ctx)
+		s.Step(ctx)
+		return err
+	})
+	every("ledger tick", LedgerTick, s.Ledger.Tick)
+	wg.Wait()
+}
+
+func (s *Service) every(ctx context.Context, wg *sync.WaitGroup) func(string, time.Duration, func(context.Context) error) {
+	return func(name string, d time.Duration, f func(context.Context) error) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -351,18 +413,6 @@ func (s *Service) Run(ctx context.Context) {
 			}
 		}()
 	}
-	every("backend step", PollInterval, func(ctx context.Context) error { s.Step(ctx); return nil })
-	every("ledger tick", LedgerTick, s.Ledger.Tick)
-	every("idempotency purge", PurgeInterval, func(ctx context.Context) error {
-		_, err := s.Store.PurgeExpiredIdempotencyKeys(ctx)
-		return err
-	})
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		s.Events.Run(ctx, DeliveryInterval)
-	}()
-	wg.Wait()
 }
 
 // ProcessStops carries out the ledger's stop requests.

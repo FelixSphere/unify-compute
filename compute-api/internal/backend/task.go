@@ -44,6 +44,19 @@ type Job struct {
 	// Owner is the billing identity that submitted the job; the artifact
 	// upload binds its token to it.
 	Owner string
+	// RuntimeLimitSeconds, when positive and below Spec.MaxRuntimeSeconds,
+	// is the cap the attempt is held to instead: a job launched late after a
+	// restart gets only the runtime its hold still covers (backend.md,
+	// "Restart").
+	RuntimeLimitSeconds int
+}
+
+// runtimeLimit is the cap the attempt ends at, in seconds from UP.
+func (j Job) runtimeLimit() int {
+	if j.RuntimeLimitSeconds > 0 && j.RuntimeLimitSeconds < j.Spec.MaxRuntimeSeconds {
+		return j.RuntimeLimitSeconds
+	}
+	return j.Spec.MaxRuntimeSeconds
 }
 
 // Task is a SkyPilot task (sky/utils/schemas.py get_task_schema). Marshalled
