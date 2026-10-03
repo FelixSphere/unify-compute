@@ -219,3 +219,34 @@ variable "ssm_skypilot_admin_password" {
   type    = string
   default = null
 }
+
+# SES (ses.tf). The identity and configuration set are created once for both
+# environments by deploy/aws/shared/ses-compute, under these same names.
+variable "ses_identity" {
+  description = "SES domain identity compute-api sends from."
+  type        = string
+  default     = "compute.unifyai.us"
+}
+
+variable "ses_configuration_set" {
+  description = "The identity's default configuration set. The instance role is granted it as well as the identity: SES authorises both on every send."
+  type        = string
+  default     = "unify-compute"
+}
+
+variable "ses_from_address" {
+  description = "The only From address the instance role may send as (docs/spec/notifications.md)."
+  type        = string
+  default     = "no-reply@compute.unifyai.us"
+
+  validation {
+    condition     = endswith(var.ses_from_address, "@${var.ses_identity}")
+    error_message = "ses_from_address must be an address at ses_identity; SES refuses any other From for this identity."
+  }
+}
+
+variable "ses_sender_name" {
+  description = "Display name in the From header."
+  type        = string
+  default     = "Unify Compute"
+}

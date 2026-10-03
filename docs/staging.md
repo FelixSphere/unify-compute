@@ -453,6 +453,69 @@ If `check-imds.sh` ever fails on a locked-down host, the rule was removed
 behind the unit's back. Find out how before re-running step 1. That is what
 host.sh's refusal is for.
 
+## SES identity for compute.unifyai.us (ADR-0011, not yet applied)
+
+compute-api's account email (verification codes, resets) goes out through
+SES as `Unify Compute <no-reply@compute.unifyai.us>` from both environments.
+Two pieces, both **defined and not applied**:
+
+- `deploy/aws/shared/ses-compute`, one stack for both environments: the
+  domain identity with Easy DKIM (2048-bit), MAIL FROM
+  `bounce.compute.unifyai.us`, `_dmarc.compute.unifyai.us` (`p=none`,
+  reports to `dmarc_report_email`), and the configuration set
+  `unify-compute` as the identity's default, with reputation metrics and a
+  CloudWatch event destination. Seven Route53 records, all new names under
+  `compute.unifyai.us`; the `compute.unifyai.us` A alias and every other
+  record are untouched, and Route53 refuses to overwrite a record that
+  already exists.
+- `modules/compute-stack/ses.tf`, in each environment: an instance-role
+  policy granting `ses:SendEmail`/`ses:SendRawEmail` on the identity **and**
+  the configuration set, only when the From address is
+  `no-reply@compute.unifyai.us`, plus three SSM String parameters,
+  `/<name>/ses_identity`, `ses_configuration_set` and `ses_sender`. Nothing on
+  the host reads them yet (plan tasks A2 and A8 do).
+
+No sandbox exit: account 871376691052 has SES production access in us-east-1
+(checked 2026-10-03). A suspension earned by any product in the account stops
+these sends too.
+
+```bash
+# 0. DMARC reports to an address outside unifyai.us are dropped unless that
+#    domain authorises them. For felixsphere.com (Cloudflare DNS, not this
+#    repository's), add once:
+#      compute.unifyai.us._report._dmarc.felixsphere.com  TXT  "v=DMARC1"
+#    Absent on 2026-10-03. Without it the record still applies p=none; only
+#    the reports are lost.
+
+# 1. the identity. Read-only plan on 2026-10-03: 10 to add, 0 to change,
+#    0 to destroy (identity, mail-from attributes, configuration set, event
+#    destination, 3 DKIM CNAMEs, MX + SPF TXT on bounce, DMARC TXT).
+terraform -chdir=deploy/aws/shared/ses-compute init
+terraform -chdir=deploy/aws/shared/ses-compute plan -out=ses.tfplan \
+  -var dmarc_report_email=<operator address>
+terraform -chdir=deploy/aws/shared/ses-compute apply ses.tfplan
+
+# 2. wait for verification (DKIM usually within minutes, up to 72 h):
+aws sesv2 get-email-identity --email-identity compute.unifyai.us \
+  --query '{v:VerifiedForSendingStatus,dkim:DkimAttributes.Status,mf:MailFromAttributes.MailFromDomainStatus,cs:ConfigurationSetName}'
+#    expect true, SUCCESS, SUCCESS, unify-compute.
+
+# 3. staging, then production. Read-only plans on 2026-10-03, each: 4 to add,
+#    0 to change, 0 to destroy (aws_iam_role_policy.instance_ses and the three
+#    SSM parameters). Nothing touches aws_instance.this; anything that does is
+#    a stop.
+terraform -chdir=deploy/aws/envs/staging plan -out=staging.tfplan
+terraform -chdir=deploy/aws/envs/staging apply staging.tfplan
+```
+
+What to exercise: from the staging host, a send to
+`success@simulator.amazonses.com` with the instance role, From
+`no-reply@compute.unifyai.us`, must succeed; the same with From
+`other@compute.unifyai.us` must be `AccessDenied`. The real path is the
+mailer in A8; until it exists, `aws sesv2 send-email` over SSM proves the
+policy. A send denied on `configuration-set/unify-compute` means the second
+ARN is missing.
+
 ## Acceptance
 
 Staging is healthy when all of these hold, checked by `scripts/smoke.sh`:
