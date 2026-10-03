@@ -61,6 +61,14 @@ const (
 type Config struct {
 	Store   *store.Store
 	Console *console.Client
+	// Biller, when set, is the ledger's biller instead of Console: the
+	// local biller (internal/billing) under ACCOUNTS_BACKEND=local. A biller
+	// with a Sweep method has it run hourly, in every process.
+	Biller ledger.Biller
+	// Gate, when set, decides before quota and the hold whether the
+	// submitting account may run jobs at all (accounts.md, "Job API
+	// changes"). Its refusal is returned as is and nothing is persisted.
+	Gate SubmitGate
 	// SkyPilot is the API server client; nil leaves the service able to read
 	// and cancel jobs but not to submit them.
 	SkyPilot  *backend.Client
@@ -78,6 +86,16 @@ type Config struct {
 	Log   *slog.Logger
 }
 
+// SubmitGate refuses a submit from an account that may not run jobs:
+// suspended, closed, or compute not enabled (ADR-0011 D3).
+type SubmitGate interface {
+	CheckSubmit(ctx context.Context, accountID int) error
+}
+
+type sweeper interface {
+	Sweep(ctx context.Context) (int, error)
+}
+
 type Service struct {
 	Store   *store.Store
 	Ledger  *ledger.Engine
@@ -86,6 +104,8 @@ type Service struct {
 
 	catalogue *sku.Catalogue
 	quota     *quota.Enforcer
+	gate      SubmitGate
+	sweeper   sweeper
 	task      backend.TaskOptions
 	now       func() time.Time
 	log       *slog.Logger
@@ -120,7 +140,13 @@ func New(cfg Config) *Service {
 		ended: map[string]backend.Event{}, stops: map[string]ledger.EndReason{}, elect: cfg.Elect,
 	}
 	s.drive.Store(!cfg.Elect)
-	s.Ledger = ledger.New(cfg.Store.Pool(), cfg.Console, actions{s}, now)
+	var biller ledger.Biller = cfg.Console
+	if cfg.Biller != nil {
+		biller = cfg.Biller
+		s.sweeper, _ = cfg.Biller.(sweeper)
+	}
+	s.gate = cfg.Gate
+	s.Ledger = ledger.New(cfg.Store.Pool(), biller, actions{s}, now)
 	if cfg.SkyPilot != nil {
 		s.Backend = backend.New(cfg.SkyPilot, backendStore{s}, sink{s}, backend.Config{
 			Task: task, Now: now,
@@ -137,7 +163,9 @@ func New(cfg Config) *Service {
 // Submission is a validated, placed submit. Candidates is what
 // upstream.Registry.Place resolved.
 type Submission struct {
-	Owner       string
+	Owner string
+	// UserID is the billing entity the hold is placed against: the console
+	// user, or the account id under ACCOUNTS_BACKEND=local.
 	UserID      int
 	TokenID     int
 	SKU         sku.SKU
@@ -155,6 +183,11 @@ type Submission struct {
 // A refused hold returns *ledger.InsufficientBalanceError and a quota
 // refusal *quota.ExceededError; in both cases no job exists.
 func (s *Service) Submit(ctx context.Context, sub Submission) (job store.Job, created bool, err error) {
+	if s.gate != nil {
+		if err := s.gate.CheckSubmit(ctx, sub.UserID); err != nil {
+			return store.Job{}, false, err
+		}
+	}
 	if s.Backend == nil {
 		return store.Job{}, false, ErrBackendUnavailable
 	}
@@ -369,6 +402,14 @@ func (s *Service) Run(ctx context.Context) {
 		_, err := s.Store.PurgeExpiredIdempotencyKeys(ctx)
 		return err
 	})
+	if s.sweeper != nil {
+		// Each sweep is per account under its row lock, so processes that
+		// sweep at once only wait for each other.
+		every("billing hold sweep", PurgeInterval, func(ctx context.Context) error {
+			_, err := s.sweeper.Sweep(ctx)
+			return err
+		})
+	}
 	wg.Add(1)
 	go func() {
 		defer wg.Done()

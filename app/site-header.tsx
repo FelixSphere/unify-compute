@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { Menu, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { BrandLockup } from './brand';
+import { AccountLink } from './account-link';
+import { LOG_IN_URL, SIGN_UP_URL } from './links';
 
 type NavItem = { href: string; label: string };
 
@@ -26,7 +28,7 @@ function useCurrentHash() {
   return hash;
 }
 
-export function SiteHeader({ homeHref = '/' }: { homeHref?: string }) {
+export function SiteHeader({ homeHref = '/', current }: { homeHref?: string; current?: '/start' }) {
   const [open, setOpen] = useState(false);
   const hash = useCurrentHash();
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -43,8 +45,8 @@ export function SiteHeader({ homeHref = '/' }: { homeHref?: string }) {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') close(true);
     };
-    // The panel only exists below 768px; widening the window must not leave it open and invisible.
-    const wide = window.matchMedia('(min-width: 768px)');
+    // The panel only exists below 1024px; widening the window must not leave it open and invisible.
+    const wide = window.matchMedia('(min-width: 1024px)');
     const onWide = () => wide.matches && setOpen(false);
     document.addEventListener('keydown', onKey);
     wide.addEventListener('change', onWide);
@@ -78,7 +80,18 @@ export function SiteHeader({ homeHref = '/' }: { homeHref?: string }) {
             {item.label}
           </a>
         ))}
+        <Link href="/start" aria-current={current === '/start' ? 'page' : undefined}>
+          Quick start
+        </Link>
       </nav>
+      <div className="nav-actions">
+        <AccountLink href={LOG_IN_URL} className="nav-login">
+          Log in
+        </AccountLink>
+        <AccountLink href={SIGN_UP_URL} className="button primary">
+          Sign up
+        </AccountLink>
+      </div>
       <button
         ref={buttonRef}
         type="button"
@@ -102,6 +115,15 @@ export function SiteHeader({ homeHref = '/' }: { homeHref?: string }) {
               {item.label}
             </a>
           ))}
+          <Link href="/start" aria-current={current === '/start' ? 'page' : undefined} onClick={() => close(false)}>
+            Quick start
+          </Link>
+          <AccountLink href={LOG_IN_URL} className="menu-account" onClick={() => close(false)}>
+            Log in
+          </AccountLink>
+          <AccountLink href={SIGN_UP_URL} className="menu-account menu-signup button primary" onClick={() => close(false)}>
+            Sign up
+          </AccountLink>
         </nav>
       </div>
     </header>

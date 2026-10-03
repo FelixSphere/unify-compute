@@ -23,6 +23,8 @@ RUN npm run build \
  && test -f dist/client/index.txt \
  && test -f dist/client/privacy.html \
  && test -f dist/client/privacy.txt \
+ && test -f dist/client/start.html \
+ && test -f dist/client/start.txt \
  && test -f dist/client/404.html \
  && rm -rf dist/client/.vite dist/client/vinext-client-entry-manifest.json
 
