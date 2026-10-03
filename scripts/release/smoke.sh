@@ -11,6 +11,12 @@
 # either name. API_ORIGIN defaults to ORIGIN for a host that serves both.
 #
 # Optional:
+#   APP_ORIGIN=https://app.staging.compute.unifyai.us
+#                           the customer app (ADR-0011): its pages come from
+#                           the site container under an enforced CSP, and
+#                           /dashboard/v1/* must reach compute-api, not the
+#                           site. Unset skips it, so a stack where the app
+#                           host is not applied yet still releases.
 #   EXPECT_BUILD=<commit>   /healthz must report this build. This is what
 #                           proves the NEW compute-api is serving publicly,
 #                           not merely that something answers.
@@ -30,6 +36,8 @@ ORIGIN="${ORIGIN%/}"
 API_ORIGIN="${API_ORIGIN:-$ORIGIN}"
 API_ORIGIN="${API_ORIGIN%/}"
 EXPECT_BUILD="${EXPECT_BUILD:-}"
+APP_ORIGIN="${APP_ORIGIN:-}"
+APP_ORIGIN="${APP_ORIGIN%/}"
 WAIT_SECONDS="${WAIT_SECONDS:-150}"
 ICON_PATH="${ICON_PATH:-/icon-v4.svg}"
 # The icon must be cacheable, for at least the hour deploy/site/Caddyfile
@@ -104,6 +112,39 @@ if [ -n "$age" ] && [ "$age" -ge "$ICON_MIN_MAX_AGE" ]; then
   ok "icon Cache-Control: $cc"
 else
   bad "icon Cache-Control is '$cc', want max-age >= $ICON_MIN_MAX_AGE"
+fi
+
+if [ -n "$APP_ORIGIN" ]; then
+  echo "--- app at $APP_ORIGIN"
+  expect_code "GET /" 200 "$(get "$APP_ORIGIN/")"
+  expect_body "/ is the Unify Compute app" '<title>Unify Compute'
+  csp="$(header content-security-policy)"
+  case "$csp" in
+    *"default-src 'none'"*) ok "app CSP is enforced" ;;
+    *) bad "app Content-Security-Policy is '$csp', want the enforced app policy" ;;
+  esac
+  case "$csp" in
+    *unsafe-inline*|*hubspot*|*hs-scripts*) bad "app CSP allows inline script or HubSpot: $csp" ;;
+  esac
+  if grep -q 'hs-script-loader' "$body"; then bad "app host serves the HubSpot loader"; fi
+  # Routed by the ALB's host + path rule. Whatever compute-api answers for a
+  # dashboard path (404 before the dashboard API exists, 401 after), it is not
+  # the site's HTML: a text/html answer means the rule is missing and the site
+  # took the request.
+  code="$(get "$APP_ORIGIN/dashboard/v1/session")"
+  ctype="$(header content-type)"
+  case "$code:$ctype" in
+    *:text/html*) bad "/dashboard/v1/session on the app host came from the site ($code $ctype), not compute-api" ;;
+    401:*|404:*) ok "/dashboard/v1/session reaches compute-api ($code $ctype)" ;;
+    *) bad "/dashboard/v1/session -> $code $ctype, want compute-api's 401 or 404" ;;
+  esac
+  # The job API stays on the API host.
+  code="$(get "$APP_ORIGIN/compute/v1/skus")"
+  if [ "$code" = 200 ] && grep -qF '"price_usd_per_hour"' "$body"; then
+    bad "/compute/v1/skus answers on the app host; the job API belongs to $API_ORIGIN only"
+  else
+    ok "/compute/v1/skus not served on the app host ($code)"
+  fi
 fi
 
 exit "$fail"

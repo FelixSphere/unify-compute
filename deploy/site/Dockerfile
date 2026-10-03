@@ -1,4 +1,5 @@
-# The marketing site (compute.unifyai.us) as a static export behind Caddy.
+# The marketing site (compute.unifyai.us) as a static export behind Caddy, and
+# the customer app's pages for app.compute.unifyai.us from the same Caddy.
 #
 # Build from the repository root:
 #   docker build -f deploy/site/Dockerfile --build-arg SITE_BUILD_ID=$(git rev-parse HEAD) .
@@ -35,8 +36,15 @@ ARG SITE_BUILD_ID=dev
 ENV XDG_DATA_HOME=/tmp/caddy-data XDG_CONFIG_HOME=/tmp/caddy-config
 COPY deploy/site/Caddyfile /etc/caddy/Caddyfile
 COPY --from=build /src/dist/client /srv
+# The app host's root (app.compute.unifyai.us): a placeholder until the
+# dashboard export replaces it (plan task A7b). Its own copies of the tokens
+# and brand files, so nothing on that host is served from the marketing root.
+COPY deploy/site/app-placeholder /srv-app
+COPY app/unifyai-tokens.css /srv-app/unifyai-tokens.css
+COPY public/favicon.ico public/icon-v4.svg /srv-app/
+COPY public/brand/unifyai-lockup-horizontal-black.svg /srv-app/brand/
 LABEL org.opencontainers.image.source="https://github.com/FelixSphere/unify-compute" \
-      org.opencontainers.image.description="compute.unifyai.us marketing site (static export served by Caddy)" \
+      org.opencontainers.image.description="compute.unifyai.us marketing site and app.compute.unifyai.us pages (static, served by Caddy)" \
       org.opencontainers.image.revision="${SITE_BUILD_ID}"
 EXPOSE 8080
 USER 65534:65534

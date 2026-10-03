@@ -20,10 +20,19 @@ first, always.
 | `staging.compute.unifyai.us` | compute-api (`/compute/v1/*`, `/healthz`) | ALB host rule → port 8080 |
 | `site.staging.compute.unifyai.us` | marketing site container (`/healthz`) | ALB host rule → port 8081 |
 | `console.staging.compute.unifyai.us` | staging Unify API console (SPA, `/api`, `/v1`) | ALB host rule → port 3000 |
+| `app.staging.compute.unifyai.us` | customer app (ADR-0011): pages from the site container's app host block; `/dashboard/v1/*` from compute-api | ALB host + path rule (priority 15) → port 8080 for `/dashboard/v1/*`; the site rule → port 8081 for the rest |
 
-All three are children of `compute.unifyai.us`, which stays a CNAME to OpenAI
+All four are children of `compute.unifyai.us`, which stays a CNAME to OpenAI
 Sites for the marketing page until the production cutover in ADR-0009. One
-certificate covers all three names. Any other Host gets a fixed `404`.
+certificate covers all four names. Any other Host gets a fixed `404`.
+
+The app host is **defined, not applied** (plan task A7a, 2026-10-03). Until it
+is, the name has no DNS record; after it is, it answers with a placeholder
+page until the app pages ship (A7b). Production's equivalent is
+`app.compute.unifyai.us`, a new record that the production stack manages from
+its first apply, independent of the `compute.unifyai.us` cutover. The app
+host's pages carry an enforced CSP with no third-party origin
+(`deploy/site/Caddyfile`); the job API (`/compute/v1/*`) is not routed there.
 
 ## What runs on the instance
 
@@ -572,7 +581,10 @@ the environment's `API_ORIGIN` and the site at its `PUBLIC_ORIGIN`:
 `/compute/v1/skus` 200 JSON with at least one priced SKU;
 `/compute/v1/jobs` without a key 401 with compute-api's `missing_key`;
 `/` 200 with `<title>Unify Compute`; `/privacy` 200; `/icon-v4.svg` 200 with
-`Cache-Control: max-age` of at least an hour (the Caddyfile's value). Smoke failing does **not** roll back
+`Cache-Control: max-age` of at least an hour (the Caddyfile's value). When the
+environment sets `APP_ORIGIN`, also the app host: `/` 200 with the enforced
+CSP and no HubSpot, `/dashboard/v1/session` answered by compute-api rather
+than the site, and `/compute/v1/skus` not served there. Smoke failing does **not** roll back
 automatically, because by then the host has passed its own checks and the
 fault may be in front of it. The summary prints the rollback command.
 
@@ -627,7 +639,7 @@ Assumptions this pipeline makes; a mismatch is a variable at the top of
 
 | Where | What |
 |---|---|
-| GitHub environments `staging`, `production` | secret `AWS_DEPLOY_ROLE_ARN`; variables `PUBLIC_ORIGIN` (the site origin smoke probes), `API_ORIGIN` (compute-api's origin), `AWS_REGION` (default `us-east-1`); production also `DNS_CUTOVER` (`done` after the cutover) and optionally `ALB_DNS_NAME`. Both restricted to `main`. Required reviewers were wanted on production; GitHub refused them on this repository's plan (HTTP 422, 2026-10-02), so the release owner rule is the only gate |
+| GitHub environments `staging`, `production` | secret `AWS_DEPLOY_ROLE_ARN`; variables `PUBLIC_ORIGIN` (the site origin smoke probes), `API_ORIGIN` (compute-api's origin), optionally `APP_ORIGIN` (the app host, the `app_origin` output; set it only after the app host is applied), `AWS_REGION` (default `us-east-1`); production also `DNS_CUTOVER` (`done` after the cutover) and optionally `ALB_DNS_NAME`. Both restricted to `main`. Required reviewers were wanted on production; GitHub refused them on this repository's plan (HTTP 422, 2026-10-02), so the release owner rule is the only gate |
 | Deploy role | trusts `token.actions.githubusercontent.com` with `sub` = `repo:FelixSphere@164092079/unify-compute@1364156790:environment:<env>` (this repo issues immutable OIDC subjects; see ADR-0009); may `ec2:DescribeInstances`, `ssm:SendCommand` on `AWS-RunShellScript` and on instances tagged for its env only, `ssm:GetCommandInvocation`; ECR push and read on `unify-compute-api` and `unify-compute-site` (the copy from GHCR) |
 | Instance | tag `Name=unify-compute-<env>`; SSM agent; `docker compose`, `flock`, `aws`, `curl`, `iptables`, `nsenter`; the IMDS lockdown (`/usr/local/sbin/unify-compute-imds-firewall`) |
 | Compose | `/opt/unify-compute/compose/docker-compose.yml` and `.env`, with the systemd unit's `WorkingDirectory` set to that directory; services `compute-api` (port 8080 on the host), `site`, `postgres` (user `unify`); the image keys `COMPUTE_API_IMAGE` and `SITE_IMAGE` |
