@@ -1,10 +1,15 @@
 # Accounts, keys, balance and top-ups
 
-- **Status:** Spec, nothing built. Decided by
-  [ADR-0011](../adr/0011-compute-owns-accounts-and-billing.md) (**Proposed**).
+- **Status:** Spec, partly built. Decided by
+  [ADR-0011](../adr/0011-compute-owns-accounts-and-billing.md) (**Accepted**).
   Until the cutover in that ADR, compute-api authenticates through the console
-  bridge ([`console-billing-bridge.md`](console-billing-bridge.md)) and none of
-  the routes, tables or emails below exist.
+  bridge ([`console-billing-bridge.md`](console-billing-bridge.md)). On `main`
+  but not deployed anywhere: the account tables and `internal/accounts` (A1),
+  the mailer (A2), and `balance_entries`, the local biller
+  (`internal/billing`, migration `0006_billing.sql`) and the admin CLI's
+  `account`, `balance` and `audit` verbs (A6). The dashboard routes, keys and
+  top-ups do not exist yet; `ACCOUNTS_BACKEND=local` therefore leaves keyed
+  job routes answering `503 console_unavailable` until A5.
 - Task breakdown: [`plan-own-accounts.md`](../plan-own-accounts.md).
 - Depends on: [`job-api.md`](job-api.md) (error envelope, job routes),
   [`metering.md`](metering.md) (holds H1–H7, settlement R1–R6, the quota unit),
@@ -139,15 +144,40 @@ ledger sees identical behaviour:
 
 - `billing_holds`: `hold_id PK`, `account_id`, `key_id`, `job_id` (null for
   R5 charges), `sku` (or `storage`/`egress`), `quota`, `settled_quota`,
-  `status` (`open`, `released`, `expired`), `expires_at`, `request` (`jsonb`,
-  the original body for idempotency comparison), timestamps.
-- `billing_settlements`: `event_id PK`, `hold_id`, `quota_delta`,
-  `gpu_seconds`, `final`.
+  `released_quota` (what went back when it closed, reported again by every
+  repeated release), `status` (`open`, `settled` when a final settle closed
+  it, `released`, `expired`), `expires_at` (null never expires),
+  `request` and `response` (`jsonb`, the original body and answer, for
+  idempotency), `created_at`, `closed_at`.
+- `billing_settlements`: `event_id PK`, `seq`, `hold_id`, `quota_delta`,
+  `gpu_seconds`, `final`, `response`. One row per accepted settle, including
+  one that moved nothing, so a replayed `event_id` answers what it answered.
 - `billing_extensions`: `extend_id PK`, `hold_id`, `additional_quota`.
 
-Each verb writes its rows and its `balance_entries` row in one transaction.
-Expiry is swept hourly: past `expires_at`, the remainder is released and the
-hold answers `409 hold_expired` afterwards, as the console's sweeper did.
+`internal/billing.Local` implements the bridge's four verbs with the console
+types, and answers each refusal with a `*console.Error` carrying the bridge's
+status and code, so the ledger (which depends on a `ledger.Biller` interface,
+not on the console client) cannot tell the two apart. `ACCOUNTS_BACKEND`
+chooses which one `main` wires. The bridge's user id is the account id; there
+is no per-key spending limit (open point 3), so `key_id` is recorded, not
+checked.
+
+Each verb writes its rows and its `balance_entries` row in one transaction,
+under `SELECT … FOR UPDATE` on the account row and then the hold row. Every
+verb first expires the touched account's holds past `expires_at` (strictly
+after, in whole seconds, as the console does), releasing their remainder,
+and that expiry commits even when the verb then refuses. An hourly sweep
+covers accounts nothing touches. Afterwards the hold answers
+`409 hold_expired`. One difference from the console remains: the console
+swept every hold before every request, so a call naming an unknown hold also
+expired other accounts' holds; locally that waits for the account's next
+call or the sweep. No answer differs.
+
+Tests: the ledger's harness tests and the restart tests run a second time
+with the local biller behind the console fake (`consoletest.Server.UseBook`),
+and the fake's hold contract runs against the fake, the local biller and the
+local biller over HTTP, plus a randomised sequence compared step by step
+with the fake (`internal/billing`).
 
 The existing `holds` table (the ledger's own view of a hold) is unchanged.
 After the cutover its `user_id` holds the account id and `token_id` the key id.
@@ -404,7 +434,16 @@ admin audit [--account <id>]                                  # checks the balan
 ```
 
 `balance credit` is how the first vertical slice funds an account before
-Stripe exists.
+Stripe exists. It refuses an account with no verified user, because
+`PurgeUnverified` would delete it with its balance. The balance entry's
+`ref_id` and idempotency key name the audit event (`admin:ae_…`).
+`enable-compute` emails the account's verified users ("Compute enabled")
+after the change commits; a failed email is reported and does not undo it.
+
+Built (A6): `account show|enable-compute|disable-compute|suspend|reinstate`,
+`balance show|credit|debit`, `audit`. Not yet: `account limits` (with top-ups,
+B1) and `topup refund` (B2). Suspending does not stop running jobs yet (B2).
+The CLI never migrates; the service does at boot.
 
 ## Emails
 
