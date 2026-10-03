@@ -26,6 +26,23 @@
         <h2 id="breakdown-title">Breakdown</h2>
         <div id="usage-breakdown" aria-live="polite"><p class="muted">Loading usage…</p></div>
       </section>
+      <section class="section" aria-labelledby="days-title">
+        <h2 id="days-title">By day</h2>
+        <div id="usage-days" aria-live="polite"></div>
+      </section>
+      <section class="section" aria-labelledby="keys-title">
+        <h2 id="keys-title">By API key</h2>
+        <div id="usage-keys" aria-live="polite"></div>
+      </section>
+      <section class="section" aria-labelledby="jobs-title">
+        <h2 id="jobs-title">Charged jobs</h2>
+        <div class="filters" role="group" aria-label="Filter charged jobs">
+          <label>SKU <select id="usage-sku"><option value="">All</option></select></label>
+          <label>API key <select id="usage-key"><option value="">All</option></select></label>
+        </div>
+        <div id="usage-jobs" aria-live="polite"></div>
+        <button class="ghost" type="button" id="usage-jobs-more" hidden>Load more</button>
+      </section>
     </main>
   </body>
 </html>

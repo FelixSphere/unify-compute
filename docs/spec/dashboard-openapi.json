@@ -2559,6 +2559,144 @@
           }
         }
       }
+    },
+    "/dashboard/v1/usage/jobs": {
+      "get": {
+        "operationId": "listUsageJobs",
+        "summary": "The jobs charged in one month",
+        "description": "The per-job view of the same settles /usage totals: every job with a settle accepted in the month, newest settle first, with what its settles added in the month. The usd values sum to /usage's gpu_usd. Keyset paged on (settled_at, job_id); a job settled on both sides of a month boundary appears in both months with each month's part.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "month",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$"
+            },
+            "description": "YYYY-MM, UTC. Absent is the current month."
+          },
+          {
+            "name": "sku",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Only jobs on this SKU."
+          },
+          {
+            "name": "key",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "description": "Only jobs submitted with this API key id."
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The next value of the previous page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobUsageList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_month (param month), invalid_key (param key), invalid_limit (param limit), invalid_cursor (param after).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: Host is not the app host. The whole prefix is 404 on any other host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than 600 reads a minute from this account (in process memory, per replica). Always with Retry-After (seconds).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "not_implemented: this deployment has no job service or ledger wired (not a configuration main produces with ACCOUNTS_BACKEND=local).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2943,7 +3081,10 @@
           "storage_usd",
           "egress_usd",
           "total_usd",
-          "by_sku"
+          "by_sku",
+          "jobs",
+          "by_day",
+          "by_key"
         ],
         "properties": {
           "object": {
@@ -2999,6 +3140,65 @@
               }
             },
             "description": "GPU time by SKU, sorted by SKU."
+          },
+          "jobs": {
+            "type": "integer",
+            "description": "Jobs with at least one settle accepted in the month."
+          },
+          "by_day": {
+            "type": "array",
+            "description": "One entry per UTC day of the month, in order, zeros included, so a chart has a slot per day. GPU settles only.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "date",
+                "gpu_seconds",
+                "usd"
+              ],
+              "properties": {
+                "date": {
+                  "type": "string",
+                  "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+                },
+                "gpu_seconds": {
+                  "type": "integer"
+                },
+                "usd": {
+                  "type": "string",
+                  "pattern": "^-?[0-9]+\\.[0-9]{4}$"
+                }
+              }
+            }
+          },
+          "by_key": {
+            "type": "array",
+            "description": "GPU settles by the API key the job was submitted with, largest first. GPU settles only.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "key",
+                "jobs",
+                "gpu_seconds",
+                "usd"
+              ],
+              "properties": {
+                "key": {
+                  "$ref": "#/components/schemas/KeyRef"
+                },
+                "jobs": {
+                  "type": "integer"
+                },
+                "gpu_seconds": {
+                  "type": "integer"
+                },
+                "usd": {
+                  "type": "string",
+                  "pattern": "^-?[0-9]+\\.[0-9]{4}$"
+                }
+              }
+            }
           }
         }
       },
@@ -3115,6 +3315,114 @@
             "type": "string",
             "format": "uri",
             "description": "Stripe's hosted Checkout page (checkout.stripe.com)."
+          }
+        }
+      },
+      "KeyRef": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "display"
+        ],
+        "description": "The API key a job was submitted with. name and display are empty strings when the key row no longer exists.",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "display": {
+            "type": "string"
+          }
+        }
+      },
+      "JobUsage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "object",
+          "job_id",
+          "sku",
+          "status",
+          "key",
+          "started_at",
+          "finished_at",
+          "settled_at",
+          "gpu_seconds",
+          "usd"
+        ],
+        "properties": {
+          "object": {
+            "const": "compute.job_usage"
+          },
+          "job_id": {
+            "type": "string"
+          },
+          "sku": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "description": "The job's current status, or an empty string if the job row is gone."
+          },
+          "key": {
+            "$ref": "#/components/schemas/KeyRef"
+          },
+          "started_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Unix seconds."
+          },
+          "finished_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Unix seconds."
+          },
+          "settled_at": {
+            "type": "integer",
+            "description": "Unix seconds of the job's last settle in the month; the list order."
+          },
+          "gpu_seconds": {
+            "type": "integer",
+            "description": "Seconds the month's settles added for this job."
+          },
+          "usd": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{4}$"
+          }
+        }
+      },
+      "JobUsageList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "object",
+          "data",
+          "has_more"
+        ],
+        "properties": {
+          "object": {
+            "const": "list"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/JobUsage"
+            }
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "next": {
+            "type": "string",
+            "description": "Pass as after to get the next page. Present only when has_more."
           }
         }
       }

@@ -1077,3 +1077,74 @@ dialog code {
     display: block;
   }
 }
+
+/* Usage: the by-day chart and the job filters. Bars are ink on surface; the
+   only amber on the page stays the focal total. */
+.chart-wrap {
+  padding: 16px 16px 12px;
+  background: var(--u-surface);
+  border: var(--u-rule);
+  border-radius: var(--u-radius);
+}
+
+.chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 160px;
+}
+
+.chart-bar {
+  flex: 1 1 0;
+  min-width: 0;
+  background: var(--u-text);
+  border-radius: 2px 2px 0 0;
+}
+
+.chart-bar.empty {
+  height: 2px;
+  background: var(--u-border);
+}
+
+.chart-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-family: var(--u-font-mono);
+  font-size: var(--u-text-xs);
+  color: var(--u-text-muted);
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  margin-bottom: 16px;
+}
+
+.filters label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--u-text-sm);
+  color: var(--u-text-2);
+}
+
+.filters select {
+  height: 36px;
+  padding: 0 12px;
+  font: inherit;
+  color: var(--u-text);
+  background: var(--u-input-bg);
+  border: 1px solid var(--u-input-border);
+  border-radius: var(--u-radius);
+}
+
+.filters select:focus-visible {
+  outline: 2px solid var(--u-focus);
+  outline-offset: 2px;
+}
+
+#usage-jobs-more {
+  margin-top: 16px;
+}

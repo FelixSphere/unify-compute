@@ -45,6 +45,9 @@ type JobRoutes interface {
 type Ledger interface {
 	History(ctx context.Context, accountID int64, after string, limit int) (billing.HistoryPage, error)
 	Usage(ctx context.Context, accountID int64, from, to time.Time) ([]billing.SKUUsage, error)
+	UsageByDay(ctx context.Context, accountID int64, from, to time.Time) ([]billing.DayUsage, error)
+	UsageByKey(ctx context.Context, accountID int64, from, to time.Time) ([]billing.KeyUsage, error)
+	UsageJobs(ctx context.Context, accountID int64, from, to time.Time, f billing.JobUsageFilter) (billing.JobUsagePage, error)
 }
 
 func notImplemented(w http.ResponseWriter, what string) {
@@ -197,16 +200,82 @@ type skuUsageView struct {
 	USD        string `json:"usd"`
 }
 
+type dayUsageView struct {
+	Date       string `json:"date"`
+	GPUSeconds int64  `json:"gpu_seconds"`
+	USD        string `json:"usd"`
+}
+
+type keyRef struct {
+	ID      int64  `json:"id"`
+	Name    string `json:"name"`
+	Display string `json:"display"`
+}
+
+type keyUsageView struct {
+	Key        keyRef `json:"key"`
+	Jobs       int64  `json:"jobs"`
+	GPUSeconds int64  `json:"gpu_seconds"`
+	USD        string `json:"usd"`
+}
+
 type usageView struct {
 	Object     string         `json:"object"`
 	Month      string         `json:"month"`
 	Currency   string         `json:"currency"`
+	Jobs       int64          `json:"jobs"`
 	GPUSeconds int64          `json:"gpu_seconds"`
 	GPUUSD     string         `json:"gpu_usd"`
 	StorageUSD string         `json:"storage_usd"`
 	EgressUSD  string         `json:"egress_usd"`
 	TotalUSD   string         `json:"total_usd"`
 	BySKU      []skuUsageView `json:"by_sku"`
+	ByDay      []dayUsageView `json:"by_day"`
+	ByKey      []keyUsageView `json:"by_key"`
+}
+
+type jobUsageView struct {
+	Object     string `json:"object"`
+	JobID      string `json:"job_id"`
+	SKU        string `json:"sku"`
+	Status     string `json:"status"`
+	Key        keyRef `json:"key"`
+	StartedAt  *int64 `json:"started_at"`
+	FinishedAt *int64 `json:"finished_at"`
+	SettledAt  int64  `json:"settled_at"`
+	GPUSeconds int64  `json:"gpu_seconds"`
+	USD        string `json:"usd"`
+}
+
+// month reads ?month=YYYY-MM (absent: the current UTC month) and returns the
+// first instant of that month, or writes invalid_month and returns false.
+func (h *Handler) month(w http.ResponseWriter, r *http.Request) (time.Time, bool) {
+	m := r.URL.Query().Get("month")
+	if m == "" {
+		now := h.now().UTC()
+		return time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC), true
+	}
+	t, err := time.Parse("2006-01", m)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "invalid_month", "month must be a UTC calendar month, YYYY-MM.", "month")
+		return time.Time{}, false
+	}
+	return t, true
+}
+
+// limit reads ?limit= with the history defaults, or writes invalid_limit.
+func limit(w http.ResponseWriter, r *http.Request) (int, bool) {
+	v := r.URL.Query().Get("limit")
+	if v == "" {
+		return defaultHistoryLimit, true
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 || n > maxHistoryLimit {
+		writeError(w, http.StatusBadRequest, "invalid_request", "invalid_limit",
+			fmt.Sprintf("limit must be an integer from 1 to %d.", maxHistoryLimit), "limit")
+		return 0, false
+	}
+	return n, true
 }
 
 // Holds that are not a job's GPU hold carry the meter as their SKU
@@ -224,23 +293,42 @@ func (h *Handler) usage(w http.ResponseWriter, r *http.Request, _ accounts.Sessi
 		notImplemented(w, "Usage is")
 		return
 	}
-	month := r.URL.Query().Get("month")
-	var from time.Time
-	if month == "" {
-		now := h.now().UTC()
-		from = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
-	} else {
-		t, err := time.Parse("2006-01", month)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request", "invalid_month", "month must be a UTC calendar month, YYYY-MM.", "month")
-			return
-		}
-		from = t
+	from, ok := h.month(w, r)
+	if !ok {
+		return
 	}
-	rows, err := h.ledger.Usage(r.Context(), u.AccountID, from, from.AddDate(0, 1, 0))
+	to := from.AddDate(0, 1, 0)
+	rows, err := h.ledger.Usage(r.Context(), u.AccountID, from, to)
 	if err != nil {
 		h.internal(w, "usage", err)
 		return
+	}
+	days, err := h.ledger.UsageByDay(r.Context(), u.AccountID, from, to)
+	if err != nil {
+		h.internal(w, "usage by day", err)
+		return
+	}
+	keys, err := h.ledger.UsageByKey(r.Context(), u.AccountID, from, to)
+	if err != nil {
+		h.internal(w, "usage by key", err)
+		return
+	}
+	// Every day of the month, so the chart has a bar slot for each; the
+	// ledger returns only days with a settle.
+	byDate := map[string]billing.DayUsage{}
+	for _, d := range days {
+		byDate[d.Day.Format("2006-01-02")] = d
+	}
+	byDay := []dayUsageView{}
+	for d := from; d.Before(to); d = d.AddDate(0, 0, 1) {
+		k := d.Format("2006-01-02")
+		byDay = append(byDay, dayUsageView{Date: k, GPUSeconds: byDate[k].GPUSeconds, USD: billing.USD(byDate[k].Quota)})
+	}
+	var jobs int64
+	byKey := []keyUsageView{}
+	for _, k := range keys {
+		jobs += k.Jobs
+		byKey = append(byKey, keyUsageView{Key: keyRef{ID: k.KeyID, Name: k.Name, Display: k.Display}, Jobs: k.Jobs, GPUSeconds: k.GPUSeconds, USD: billing.USD(k.Quota)})
 	}
 	var gpu, storage, egress, secs int64
 	bySKU := []skuUsageView{}
@@ -256,7 +344,56 @@ func (h *Handler) usage(w http.ResponseWriter, r *http.Request, _ accounts.Sessi
 			bySKU = append(bySKU, skuUsageView{SKU: row.SKU, GPUSeconds: row.GPUSeconds, USD: billing.USD(row.Quota)})
 		}
 	}
-	writeJSON(w, http.StatusOK, usageView{Object: "compute.usage", Month: from.Format("2006-01"), Currency: "USD",
+	writeJSON(w, http.StatusOK, usageView{Object: "compute.usage", Month: from.Format("2006-01"), Currency: "USD", Jobs: jobs,
 		GPUSeconds: secs, GPUUSD: billing.USD(gpu), StorageUSD: billing.USD(storage), EgressUSD: billing.USD(egress),
-		TotalUSD: billing.USD(gpu + storage + egress), BySKU: bySKU})
+		TotalUSD: billing.USD(gpu + storage + egress), BySKU: bySKU, ByDay: byDay, ByKey: byKey})
+}
+
+// usageJobs lists the jobs charged in a month, newest settle first, with
+// optional sku and key filters: the per-job view of the same settles /usage
+// totals, so the two always agree.
+func (h *Handler) usageJobs(w http.ResponseWriter, r *http.Request, _ accounts.Session, u accounts.User) {
+	if h.ledger == nil {
+		notImplemented(w, "Usage is")
+		return
+	}
+	from, ok := h.month(w, r)
+	if !ok {
+		return
+	}
+	n, ok := limit(w, r)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	f := billing.JobUsageFilter{SKU: q.Get("sku"), After: q.Get("after"), Limit: n}
+	if v := q.Get("key"); v != "" {
+		id, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || id < 1 {
+			writeError(w, http.StatusBadRequest, "invalid_request", "invalid_key", "key must be the id of one of your API keys.", "key")
+			return
+		}
+		f.KeyID = id
+	}
+	page, err := h.ledger.UsageJobs(r.Context(), u.AccountID, from, from.AddDate(0, 1, 0), f)
+	if errors.Is(err, billing.ErrInvalidCursor) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "invalid_cursor", "after must be the id of a job in this list.", "after")
+		return
+	}
+	if err != nil {
+		h.internal(w, "usage jobs", err)
+		return
+	}
+	data := make([]jobUsageView, len(page.Rows))
+	for i, j := range page.Rows {
+		data[i] = jobUsageView{Object: "compute.job_usage", JobID: j.JobID, SKU: j.SKU, Status: j.Status,
+			Key:       keyRef{ID: j.KeyID, Name: j.KeyName, Display: j.KeyDisplay},
+			StartedAt: unixPtr(j.StartedAt), FinishedAt: unixPtr(j.FinishedAt), SettledAt: j.SettledAt.Unix(),
+			GPUSeconds: j.GPUSeconds, USD: billing.USD(j.Quota)}
+	}
+	out := map[string]any{"object": "list", "data": data, "has_more": page.HasMore}
+	if page.HasMore {
+		out["next"] = data[len(data)-1].JobID
+	}
+	writeJSON(w, http.StatusOK, out)
 }

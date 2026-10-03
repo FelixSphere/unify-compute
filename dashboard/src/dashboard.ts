@@ -78,13 +78,31 @@ type Entry = {
   ref: string | { type?: string; id?: string } | null;
   created_at: number;
 };
+type KeyRef = { id: number; name: string; display: string };
 type Usage = {
+  month: string;
+  jobs: number;
+  gpu_seconds: number;
   gpu_usd: string;
   storage_usd: string;
   egress_usd: string;
   total_usd: string;
   by_sku: { sku: string; gpu_seconds: number; usd: string }[];
+  by_day: { date: string; gpu_seconds: number; usd: string }[];
+  by_key: { key: KeyRef; jobs: number; gpu_seconds: number; usd: string }[];
 };
+type JobUsage = {
+  job_id: string;
+  sku: string;
+  status: string;
+  key: KeyRef;
+  started_at: number | null;
+  finished_at: number | null;
+  settled_at: number;
+  gpu_seconds: number;
+  usd: string;
+};
+type JobUsageList = { data: JobUsage[]; has_more: boolean; next?: string };
 type List<T> = { data: T[]; has_more?: boolean; next?: string };
 
 const CONTACT = 'mailto:contactus@felixsphere.com?subject=Unify%20Compute%20access';
@@ -763,6 +781,37 @@ function shiftMonth(m: string, by: number) {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
+const keyLabel = (k: KeyRef) => (k.display ? `${k.display} · ${k.name || 'deleted key'}` : `key #${k.id} (deleted)`);
+
+// One bar per day of the month, heights relative to the busiest day. Ink on
+// paper like the rest of the dashboard; amber stays for the focal number.
+function dayChart(days: Usage['by_day'], total: string) {
+  const values = days.map((d) => cents(d.usd) ?? 0);
+  const max = Math.max(...values, 1);
+  const bars = days.map((d, i) =>
+    h('div', {
+      class: values[i] ? 'chart-bar' : 'chart-bar empty',
+      style: values[i] ? `height:${Math.max((values[i] / max) * 100, 2).toFixed(1)}%` : undefined,
+      title: `${d.date}: USD ${d.usd}, ${duration(d.gpu_seconds)}`,
+    }),
+  );
+  const ticks = [1, 8, 15, 22, 29].filter((n) => n <= days.length);
+  return h(
+    'div',
+    { class: 'chart-wrap', role: 'img', 'aria-label': `GPU charges by day in ${monthLabel(days[0]?.date.slice(0, 7) ?? '')}: USD ${total} in total` },
+    h('div', { class: 'chart' }, ...bars),
+    h('div', { class: 'chart-axis', 'aria-hidden': 'true' }, ...ticks.map((n) => h('span', {}, String(n)))),
+  );
+}
+
+function fillSelect(id: string, options: { value: string; label: string }[]) {
+  const sel = $<HTMLSelectElement>(id);
+  if (!sel) return;
+  const keep = sel.value;
+  sel.replaceChildren(h('option', { value: '' }, 'All'), ...options.map((o) => h('option', { value: o.value }, o.label)));
+  sel.value = options.some((o) => o.value === keep) ? keep : '';
+}
+
 async function usage() {
   const me = await shell();
   if (!me) return;
@@ -771,6 +820,42 @@ async function usage() {
   let month = current;
   const prev = $<HTMLButtonElement>('month-prev')!;
   const next = $<HTMLButtonElement>('month-next')!;
+  const skuSel = $<HTMLSelectElement>('usage-sku')!;
+  const keySel = $<HTMLSelectElement>('usage-key')!;
+  const more = $<HTMLButtonElement>('usage-jobs-more')!;
+  let rows: JobUsage[] = [];
+  let cursor: string | undefined;
+
+  function jobsTableView() {
+    return rows.length
+      ? table(
+          'Charged jobs',
+          [{ text: 'Job' }, { text: 'Status' }, { text: 'SKU' }, { text: 'API key' }, { text: 'Last charged' }, { text: 'GPU time', num: true }, { text: 'USD', num: true }],
+          rows.map((j) => [jobLink(j.job_id), jobState(j.status), mono(j.sku), mono(keyLabel(j.key)), when(j.settled_at), mono(duration(j.gpu_seconds)), mono(j.usd)]),
+        )
+      : muted('No job was charged in this month with these filters.');
+  }
+
+  async function loadJobs(append: boolean) {
+    if (!append) {
+      rows = [];
+      cursor = undefined;
+    }
+    const q = new URLSearchParams({ month, limit: '50' });
+    if (skuSel.value) q.set('sku', skuSel.value);
+    if (keySel.value) q.set('key', keySel.value);
+    if (cursor) q.set('after', cursor);
+    const r = await get<JobUsageList>(`/usage/jobs?${q}`);
+    if (!r.ok) {
+      fill('usage-jobs', muted(notBuilt(r.error) ? 'Charged jobs will be listed here.' : r.error.message));
+      more.hidden = true;
+      return;
+    }
+    rows = rows.concat(r.data.data);
+    cursor = r.data.next;
+    fill('usage-jobs', jobsTableView());
+    more.hidden = !r.data.has_more;
+  }
 
   async function load() {
     setText('usage-month-label', monthLabel(month));
@@ -786,6 +871,21 @@ async function usage() {
     }
     const u = r.data;
     setText('usage-total', u.total_usd);
+    setText('usage-sub', `${u.jobs} job${u.jobs === 1 ? '' : 's'} charged · ${duration(u.gpu_seconds)} of GPU time.`);
+    fill('usage-days', u.by_day?.length ? dayChart(u.by_day, u.gpu_usd) : muted('Nothing was charged in this month.'));
+    fill(
+      'usage-keys',
+      u.by_key?.length
+        ? table(
+            'GPU time by API key',
+            [{ text: 'API key' }, { text: 'Jobs', num: true }, { text: 'GPU time', num: true }, { text: 'USD', num: true }],
+            u.by_key.map((k) => [mono(keyLabel(k.key)), mono(String(k.jobs)), mono(duration(k.gpu_seconds)), mono(k.usd)]),
+          )
+        : muted('No API key was charged in this month.'),
+    );
+    fillSelect('usage-sku', (u.by_sku ?? []).map((s) => ({ value: s.sku, label: s.sku })));
+    fillSelect('usage-key', (u.by_key ?? []).map((k) => ({ value: String(k.key.id), label: keyLabel(k.key) })));
+    void loadJobs(false);
     fill(
       'usage-breakdown',
       table('Usage by meter', [{ text: 'Meter' }, { text: 'USD', num: true }], [
@@ -810,6 +910,9 @@ async function usage() {
     month = shiftMonth(month, 1);
     void load();
   });
+  skuSel.addEventListener('change', () => void loadJobs(false));
+  keySel.addEventListener('change', () => void loadJobs(false));
+  more.addEventListener('click', () => void loadJobs(true));
   await load();
 }
 
