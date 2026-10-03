@@ -17,9 +17,25 @@
           <p class="metric" id="usage-total" aria-live="polite">—</p>
           <p class="sub" id="usage-sub">Settled charges for GPU time, storage and egress.</p>
         </div>
-        <div class="month-nav" role="group" aria-label="Month">
-          <button class="ghost" type="button" id="month-prev">Previous month</button>
-          <button class="ghost" type="button" id="month-next">Next month</button>
+        <div class="period-nav" role="group" aria-label="Period">
+          <label>Period
+            <select id="usage-range">
+              <option value="month" selected>Calendar month</option>
+              <option value="7d">Last 7 days</option>
+              <option value="30d">Last 30 days</option>
+              <option value="custom">Custom dates</option>
+            </select>
+          </label>
+          <span class="month-nav" id="month-controls">
+            <button class="ghost" type="button" id="month-prev">Previous month</button>
+            <button class="ghost" type="button" id="month-next">Next month</button>
+          </span>
+          <span class="month-nav" id="custom-controls" hidden>
+            <label>From <input type="date" id="usage-from" /></label>
+            <label>To <input type="date" id="usage-to" /></label>
+            <button class="ghost" type="button" id="usage-apply">Apply</button>
+          </span>
+          <a class="ghost" id="usage-export" href="#" download>Export CSV</a>
         </div>
       </section>
       <section class="section" aria-labelledby="breakdown-title">

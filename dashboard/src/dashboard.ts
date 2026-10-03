@@ -4,24 +4,7 @@
 // not register, and one without a job service 501; each section then says
 // what will appear there instead of failing the page.
 
-import {
-  $,
-  type ApiError,
-  busy,
-  call,
-  checkConfirm,
-  checkNewPassword,
-  clearFieldError,
-  focusFirstInvalid,
-  GENERIC,
-  input,
-  onSubmit,
-  type Result,
-  setFieldError,
-  setFormError,
-  showApiError,
-  wireConfirm,
-} from './lib';
+import { API, $, type ApiError, busy, call, checkConfirm, checkNewPassword, clearFieldError, focusFirstInvalid, GENERIC, input, onSubmit, type Result, setFieldError, setFormError, showApiError, wireConfirm } from './lib';
 
 type Me = {
   user: { email: string; created_at: number };
@@ -80,7 +63,9 @@ type Entry = {
 };
 type KeyRef = { id: number; name: string; display: string };
 type Usage = {
-  month: string;
+  month?: string;
+  from: string;
+  to: string;
   jobs: number;
   gpu_seconds: number;
   gpu_usd: string;
@@ -795,13 +780,29 @@ function dayChart(days: Usage['by_day'], total: string) {
       title: `${d.date}: USD ${d.usd}, ${duration(d.gpu_seconds)}`,
     }),
   );
-  const ticks = [1, 8, 15, 22, 29].filter((n) => n <= days.length);
+  // About five labels along the axis, each a day of its month; the first
+  // and last day always.
+  const step = Math.max(1, Math.round((days.length - 1) / 4));
+  const ticks = days.filter((_, i) => i % step === 0 || i === days.length - 1).map((d) => d.date);
+  const label = (date: string) => (days.length <= 31 ? String(Number(date.slice(8))) : date.slice(5));
   return h(
     'div',
-    { class: 'chart-wrap', role: 'img', 'aria-label': `GPU charges by day in ${monthLabel(days[0]?.date.slice(0, 7) ?? '')}: USD ${total} in total` },
+    { class: 'chart-wrap', role: 'img', 'aria-label': `GPU charges by day from ${days[0]?.date} to ${days[days.length - 1]?.date}: USD ${total} in total` },
     h('div', { class: 'chart' }, ...bars),
-    h('div', { class: 'chart-axis', 'aria-hidden': 'true' }, ...ticks.map((n) => h('span', {}, String(n)))),
+    h('div', { class: 'chart-axis', 'aria-hidden': 'true' }, ...ticks.map((d) => h('span', {}, label(d)))),
   );
+}
+
+const isoDate = (d: Date) => d.toISOString().slice(0, 10);
+
+// The period the usage page shows: a calendar month, a trailing window, or
+// two dates. Serialised the way the API takes it.
+type Period = { kind: 'month'; month: string } | { kind: 'range'; from: string; to: string };
+function periodQuery(p: Period): URLSearchParams {
+  return p.kind === 'month' ? new URLSearchParams({ month: p.month }) : new URLSearchParams({ from: p.from, to: p.to });
+}
+function periodLabel(p: Period): string {
+  return p.kind === 'month' ? monthLabel(p.month) : `${p.from} to ${p.to}`;
 }
 
 function fillSelect(id: string, options: { value: string; label: string }[]) {
@@ -818,8 +819,16 @@ async function usage() {
   const now = new Date();
   const current = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
   let month = current;
+  let period: Period = { kind: 'month', month };
   const prev = $<HTMLButtonElement>('month-prev')!;
   const next = $<HTMLButtonElement>('month-next')!;
+  const rangeSel = $<HTMLSelectElement>('usage-range')!;
+  const monthControls = $('month-controls')!;
+  const customControls = $('custom-controls')!;
+  const fromIn = $<HTMLInputElement>('usage-from')!;
+  const toIn = $<HTMLInputElement>('usage-to')!;
+  const apply = $<HTMLButtonElement>('usage-apply')!;
+  const exportLink = $<HTMLAnchorElement>('usage-export')!;
   const skuSel = $<HTMLSelectElement>('usage-sku')!;
   const keySel = $<HTMLSelectElement>('usage-key')!;
   const more = $<HTMLButtonElement>('usage-jobs-more')!;
@@ -841,7 +850,8 @@ async function usage() {
       rows = [];
       cursor = undefined;
     }
-    const q = new URLSearchParams({ month, limit: '50' });
+    const q = periodQuery(period);
+    q.set('limit', '50');
     if (skuSel.value) q.set('sku', skuSel.value);
     if (keySel.value) q.set('key', keySel.value);
     if (cursor) q.set('after', cursor);
@@ -858,9 +868,10 @@ async function usage() {
   }
 
   async function load() {
-    setText('usage-month-label', monthLabel(month));
-    next.disabled = month >= current;
-    const r = await get<Usage>(`/usage?month=${month}`);
+    setText('usage-month-label', periodLabel(period));
+    next.disabled = period.kind !== 'month' || month >= current;
+    exportLink.href = `${API}/usage/export?${periodQuery(period)}`;
+    const r = await get<Usage>(`/usage?${periodQuery(period)}`);
     if (!r.ok) {
       setText('usage-total', '—');
       fill(
@@ -904,10 +915,37 @@ async function usage() {
   }
   prev.addEventListener('click', () => {
     month = shiftMonth(month, -1);
+    period = { kind: 'month', month };
     void load();
   });
   next.addEventListener('click', () => {
     month = shiftMonth(month, 1);
+    period = { kind: 'month', month };
+    void load();
+  });
+  function trailing(days: number): Period {
+    const end = new Date();
+    const start = new Date(end.getTime() - (days - 1) * 86_400_000);
+    return { kind: 'range', from: isoDate(start), to: isoDate(end) };
+  }
+  rangeSel.addEventListener('change', () => {
+    const v = rangeSel.value;
+    monthControls.hidden = v !== 'month';
+    customControls.hidden = v !== 'custom';
+    if (v === 'month') period = { kind: 'month', month };
+    else if (v === '7d') period = trailing(7);
+    else if (v === '30d') period = trailing(30);
+    else {
+      if (!fromIn.value) fromIn.value = isoDate(new Date(Date.now() - 29 * 86_400_000));
+      if (!toIn.value) toIn.value = isoDate(new Date());
+      period = { kind: 'range', from: fromIn.value, to: toIn.value };
+    }
+    void load();
+  });
+  apply.addEventListener('click', () => {
+    if (!fromIn.value || !toIn.value) return;
+    if (toIn.value < fromIn.value) [fromIn.value, toIn.value] = [toIn.value, fromIn.value];
+    period = { kind: 'range', from: fromIn.value, to: toIn.value };
     void load();
   });
   skuSel.addEventListener('change', () => void loadJobs(false));
@@ -961,12 +999,14 @@ async function billing() {
   if (!me) return;
   const balance = showBalance();
   const more = $<HTMLButtonElement>('history-more')!;
+  const kindSel = $<HTMLSelectElement>('history-kind');
   let rows: Entry[] = [];
   let cursor: string | undefined;
 
   async function load(append: boolean) {
     more.disabled = true;
     const q = new URLSearchParams({ limit: '25' });
+    for (const k of (kindSel?.value ?? '').split(',').filter(Boolean)) q.append('kind', k);
     if (append && cursor) q.set('after', cursor);
     const r = await get<Entry[] | List<Entry>>(`/transactions?${q}`);
     more.disabled = false;
@@ -994,6 +1034,7 @@ async function billing() {
     );
   }
   more.addEventListener('click', () => void load(true));
+  kindSel?.addEventListener('change', () => void load(false));
 
   // --- Card top-ups (B1). The page never credits anything: it sends the
   // browser to Stripe's Checkout page and, on the way back, waits for the

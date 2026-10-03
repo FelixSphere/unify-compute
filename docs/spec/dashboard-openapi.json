@@ -1296,6 +1296,32 @@
         ],
         "parameters": [
           {
+            "name": "kind",
+            "in": "query",
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "topup",
+                  "hold",
+                  "extend",
+                  "settle",
+                  "release",
+                  "refund",
+                  "dispute",
+                  "dispute_reversal",
+                  "admin_credit",
+                  "admin_debit",
+                  "writeoff"
+                ]
+              }
+            },
+            "description": "Only entries of these kinds; repeatable. Absent is every kind."
+          },
+          {
             "name": "after",
             "in": "query",
             "schema": {
@@ -1326,7 +1352,7 @@
             }
           },
           "400": {
-            "description": "invalid_limit (param limit) or invalid_cursor (param after): not an entry of this account.",
+            "description": "invalid_limit (param limit), invalid_cursor (param after), invalid_kind (param kind).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1414,7 +1440,25 @@
               "type": "string",
               "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$"
             },
-            "description": "YYYY-MM, UTC. Absent is the current month."
+            "description": "YYYY-MM, UTC. Absent (and no from/to) is the current month."
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+            },
+            "description": "First day, inclusive, UTC. With to; not with month. At most 366 days from to."
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+            },
+            "description": "Last day, inclusive, UTC. With from."
           }
         ],
         "responses": {
@@ -1429,7 +1473,7 @@
             }
           },
           "400": {
-            "description": "invalid_month (param month).",
+            "description": "invalid_month (param month); invalid_period (param month, from or to): month given with from/to, a malformed date, to before from, or more than 366 days.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2578,7 +2622,25 @@
               "type": "string",
               "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$"
             },
-            "description": "YYYY-MM, UTC. Absent is the current month."
+            "description": "YYYY-MM, UTC. Absent (and no from/to) is the current month."
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+            },
+            "description": "First day, inclusive, UTC. With to; not with month. At most 366 days from to."
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+            },
+            "description": "Last day, inclusive, UTC. With from."
           },
           {
             "name": "sku",
@@ -2628,7 +2690,128 @@
             }
           },
           "400": {
-            "description": "invalid_month (param month), invalid_key (param key), invalid_limit (param limit), invalid_cursor (param after).",
+            "description": "invalid_month (param month), invalid_period (param month, from or to), invalid_key (param key), invalid_limit (param limit), invalid_cursor (param after).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: Host is not the app host. The whole prefix is 404 on any other host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than 600 reads a minute from this account (in process memory, per replica). Always with Retry-After (seconds).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "not_implemented: this deployment has no job service or ledger wired (not a configuration main produces with ACCOUNTS_BACKEND=local).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/usage/export": {
+      "get": {
+        "operationId": "exportUsage",
+        "summary": "The charged jobs of a period as a FOCUS-shaped CSV",
+        "description": "The same rows as /usage/jobs, unfiltered, as a CSV attachment with FOCUS 1.0 column names (BillingAccountId, BillingPeriodStart/End, ChargePeriodStart/End, ChargeCategory, ServiceName, ResourceId, SkuId, ConsumedQuantity, ConsumedUnit, BilledCost, EffectiveCost, …) plus x_ApiKeyId, x_ApiKeyName and x_JobStatus. ChargePeriodStart/End are the job's started_at and finished_at (its last settle when either is missing); BillingPeriodStart/End are the requested period. At most 10000 rows; ask for a shorter period beyond that. Product-design task C10.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "month",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$"
+            },
+            "description": "YYYY-MM, UTC. Absent (and no from/to) is the current month."
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+            },
+            "description": "First day, inclusive, UTC. With to; not with month. At most 366 days from to."
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+            },
+            "description": "Last day, inclusive, UTC. With from."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The CSV. Content-Disposition names the file unify-compute-usage-<from>-<to>.csv.",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_month (param month), invalid_period (param month, from or to).",
             "content": {
               "application/json": {
                 "schema": {
@@ -3074,7 +3257,6 @@
         "additionalProperties": false,
         "required": [
           "object",
-          "month",
           "currency",
           "gpu_seconds",
           "gpu_usd",
@@ -3084,7 +3266,9 @@
           "by_sku",
           "jobs",
           "by_day",
-          "by_key"
+          "by_key",
+          "from",
+          "to"
         ],
         "properties": {
           "object": {
@@ -3092,7 +3276,7 @@
           },
           "month": {
             "type": "string",
-            "description": "YYYY-MM, UTC."
+            "description": "YYYY-MM, UTC. Present only when the period is a calendar month (the default, or ?month=)."
           },
           "currency": {
             "const": "USD"
@@ -3147,7 +3331,7 @@
           },
           "by_day": {
             "type": "array",
-            "description": "One entry per UTC day of the month, in order, zeros included, so a chart has a slot per day. GPU settles only.",
+            "description": "One entry per UTC day of the period, in order, zeros included, so a chart has a slot per day. GPU settles only.",
             "items": {
               "type": "object",
               "additionalProperties": false,
@@ -3199,6 +3383,16 @@
                 }
               }
             }
+          },
+          "from": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+            "description": "First day of the period, inclusive, UTC."
+          },
+          "to": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+            "description": "Last day of the period, inclusive, UTC."
           }
         }
       },

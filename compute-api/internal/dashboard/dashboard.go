@@ -134,6 +134,7 @@ func New(cfg Config) (*Handler, error) {
 	h.handle("GET /transactions", h.session(h.read(h.transactions)))
 	h.handle("GET /usage", h.session(h.read(h.usage)))
 	h.handle("GET /usage/jobs", h.session(h.read(h.usageJobs)))
+	h.handle("GET /usage/export", h.session(h.read(h.usageExport)))
 	h.handle("GET /jobs", h.session(h.read(h.job(JobRoutes.List))))
 	h.handle("GET /jobs/{id}", h.session(h.read(h.job(JobRoutes.Get))))
 	h.handle("POST /jobs/{id}/cancel", h.session(h.job(JobRoutes.Cancel)))

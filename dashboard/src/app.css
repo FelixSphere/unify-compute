@@ -1130,6 +1130,30 @@ dialog code {
   color: var(--u-text-2);
 }
 
+.period-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+}
+
+.period-nav label,
+.period-nav .month-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--u-text-sm);
+  color: var(--u-text-2);
+}
+
+a.ghost {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+.period-nav select,
+.period-nav input[type='date'],
 .filters select {
   height: 36px;
   padding: 0 12px;
@@ -1140,6 +1164,8 @@ dialog code {
   border-radius: var(--u-radius);
 }
 
+.period-nav select:focus-visible,
+.period-nav input[type='date']:focus-visible,
 .filters select:focus-visible {
   outline: 2px solid var(--u-focus);
   outline-offset: 2px;
