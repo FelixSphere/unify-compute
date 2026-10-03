@@ -545,9 +545,35 @@ line.
 Secrets come from SSM under the stack's prefix, like the existing ones
 (`deploy/aws/modules/compute-stack/instance.tf`, `ssm_prefix`).
 
+## Terms and Conditions
+
+On 2026-10-03 the operator decided that Unify Compute uses FelixSphere's
+existing Terms and Conditions at https://felixsphere.com/legal/terms, since
+FelixSphere LLC is the contracting entity (ADR-0011 D2). The sign-up consent
+line and the footers of the marketing site and the app host link there; the
+URL is `TERMS_URL` in `app/links.ts`, which `dashboard/vite.config.ts` also
+imports. compute.unifyai.us has no `/terms` page.
+
+Two known gaps, left for the legal review before the first live top-up
+(ADR-0011 D6; `plan-own-accounts.md` O5):
+
+1. **Refunds.** The document is a generic template whose refund clause is
+   written for physical goods (returns, shipping), not for prepaid compute
+   credit that is spent per second. Refunds of unused balance, including at
+   account close, are not covered.
+2. **Acceptable use.** It has no acceptable-use policy: nothing forbids
+   cryptocurrency mining, abuse of GPUs, or the other uses the upstream GPU
+   providers' own terms require us to prohibit and enforce.
+
+This also departs from `~/unifyai-brand-kit/UI-STANDARD.md`, which allows no
+link to felixsphere.com other than the contact address, and from the brand's
+"UnifyAI · Petaling Jaya" company line; ADR-0011 D2 already records that
+reconciliation as outstanding.
+
 ## Open points
 
 1. Decisions D1–D8 in ADR-0011.
 2. Whether `pending` users can be purged earlier than 7 days under abuse.
 3. A per-key monthly spend cap (the console's token quota) if a customer asks.
 4. Breached-password checking, TOTP, organisations and invitations: later.
+5. The Terms and Conditions' refund and acceptable-use gaps (above).

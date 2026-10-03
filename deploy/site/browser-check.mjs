@@ -217,6 +217,11 @@ const HOME_TITLE = 'Unify Compute — On-demand inference & GPU compute';
 const PRIVACY_TITLE = 'Privacy Policy — Unify Compute';
 const COOKIE_LINK = '[aria-label="Cookie notice"] a[href="/privacy"]';
 const FOOTER_LINK = 'footer a[href="/privacy"]';
+// FelixSphere's Terms and Conditions (app/links.ts TERMS_URL; ADR-0011 D2).
+const TERMS_URL = 'https://felixsphere.com/legal/terms';
+const termsLinks = (selector) =>
+  evaluate(`[...document.querySelectorAll(${JSON.stringify(selector)})].filter((a) => /terms/i.test(a.textContent)).map((a) => a.textContent.trim() + '|' + a.getAttribute('href') + '|' + (a.target || ''))`);
+const deadTerms = `document.querySelectorAll('a[href*="compute.unifyai.us/terms"]').length`;
 
 // A marker on window survives a client-side navigation and is gone after a
 // document load, which is how a broken router that falls back to full page
@@ -926,6 +931,16 @@ async function appChecks() {
     `${APP_HOST} CSP blocks inline script`,
     `${APP_HOST} CSP did not block an inline script (ran=${inlineRan.ran}, violation=${inlineRan.violated})`,
   );
+  {
+    const consent = await termsLinks('.legal a');
+    const below = await termsLinks('.below a');
+    check(
+      consent.join() === `Terms and Conditions|${TERMS_URL}|` && below.join() === `Terms|${TERMS_URL}|`,
+      `/signup Terms links go to ${TERMS_URL}, same tab`,
+      `/signup Terms links: consent ${JSON.stringify(consent)}, footer ${JSON.stringify(below)}`,
+    );
+    check((await evaluate(deadTerms)) === 0, '/signup has no compute.unifyai.us/terms link', '/signup still links to compute.unifyai.us/terms');
+  }
   await shot('signup-desktop');
 
   // Show/hide: a real button with a label that says what it will do.
@@ -1201,6 +1216,15 @@ try {
     'HubSpot loader not present exactly once',
   );
 
+  {
+    const footerTerms = await termsLinks('footer a');
+    check(
+      footerTerms.join() === `Terms|${TERMS_URL}|`,
+      `/ footer Terms links to ${TERMS_URL}, same tab`,
+      `/ footer Terms links: ${JSON.stringify(footerTerms)}`,
+    );
+    check((await evaluate(deadTerms)) === 0, '/ has no compute.unifyai.us/terms link', '/ still links to compute.unifyai.us/terms');
+  }
   await clickAndExpectSoftNav(FOOTER_LINK, 'footer "Privacy"');
   await back();
   await clickAndExpectSoftNav(COOKIE_LINK, 'cookie notice "Privacy Policy"');
