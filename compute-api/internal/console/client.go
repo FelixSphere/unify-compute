@@ -273,3 +273,13 @@ func (c *Client) Release(ctx context.Context, holdID string) (*ReleaseResult, er
 	}
 	return &out, nil
 }
+
+// Owner is the billing identity compute-api scopes jobs and quotas to: the
+// tenant when the key belongs to one, else the user, matching which balance
+// remain_quota reports.
+func (id Identity) Owner() string {
+	if id.TenantID > 0 {
+		return fmt.Sprintf("tenant:%d", id.TenantID)
+	}
+	return fmt.Sprintf("user:%d", id.UserID)
+}

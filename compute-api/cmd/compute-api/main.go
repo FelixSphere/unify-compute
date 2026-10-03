@@ -12,6 +12,7 @@ import (
 
 	"github.com/FelixSphere/unify-compute/compute-api/internal/api"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/console"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/quota"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/sku"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/template"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/upstream"
@@ -29,6 +30,17 @@ func main() {
 		log.Error("load sku catalogue", "err", err)
 		os.Exit(1)
 	}
+
+	// Quotas are validated at boot like the catalogue, so a bad file fails
+	// the deploy. They are not enforced yet: enforcement needs the owner a
+	// key resolves to, which arrives with the console bridge's verify, and
+	// the job store, which this binary does not open yet.
+	quotas, err := quota.Load(env("QUOTA_FILE", "config/quotas.json"))
+	if err != nil {
+		log.Error("load quotas", "err", err)
+		os.Exit(1)
+	}
+	log.Info("quotas loaded", "overrides", len(quotas.Owners), "enforced", false)
 
 	// Templates are checked against the catalogue they sell from, so a
 	// template naming a SKU that was removed fails the deploy, not a submit.

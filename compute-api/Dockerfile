@@ -1,6 +1,7 @@
 # Two stages: build with the toolchain, run from a distroless image with no
-# shell, as a non-root user. The SKU catalogue ships inside the image on purpose
-# (see AGENTS.md: a price change is a code change, not a config edit).
+# shell, as a non-root user. The SKU catalogue and the quota limits ship inside
+# the image on purpose (see AGENTS.md: a price change is a code change, not a
+# config edit; docs/spec/quotas.md: so is a limit).
 FROM golang:1.24-alpine AS build
 ARG BUILD=dev
 WORKDIR /src
@@ -14,6 +15,7 @@ FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /app
 COPY --from=build /out/compute-api /app/compute-api
 COPY config/skus.json /app/config/skus.json
+COPY config/quotas.json /app/config/quotas.json
 COPY config/templates.json /app/config/templates.json
 ENV LISTEN_ADDR=0.0.0.0:8080
 EXPOSE 8080

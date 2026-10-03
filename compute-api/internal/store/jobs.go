@@ -151,6 +151,29 @@ func (s *Store) Create(ctx context.Context, nj NewJob, idem *Idempotency) (job J
 	if idem != nil && (len(idem.Key) == 0 || len([]rune(idem.Key)) > 255) {
 		return Job{}, false, ErrInvalidIdempotencyKey
 	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Job{}, false, err
+	}
+	defer tx.Rollback(ctx)
+
+	job, replay, err := insertJob(ctx, tx, nj, idem)
+	if err != nil {
+		return Job{}, false, err
+	}
+	if replay {
+		_ = tx.Rollback(ctx)
+		return s.replay(ctx, nj.Owner, idem)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Job{}, false, err
+	}
+	return job, true, nil
+}
+
+// insertJob inserts nj and binds idem to it inside tx. replay=true means the
+// key is already bound to a live job; the caller must roll back and replay.
+func insertJob(ctx context.Context, tx pgx.Tx, nj NewJob, idem *Idempotency) (job Job, replay bool, err error) {
 	meta := nj.Metadata
 	if meta == nil {
 		meta = map[string]string{}
@@ -159,12 +182,6 @@ func (s *Store) Create(ctx context.Context, nj NewJob, idem *Idempotency) (job J
 	if err != nil {
 		return Job{}, false, err
 	}
-
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return Job{}, false, err
-	}
-	defer tx.Rollback(ctx)
 
 	job, err = scanJob(tx.QueryRow(ctx, `
 		INSERT INTO jobs (id, owner, token_id, sku, spec, metadata)
@@ -188,18 +205,13 @@ func (s *Store) Create(ctx context.Context, nj NewJob, idem *Idempotency) (job J
 			RETURNING job_id`,
 			nj.Owner, idem.Key, idem.RequestHash, job.ID, IdempotencyRetention.Seconds()).Scan(&bound)
 		if errors.Is(err, pgx.ErrNoRows) {
-			_ = tx.Rollback(ctx)
-			return s.replay(ctx, nj.Owner, idem)
+			return Job{}, true, nil
 		}
 		if err != nil {
 			return Job{}, false, fmt.Errorf("store: bind idempotency key: %w", err)
 		}
 	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return Job{}, false, err
-	}
-	return job, true, nil
+	return job, false, nil
 }
 
 func (s *Store) replay(ctx context.Context, owner string, idem *Idempotency) (Job, bool, error) {

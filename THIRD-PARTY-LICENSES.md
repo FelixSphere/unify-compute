@@ -17,8 +17,9 @@ here, in the commit that adds it. Permissive licences only (ADR-0002).
 
 The modules above are what `go list -deps ./...` reaches; `go.mod` lists
 nothing else. pgx's own test dependencies (testify and friends) are not in
-our build graph. The `cmd/compute-api` binary links them once it imports
-`internal/store`, which it does not yet.
+our build graph. The `cmd/compute-api` binary links pgx and its transitive
+modules through `internal/quota`, which imports `internal/store` for its
+usage types; the binary does not open a database yet.
 
 ## Run alongside, over HTTP or as a separate container (not linked)
 
