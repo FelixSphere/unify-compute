@@ -565,10 +565,15 @@ Two known gaps, left for the legal review before the first live top-up
    cryptocurrency mining, abuse of GPUs, or the other uses the upstream GPU
    providers' own terms require us to prohibit and enforce.
 
-This also departs from `~/unifyai-brand-kit/UI-STANDARD.md`, which allows no
-link to felixsphere.com other than the contact address, and from the brand's
-"UnifyAI · Petaling Jaya" company line; ADR-0011 D2 already records that
-reconciliation as outstanding.
+The privacy policy (`app/privacy/page.tsx`) names FelixSphere LLC, 6 Karen
+Ct, CA 94010, as the Company and data controller to match (operator decision,
+2026-10-03). The footers keep the brand's "© <year> UnifyAI" company line
+from `~/unifyai-brand-kit/UI-STANDARD.md`, which is not the legal entity.
+
+Both depart from UI-STANDARD, which allows no felixsphere.com link other than
+the contact address and no "FelixSphere LLC". The brand owner has been asked
+to allow them in Compute's legal pages; until then `check-consistency.sh`
+item 4 flags them.
 
 ## Open points
 

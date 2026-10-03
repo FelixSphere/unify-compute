@@ -5,12 +5,15 @@ import { SiteHeader } from '../site-header';
 export const metadata: Metadata = {
   title: 'Privacy Policy — Unify Compute',
   description:
-    'How UnifyAI collects, uses, and protects your information, and the cookies this site uses.',
+    'How FelixSphere LLC collects, uses, and protects your information, and the cookies this site uses.',
 };
 
-// UnifyAI is the Company and data controller (user decision, 2026-10-01). The text started from
-// FelixSphere's policy but no longer tracks it; edit it here. The contact mailbox stays on
-// felixsphere.com only until a unifyai.us mailbox exists (unifyai.us has no MX record).
+// FelixSphere LLC is the Company and data controller (operator decision, 2026-10-03), because it
+// contracts with customers, owns the Stripe account (ADR-0011 D2) and publishes the Terms this
+// site links to (TERMS_URL in ../links.ts). This is Compute's own copy of a policy that started
+// from FelixSphere's and no longer tracks it; edit it here. The footer's "© <year> UnifyAI"
+// line is the brand's company line (UI-STANDARD), not the legal entity.
+// The contact mailbox stays on felixsphere.com until a unifyai.us mailbox exists.
 export default function PrivacyPolicy() {
   return (
     <main id="top">
@@ -20,7 +23,7 @@ export default function PrivacyPolicy() {
       <SiteHeader />
       <article className="legal wrap" id="policy">
         <h1>Privacy Policy</h1>
-        <p className="legal-updated">Last updated: October 1, 2026</p>
+        <p className="legal-updated">Last updated: October 3, 2026</p>
 
         <p>
           This Privacy Policy describes Our policies and procedures on the
@@ -67,8 +70,7 @@ export default function PrivacyPolicy() {
           <strong> Company </strong>
           (referred to as either &quot;the Company&quot;, &quot;We&quot;,
           &quot;Us&quot; or &quot;Our&quot; in this Agreement) refers to
-          UnifyAI, Lebuh Bandar Utama PJU 6, 47800 Petaling Jaya, Selangor,
-          Malaysia.
+          FelixSphere LLC, 6 Karen Ct, CA 94010.
         </p>
 
         <p>For the purpose of the GDPR, the Company is the Data Controller.</p>
