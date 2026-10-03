@@ -1,7 +1,8 @@
 // The signed-in pages (UI-STANDARD "App shell"). Every route and shape is
-// docs/spec/accounts.md, "Dashboard API". Routes compute-api does not serve
-// yet answer 404 not_found; each section then says what will appear there
-// instead of failing the page.
+// docs/spec/accounts.md, "Dashboard API"; compute-api serves all of them
+// since A7d. An older compute-api answers 404 not_found for a route it does
+// not register, and one without a job service 501; each section then says
+// what will appear there instead of failing the page.
 
 import {
   $,
@@ -27,7 +28,7 @@ type Me = {
   account: { id: number; status: 'active' | 'suspended' | 'closed'; compute_enabled: boolean };
   csrf_token: string;
 };
-type Balance = { available_usd: string; held_usd: string };
+type Balance = { available_usd: string; held_usd: string; currency?: 'USD' };
 type Key = {
   id: number | string;
   name: string;
@@ -58,6 +59,7 @@ type Entry = {
   kind: string;
   amount_usd: string;
   available_after_usd: string;
+  job_id?: string | null;
   ref: string | { type?: string; id?: string } | null;
   created_at: number;
 };
@@ -700,9 +702,8 @@ async function job() {
   $('logs-refresh')!.addEventListener('click', () => void logs());
   await logs();
 
-  // Not in the spec's dashboard routes yet: proposed in the A7c PR as
-  // "GET /jobs/{id}/artifacts, as the job API". Until then this says where
-  // the files can be fetched.
+  // GET /jobs/{id}/artifacts, as the job API (built in A7d). Against an
+  // older compute-api without it, this says where the files can be fetched.
   const a = await get<List<Artifact> & { complete?: boolean; truncated?: boolean }>(`${path}/artifacts`);
   if (!a.ok) {
     fill(

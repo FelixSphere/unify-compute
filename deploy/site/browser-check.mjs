@@ -426,11 +426,10 @@ const noHorizontalScroll = async (path) => {
 };
 
 // The signed-in pages (dashboard/, plan task A7c), against stubs in the shapes
-// of docs/spec/accounts.md's session routes. compute-api serves only /me,
-// /logout, /password and /reauth of those today; the rest are stubbed here
-// exactly as the spec names them, and each page is also checked with the
-// route missing (404 not_found), which is what production answers until the
-// route is built.
+// compute-api answers for docs/spec/accounts.md's session routes (all built
+// since A7d; compute-api/internal/dashboard and dashboard-openapi.json). Each
+// page is also checked with the route missing (404 not_found), which is what
+// a compute-api older than A7d answers.
 const CSRF = 'csrf-dash-7';
 const ME = {
   user: { email: 'jane.doe@example.com', created_at: 1791000000 },
@@ -462,11 +461,19 @@ const okBody = (body, status = 200) => ({ status, body });
 const notFound = { status: 404, body: { error: { type: 'not_found', code: 'not_found', message: 'Not found.' } } };
 const sessionGone = err('session_required', 'Log in to continue.', null, 401, 'authentication_error');
 
+const entry = (e, job) => ({
+  object: 'compute.balance_entry',
+  job_id: job ?? null,
+  ref: job ? { type: 'job', id: job } : null,
+  detail: job ? { sku: 'a10g-24gb-x1' } : {},
+  ...e,
+});
+
 let keysList = [KEY];
 const baseStubs = () => ({
   'GET /me': okBody(ME),
   'POST /logout': { status: 204 },
-  'GET /balance': okBody({ available_usd: '12.5000', held_usd: '2.5400', limits: { topup_min_usd: '10.00', topup_max_usd: '100.00', balance_max_usd: '200.00', topups_per_day: 3 } }),
+  'GET /balance': okBody({ object: 'compute.balance', currency: 'USD', available_usd: '12.5000', held_usd: '2.5400', limits: { topup_min_usd: '10.00', topup_max_usd: '100.00', balance_max_usd: '200.00', topups_per_day: 3 } }),
   'GET /jobs': okBody({ object: 'list', data: [RUNNING, DONE], has_more: false }),
   [`GET /jobs/${JOB_ID}`]: okBody(RUNNING),
   [`GET /jobs/${JOB_ID}/events`]: okBody({
@@ -485,14 +492,28 @@ const baseStubs = () => ({
     truncated: false,
   }),
   'GET /keys': () => okBody(keysList),
+  // An operator credit has no ref (its audit id and reason are internal); a
+  // hold's entries name the job, not the hold.
   'GET /transactions': okBody({
+    object: 'list',
     data: [
-      { id: 'be_2', kind: 'settle', amount_usd: '-0.8600', available_after_usd: '12.5000', ref: JOB_ID, created_at: 1791000400, detail: {} },
-      { id: 'be_1', kind: 'admin_credit', amount_usd: '15.0000', available_after_usd: '15.0000', ref: 'ae_01J8', created_at: 1791000000, detail: {} },
+      entry({ id: 'be_01J8Q6ZK3R7Y9W2X4V6T8S0A03', kind: 'settle', amount_usd: '-0.8600', available_delta_usd: '0.0000', held_delta_usd: '-0.8600', available_after_usd: '12.5000', held_after_usd: '1.6800', created_at: 1791000400 }, JOB_ID),
+      entry({ id: 'be_01J8Q6ZK3R7Y9W2X4V6T8S0A02', kind: 'hold', amount_usd: '-2.5400', available_delta_usd: '-2.5400', held_delta_usd: '2.5400', available_after_usd: '12.5000', held_after_usd: '2.5400', created_at: 1791000100 }, JOB_ID),
+      entry({ id: 'be_01J8Q6ZK3R7Y9W2X4V6T8S0A01', kind: 'admin_credit', amount_usd: '15.0000', available_delta_usd: '15.0000', held_delta_usd: '0.0000', available_after_usd: '15.0000', held_after_usd: '0.0000', created_at: 1791000000 }),
     ],
     has_more: false,
   }),
-  'GET /usage': okBody({ gpu_usd: '3.4000', storage_usd: '0.0000', egress_usd: '0.0000', total_usd: '3.4000', by_sku: [{ sku: 'a10g-24gb-x1', gpu_seconds: 10200, usd: '3.4000' }] }),
+  'GET /usage': okBody({
+    object: 'compute.usage',
+    month: '2026-10',
+    currency: 'USD',
+    gpu_seconds: 10200,
+    gpu_usd: '3.4000',
+    storage_usd: '0.0000',
+    egress_usd: '0.0000',
+    total_usd: '3.4000',
+    by_sku: [{ sku: 'a10g-24gb-x1', gpu_seconds: 10200, usd: '3.4000' }],
+  }),
 });
 
 const visibleCount = (sel) =>
@@ -714,12 +735,13 @@ async function dashboardChecks() {
   );
   csrfChecked('cancel job', cancelFrom);
 
-  // Artifacts have no dashboard route in the spec yet: say where they are.
+  // A compute-api older than A7d has no dashboard artifacts route: say where
+  // the files are.
   delete stubs[`GET /jobs/${JOB_ID}/artifacts`];
   stubs[`GET /jobs/${JOB_ID}`] = okBody(RUNNING);
   await appLoad(`/jobs/${JOB_ID}`);
   await waitFor(`document.querySelector('#job-artifacts')?.textContent.includes('/compute/v1/jobs/${JOB_ID}/artifacts')`, 'artifacts placeholder naming the job API route');
-  ok('artifacts without a dashboard route point at the job API');
+  ok('artifacts without the dashboard route (pre-A7d compute-api) point at the job API');
   stubs[`GET /jobs/job_missing`] = notFound;
   await appLoad('/jobs/job_missing');
   await formErrorShown("We couldn't find that job in your account.", 'unknown job');
@@ -744,6 +766,12 @@ async function dashboardChecks() {
     'billing: balance or history wrong',
   );
   check(
+    (await evaluate(`[...document.querySelectorAll('#history tbody tr')].map((tr) => tr.cells[1].textContent + '|' + tr.cells[4].textContent).join()`)) ===
+      `Charge|${JOB_ID},Hold|${JOB_ID},Credit|—`,
+    'billing: each entry names its job; an operator credit shows no reference',
+    'billing: history rows or references wrong',
+  );
+  check(
     (await evaluate(`document.querySelector('.focal a.primary')?.getAttribute('href')`))?.startsWith('mailto:contactus@felixsphere.com'),
     'billing: the one primary is "Contact us" (top-ups not built)',
     'billing: no contact primary',
@@ -751,7 +779,7 @@ async function dashboardChecks() {
   await onePrimary('/billing');
   await shot('billing-desktop');
 
-  // Routes compute-api does not serve yet answer 404 not_found: placeholders.
+  // A compute-api older than A7d answers 404 not_found: placeholders.
   for (const route of ['GET /balance', 'GET /transactions', 'GET /usage', 'GET /keys', 'GET /jobs']) delete stubs[route];
   for (const [path, sel, want] of [
     ['/billing', '#history', 'Your balance history will appear here'],

@@ -214,6 +214,10 @@ on migration numbers (A1 takes `0005`, A6 takes `0006`).
 - **Done when:** a signed-in user sees the balance an `admin balance credit`
   gave them, creates and revokes a key, and sees a job submitted with that
   key, with its hold and settled amounts.
+- **Split:** the pages merged first (#62); the compute-api routes they call
+  (`/balance`, `/transactions`, `/usage`, `/jobs*` including
+  `/jobs/{id}/artifacts`) followed as A7d, with an end-to-end test from
+  signup to the dashboard showing a settled job.
 
 ### A8 — Staging: the vertical slice
 

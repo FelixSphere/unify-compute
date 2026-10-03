@@ -221,8 +221,9 @@ func main() {
 		if art != nil {
 			cfg.Outputs = art
 		}
+		var local *billing.Local
 		if backendName == backendLocal {
-			local := billing.New(st.Pool(), nil)
+			local = billing.New(st.Pool(), nil)
 			cfg.Biller, cfg.Gate = local, local
 		}
 		svc = jobs.New(cfg)
@@ -243,7 +244,8 @@ func main() {
 		// The same switch mounts /dashboard/v1: with the console backend
 		// none of it is registered.
 		if backendName == backendLocal {
-			dash, err = dashboard.New(dashboard.Config{Accounts: acc, Mailer: mail, AppOrigin: os.Getenv("APP_ORIGIN"), Log: log})
+			dash, err = dashboard.New(dashboard.Config{Accounts: acc, Mailer: mail, AppOrigin: os.Getenv("APP_ORIGIN"), Log: log,
+				Jobs: handler.AccountJobs(), Ledger: local})
 			if err != nil {
 				log.Error("dashboard", "err", err)
 				os.Exit(1)

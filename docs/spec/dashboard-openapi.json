@@ -3,7 +3,7 @@
   "info": {
     "title": "Unify Compute dashboard API",
     "version": "v1-draft",
-    "description": "The /dashboard/v1 routes the dashboard pages call (ADR-0011, docs/spec/accounts.md). Served by compute-api only with ACCOUNTS_BACKEND=local and only on the app host (Host = APP_ORIGIN's host, else 404); with the console backend none of it exists. Not part of the job API contract (compute-api/internal/api/openapi.json): no API key is accepted here and no cookie there. Every non-GET needs Origin = APP_ORIGIN; session routes need the __Host-uc_session cookie and, for non-GET, X-CSRF-Token. compute-api/internal/dashboard tests hold this document's operations against the registered routes. Balance, jobs and top-ups (A7c, B1) are not here yet.",
+    "description": "The /dashboard/v1 routes the dashboard pages call (ADR-0011, docs/spec/accounts.md). Served by compute-api only with ACCOUNTS_BACKEND=local and only on the app host (Host = APP_ORIGIN's host, else 404); with the console backend none of it exists. Not part of the job API contract (compute-api/internal/api/openapi.json): no API key is accepted here and no cookie there. Every non-GET needs Origin = APP_ORIGIN; session routes need the __Host-uc_session cookie and, for non-GET, X-CSRF-Token. compute-api/internal/dashboard tests hold this document's operations against the registered routes. Balance, history, usage and the account's jobs (A7d) reuse the job API's objects by reference to openapi.json; top-ups (B1), export and close are not here yet.",
     "license": {
       "name": "Proprietary",
       "identifier": "LicenseRef-Proprietary"
@@ -1211,6 +1211,925 @@
           }
         }
       }
+    },
+    "/dashboard/v1/balance": {
+      "get": {
+        "operationId": "getBalance",
+        "summary": "The account's balance",
+        "description": "From the account row, which every balance entry updates in the same transaction. Amounts are USD decimal strings with 4 places, never floats; limits are the account's top-up limits in USD with 2 places (top-ups are not built yet).",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The balance.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Balance"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: Host is not the app host. The whole prefix is 404 on any other host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than 600 reads a minute from this account (in process memory, per replica). Always with Retry-After (seconds).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/transactions": {
+      "get": {
+        "operationId": "listTransactions",
+        "summary": "The account's balance history",
+        "description": "Balance entries, newest first, as a cursor list: pass the previous page's next as after. Every movement of the balance is one entry (admin_credit, hold, extend, settle, release, and later topup, refund, …). An operator adjustment's reason and audit reference are internal and never shown; a hold's id is replaced by the job it belongs to.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "An entry id from this account's history; the page starts with the entry after it."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of entries.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntryList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_limit (param limit) or invalid_cursor (param after): not an entry of this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: Host is not the app host. The whole prefix is 404 on any other host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than 600 reads a minute from this account (in process memory, per replica). Always with Retry-After (seconds).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "not_implemented: this deployment has no job service or ledger wired (not a configuration main produces with ACCOUNTS_BACKEND=local).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/usage": {
+      "get": {
+        "operationId": "getUsage",
+        "summary": "One month's usage",
+        "description": "What the account was charged in one UTC calendar month: the settles accepted in it, by SKU, summed in quota units and converted once, so total_usd equals the sum of the month's settle entries and, for a job settled within the month, its settled_cost_usd. gpu_seconds counts the seconds each settle added. Usage accrued but not yet settled is not included (it is at most a few minutes of a running job; the Job object's usage shows it). storage_usd and egress_usd stay 0.0000 until the R5 daily charges exist (metering.md).",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "month",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$"
+            },
+            "description": "YYYY-MM, UTC. Absent is the current month."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The month.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Usage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_month (param month).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: Host is not the app host. The whole prefix is 404 on any other host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than 600 reads a minute from this account (in process memory, per replica). Always with Retry-After (seconds).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "not_implemented: this deployment has no job service or ledger wired (not a configuration main produces with ACCOUNTS_BACKEND=local).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/jobs": {
+      "get": {
+        "operationId": "listJobs",
+        "summary": "The account's jobs",
+        "description": "The job API's own handler (compute-api/internal/api), run for the session's account (owner account:<id>), so the body, pagination and errors are exactly the job API's (openapi.json, the same path under /compute/v1). Key scopes do not apply; the session is the credential. Newest first; status may repeat.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "openapi.json#/components/schemas/JobStatus"
+              }
+            },
+            "style": "form",
+            "explode": true
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of jobs.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "openapi.json#/components/schemas/JobList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_status, invalid_limit or invalid_cursor; param names the parameter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: Host is not the app host. The whole prefix is 404 on any other host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than 600 reads a minute from this account (in process memory, per replica). Always with Retry-After (seconds).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "not_implemented: this deployment has no job service or ledger wired (not a configuration main produces with ACCOUNTS_BACKEND=local).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/jobs/{id}": {
+      "get": {
+        "operationId": "getJob",
+        "summary": "One job",
+        "description": "The job API's own handler (compute-api/internal/api), run for the session's account (owner account:<id>), so the body, pagination and errors are exactly the job API's (openapi.json, the same path under /compute/v1). Key scopes do not apply; the session is the credential.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The Job object.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "openapi.json#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "job_not_found (type not_found): no job with this id in this account. Another account's job answers exactly as a missing one does, so the response never says whether the id exists. Or not_found: Host is not the app host. The whole prefix is 404 on any other host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than 600 reads a minute from this account (in process memory, per replica). Always with Retry-After (seconds).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "not_implemented: this deployment has no job service or ledger wired (not a configuration main produces with ACCOUNTS_BACKEND=local).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/jobs/{id}/cancel": {
+      "post": {
+        "operationId": "cancelJob",
+        "summary": "Cancel a job",
+        "description": "The job API's own handler (compute-api/internal/api), run for the session's account (owner account:<id>), so the body, pagination and errors are exactly the job API's (openapi.json, the same path under /compute/v1). Key scopes do not apply; the session is the credential. Needs Origin = APP_ORIGIN and X-CSRF-Token. GPU metering stops when the cancel is accepted; teardown continues afterwards. Not counted against the read limit.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Cancel accepted; the Job object.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "openapi.json#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "csrf_failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "job_not_found (type not_found): no job with this id in this account. Another account's job answers exactly as a missing one does, so the response never says whether the id exists. Or not_found: Host is not the app host. The whole prefix is 404 on any other host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "job_terminal (type conflict): the job has already ended.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "not_implemented: this deployment has no job service or ledger wired (not a configuration main produces with ACCOUNTS_BACKEND=local).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/jobs/{id}/events": {
+      "get": {
+        "operationId": "listJobEvents",
+        "summary": "A job's events",
+        "description": "The job API's own handler (compute-api/internal/api), run for the session's account (owner account:<id>), so the body, pagination and errors are exactly the job API's (openapi.json, the same path under /compute/v1). Key scopes do not apply; the session is the credential. Oldest first.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of events.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "openapi.json#/components/schemas/EventList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_cursor (param after) or invalid_limit (param limit).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "job_not_found (type not_found): no job with this id in this account. Another account's job answers exactly as a missing one does, so the response never says whether the id exists. Or not_found: Host is not the app host. The whole prefix is 404 on any other host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than 600 reads a minute from this account (in process memory, per replica). Always with Retry-After (seconds).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "not_implemented: this deployment has no job service or ledger wired (not a configuration main produces with ACCOUNTS_BACKEND=local).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/jobs/{id}/logs": {
+      "get": {
+        "operationId": "getJobLogs",
+        "summary": "A job's logs so far",
+        "description": "The job API's own handler (compute-api/internal/api), run for the session's account (owner account:<id>), so the body, pagination and errors are exactly the job API's (openapi.json, the same path under /compute/v1). Key scopes do not apply; the session is the credential. text/plain, possibly empty: logs are read from the job's cluster while it exists. follow=true is not supported here or in the job API yet (501).",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Logs so far.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "job_not_found (type not_found): no job with this id in this account. Another account's job answers exactly as a missing one does, so the response never says whether the id exists. Or not_found: Host is not the app host. The whole prefix is 404 on any other host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than 600 reads a minute from this account (in process memory, per replica). Always with Retry-After (seconds).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "not_implemented: follow=true, or no job service wired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "logs_unavailable (type upstream_unavailable): the cluster's logs could not be read right now.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/jobs/{id}/artifacts": {
+      "get": {
+        "operationId": "listJobArtifacts",
+        "summary": "A job's output files",
+        "description": "The job API's own handler (compute-api/internal/api), run for the session's account (owner account:<id>), so the body, pagination and errors are exactly the job API's (openapi.json, the same path under /compute/v1). Key scopes do not apply; the session is the credential. Each file has a presigned S3 GET URL valid for one hour.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Artifacts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "openapi.json#/components/schemas/ArtifactList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "job_not_found (type not_found): no job with this id in this account. Another account's job answers exactly as a missing one does, so the response never says whether the id exists. Or not_found: Host is not the app host. The whole prefix is 404 on any other host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than 600 reads a minute from this account (in process memory, per replica). Always with Retry-After (seconds).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "not_implemented: this deployment has no artifact storage.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "storage_unavailable: artifact storage could not be reached.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1392,6 +2311,265 @@
             "type": "string",
             "pattern": "^uck_[0-9A-Za-z]{40}$",
             "description": "The whole key, for `Authorization: Bearer` on the job API. Shown once; only its SHA-256 is stored."
+          }
+        }
+      },
+      "Balance": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "object",
+          "currency",
+          "available_usd",
+          "held_usd",
+          "limits"
+        ],
+        "properties": {
+          "object": {
+            "const": "compute.balance"
+          },
+          "currency": {
+            "const": "USD"
+          },
+          "available_usd": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{4}$",
+            "description": "Spendable now."
+          },
+          "held_usd": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{4}$",
+            "description": "Reserved for running jobs; what a job does not use comes back when it ends."
+          },
+          "limits": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "topup_min_usd",
+              "topup_max_usd",
+              "balance_max_usd",
+              "topups_per_day"
+            ],
+            "properties": {
+              "topup_min_usd": {
+                "type": "string",
+                "pattern": "^[0-9]+\\.[0-9]{2}$"
+              },
+              "topup_max_usd": {
+                "type": "string",
+                "pattern": "^[0-9]+\\.[0-9]{2}$"
+              },
+              "balance_max_usd": {
+                "type": "string",
+                "pattern": "^[0-9]+\\.[0-9]{2}$"
+              },
+              "topups_per_day": {
+                "type": "integer"
+              }
+            }
+          }
+        }
+      },
+      "Entry": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "object",
+          "kind",
+          "amount_usd",
+          "available_delta_usd",
+          "held_delta_usd",
+          "available_after_usd",
+          "held_after_usd",
+          "job_id",
+          "ref",
+          "created_at",
+          "detail"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^be_[0-9A-HJKMNP-TV-Z]{26}$"
+          },
+          "object": {
+            "const": "compute.balance_entry"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "topup",
+              "hold",
+              "extend",
+              "settle",
+              "release",
+              "refund",
+              "dispute",
+              "dispute_reversal",
+              "admin_credit",
+              "admin_debit",
+              "writeoff"
+            ]
+          },
+          "amount_usd": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{4}$",
+            "description": "The one figure a history row shows: for settle, the charge taken out of held (negative); for every other kind, the change in available."
+          },
+          "available_delta_usd": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{4}$"
+          },
+          "held_delta_usd": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{4}$"
+          },
+          "available_after_usd": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{4}$"
+          },
+          "held_after_usd": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{4}$"
+          },
+          "job_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The job a hold, extend, settle or release belongs to; null otherwise."
+          },
+          "ref": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": false,
+            "required": [
+              "type",
+              "id"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "job",
+                  "topup"
+                ]
+              },
+              "id": {
+                "type": "string"
+              }
+            },
+            "description": "What caused the entry, when the account holder can see it; null for an operator adjustment."
+          },
+          "created_at": {
+            "type": "integer",
+            "description": "Unix seconds."
+          },
+          "detail": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "sku, for entries that belong to a hold. Nothing else, and never an operator's reason."
+          }
+        }
+      },
+      "EntryList": {
+        "type": "object",
+        "required": [
+          "object",
+          "data",
+          "has_more"
+        ],
+        "properties": {
+          "object": {
+            "const": "list"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Entry"
+            }
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "next": {
+            "type": "string",
+            "description": "Present when has_more: the last entry's id, to pass as after."
+          }
+        }
+      },
+      "Usage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "object",
+          "month",
+          "currency",
+          "gpu_seconds",
+          "gpu_usd",
+          "storage_usd",
+          "egress_usd",
+          "total_usd",
+          "by_sku"
+        ],
+        "properties": {
+          "object": {
+            "const": "compute.usage"
+          },
+          "month": {
+            "type": "string",
+            "description": "YYYY-MM, UTC."
+          },
+          "currency": {
+            "const": "USD"
+          },
+          "gpu_seconds": {
+            "type": "integer"
+          },
+          "gpu_usd": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{4}$"
+          },
+          "storage_usd": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{4}$"
+          },
+          "egress_usd": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{4}$"
+          },
+          "total_usd": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{4}$"
+          },
+          "by_sku": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "sku",
+                "gpu_seconds",
+                "usd"
+              ],
+              "properties": {
+                "sku": {
+                  "type": "string"
+                },
+                "gpu_seconds": {
+                  "type": "integer"
+                },
+                "usd": {
+                  "type": "string",
+                  "pattern": "^-?[0-9]+\\.[0-9]{4}$"
+                }
+              }
+            },
+            "description": "GPU time by SKU, sorted by SKU."
           }
         }
       }

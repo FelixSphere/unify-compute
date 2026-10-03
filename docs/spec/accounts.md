@@ -10,9 +10,10 @@
   (`internal/billing`, migration `0006_billing.sql`) and the admin CLI's
   `account`, `balance` and `audit` verbs (A6), and API keys (A5: migration
   `0007_api_keys.sql`, the dashboard's `/keys` routes, and the job API's
-  `uck_` verifier with scopes). All of it is behind `ACCOUNTS_BACKEND=local`,
-  which no environment sets. Top-ups, `GET /compute/v1/balance` and the rest
-  of the dashboard's session routes beyond `/keys` do not exist yet.
+  `uck_` verifier with scopes), and the dashboard's balance, history, usage
+  and job routes (A7d). All of it is behind `ACCOUNTS_BACKEND=local`, which
+  no environment sets. Top-ups, `GET /compute/v1/balance`, account export
+  and close do not exist yet.
 - Task breakdown: [`plan-own-accounts.md`](../plan-own-accounts.md).
 - Depends on: [`job-api.md`](job-api.md) (error envelope, job routes),
   [`metering.md`](metering.md) (holds H1–H7, settlement R1–R6, the quota unit),
@@ -335,7 +336,10 @@ named by `param`, or in the form-level box when `param` is absent
 | 403 | `permission_error` | `csrf_failed` | Missing or wrong `X-CSRF-Token`, or foreign `Origin` |
 | 403 | `permission_error` | `topup_limit_exceeded` | Below the minimum, above the per-top-up maximum, would exceed the balance maximum, or over the daily count. `message` says which and invites contact for a review |
 | 403 | `permission_error` | `key_limit_reached` | 10 active keys already |
-| 404 | `not_found` | `not_found` | Key, top-up or job not in this account |
+| 400 | `invalid_request` | `invalid_month` | `/usage`: `month` not `YYYY-MM` |
+| 400 | `invalid_request` | `invalid_cursor`, `invalid_limit`, `invalid_status` | List routes: `after` not one of this account's entries or jobs, `limit` out of range, unknown job status (`param` names it) |
+| 404 | `not_found` | `not_found` | Key or top-up not in this account |
+| 404 | `not_found` | `job_not_found` | Job not in this account, on the dashboard as on the job API |
 | 409 | `conflict` | `topup_open` | A top-up from this account is already `open`; finish or abandon it (returns its id) |
 | 429 | `rate_limited` | `rate_limited` | Any throttle; always with `Retry-After` |
 | 502 | `payment_provider_error` | `stripe_unavailable` | Stripe did not create the Checkout Session; nothing was charged |
@@ -368,6 +372,7 @@ resend, login and forgot-password. Throttles, as built:
 | Resend per IP | 20 / h | every request |
 | Forgot per IP, per address | 5 / h each | every request, unknown addresses included |
 | Key creation per account | 20 / h | every well-formed request after reauth, refusals for the key limit included: each creation sends an email |
+| Reads per account | 600 / min | every `GET` of `/balance`, `/transactions`, `/usage` and `/jobs…`, as the job API's 600 reads a minute per key; in process memory, per replica. Cancel is not a read |
 
 The client IP is the **last** `X-Forwarded-For` entry (the ALB appends it),
 never the first. Resend and forgot-password look the address up and send
@@ -393,17 +398,17 @@ after the response, so neither the status nor the time depends on it.
 | `POST /logout` | — | `204`, cookie cleared |
 | `POST /password` | `{ current_password, password, password_confirm }` | `204`; other sessions ended. `current_password` is the recent-password check and counts as a reauth; wrong is `401 invalid_credentials` with `param: current_password` |
 | `POST /reauth` | `{ password }` | `204`; sets `reauth_at` |
-| `GET /balance` | — | `{ available_usd, held_usd, limits: { topup_min_usd, topup_max_usd, balance_max_usd, topups_per_day } }` |
-| `GET /transactions?after=&limit=` | — | Cursor list of balance entries, newest first: `{ id, kind, amount_usd, available_after_usd, ref, created_at, detail }` |
+| `GET /balance` | — | `{ object: "compute.balance", currency: "USD", available_usd, held_usd, limits: { topup_min_usd, topup_max_usd, balance_max_usd, topups_per_day } }`, from the account row. Built (A7d) |
+| `GET /transactions?after=&limit=` | — | `{ object: "list", data, has_more, next? }`, balance entries newest first, `limit` 1–100 (default 20), `after` an entry id: `{ id, object: "compute.balance_entry", kind, amount_usd, available_delta_usd, held_delta_usd, available_after_usd, held_after_usd, job_id, ref, created_at, detail }`. `amount_usd` is what a `settle` took out of held (negative), and for every other kind the change in available. `ref` is `{ type: "job" \| "topup", id }` or `null`: a hold's id is replaced by its job, and an operator adjustment's audit id and reason are never returned. `detail` holds only `sku`. Built (A7d) |
 | `GET /keys` | — | `[{ id, name, display, scopes, created_at, expires_at, last_used_at, revoked_at }]`, a bare array, newest first, revoked and expired keys included. Built (A5) |
 | `POST /keys` | `{ name, scopes, expires_at? }` | `201 { …key, secret: "uck_…" }`; the secret is never returned again. Needs reauth after 10 min (`401 reauth_required`, checked before the body). Emails "key created". Built (A5) |
 | `DELETE /keys/{id}` | — | `204`, also for a key already revoked; another account's key is `404 not_found`. Built (A5) |
-| `GET /jobs?status=&after=&limit=` | — | The job API's list, owner-scoped to the account |
-| `GET /jobs/{id}` | — | The Job object (`job-api.md`) |
-| `GET /jobs/{id}/events`, `GET /jobs/{id}/logs` | — | As the job API |
-| `POST /jobs/{id}/cancel` | — | As the job API |
-| `GET /jobs/{id}/artifacts` | — | As the job API. *Proposed by A7c, not yet agreed or built*: without it the dashboard's job page cannot offer downloads, because the page has a session and the job API takes only a key. The page calls it and, while it answers `404`, names the job API route instead |
-| `GET /usage?month=YYYY-MM` | — | `{ gpu_usd, storage_usd, egress_usd, total_usd, by_sku: [...] }`, from settle entries |
+| `GET /jobs?status=&after=&limit=` | — | The job API's list, owner-scoped to the account. Built (A7d) |
+| `GET /jobs/{id}` | — | The Job object (`job-api.md`). Built (A7d) |
+| `GET /jobs/{id}/events`, `GET /jobs/{id}/logs` | — | As the job API (`follow=true` is 501 in both). Built (A7d) |
+| `POST /jobs/{id}/cancel` | — | As the job API: `202` with the Job, `409 job_terminal` once ended. Needs the CSRF header. Built (A7d) |
+| `GET /jobs/{id}/artifacts` | — | As the job API: the listing and presigned GET URLs. Without it the job page could not offer downloads, because the page has a session and the job API takes only a key. Built (A7d) |
+| `GET /usage?month=YYYY-MM` | — | `{ object: "compute.usage", month, currency: "USD", gpu_seconds, gpu_usd, storage_usd, egress_usd, total_usd, by_sku: [{ sku, gpu_seconds, usd }] }` for one UTC month (absent: the current one; malformed: `400 invalid_month`). Totals the settles accepted in the month by SKU, in quota units converted once, so `total_usd` is exactly what the month's settle entries took; `gpu_seconds` counts what each settle added. Usage accrued but not yet settled is not in it. Holds whose SKU is `storage` or `egress` (R5, not built) go to those meters, so both read `0.0000` today. Built (A7d) |
 | `POST /topups` | `{ amount_usd: "20.00" }` | `201 { id, status: "open", checkout_url }` |
 | `GET /topups`, `GET /topups/{id}` | — | `{ id, amount_usd, status, created_at, paid_at, receipt_url, refunded_usd }` |
 | `GET /account/export` | — | `200` JSON attachment: user, account, keys (metadata), jobs, balance entries, top-ups |
@@ -413,11 +418,14 @@ Submitting jobs from the dashboard is not in the first version: customers
 submit with a key.
 
 The pages (A7c, `dashboard/`) call every route above except top-ups, export
-and close. Of the session routes only `/me`, `/logout`, `/password` and
-`/reauth` are built; for the others compute-api answers `404 not_found`, and
-each page section says what will appear there instead of failing. The page
-reads `by_sku` entries as `{ sku, gpu_seconds, usd }`; whoever builds
-`/usage` fixes that shape here.
+and close, and since A7d every one they call is built. The job routes are
+the job API's own handlers (`api.Server.AccountJobs`) run for the session's
+account, so bodies, pagination and errors are the job API's; another
+account's job answers `404 job_not_found` exactly as a missing one does.
+A deployment without a job service or ledger answers those routes `501
+not_implemented` (main always wires both with `ACCOUNTS_BACKEND=local`). A
+page section still says what will appear there when its route answers `404
+not_found` or `501`, so the pages also work against an older compute-api.
 
 ## Job API changes (`/compute/v1`)
 

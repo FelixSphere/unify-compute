@@ -1,6 +1,7 @@
 // Package dashboard serves the dashboard API, /dashboard/v1 on the app host
 // (ADR-0011 §5 and §8, docs/spec/accounts.md "Dashboard API"): signup,
-// verification, login, sessions, password reset and change, and API keys. It is mounted
+// verification, login, sessions, password reset and change, API keys, the
+// balance and its history, monthly usage, and the account's jobs. It is mounted
 // only with ACCOUNTS_BACKEND=local; with the console backend compute-api
 // registers none of it.
 //
@@ -35,6 +36,7 @@ import (
 
 	"github.com/FelixSphere/unify-compute/compute-api/internal/accounts"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/mailer"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/ratelimit"
 )
 
 const (
@@ -60,9 +62,16 @@ type Config struct {
 	// accepted only for a loopback host, for local development.
 	AppOrigin string
 	Log       *slog.Logger
-	// Now dates the password-changed email; nil is time.Now. Session and
-	// token times come from the accounts service's own clock.
+	// Now dates the password-changed email and picks the current month for
+	// /usage; nil is time.Now. Session and token times come from the
+	// accounts service's own clock.
 	Now func() time.Time
+	// Jobs serves /jobs and its sub-routes with the job API's own handlers
+	// (api.Server.AccountJobs). Ledger reads the balance history and usage
+	// (billing.Local). Either nil answers its routes 501 not_implemented;
+	// main sets both.
+	Jobs   JobRoutes
+	Ledger Ledger
 }
 
 type Handler struct {
@@ -72,6 +81,9 @@ type Handler struct {
 	host   string
 	log    *slog.Logger
 	now    func() time.Time
+	jobs   JobRoutes
+	ledger Ledger
+	reads  *ratelimit.Limiter
 
 	mux      *http.ServeMux
 	patterns []string
@@ -90,7 +102,7 @@ func New(cfg Config) (*Handler, error) {
 		return nil, fmt.Errorf("APP_ORIGIN %q: the dashboard needs the app's origin, e.g. https://app.compute.unifyai.us (http only for localhost)", cfg.AppOrigin)
 	}
 	h := &Handler{acc: cfg.Accounts, mail: cfg.Mailer, origin: strings.ToLower(origin), host: strings.ToLower(u.Host),
-		log: cfg.Log, now: cfg.Now, mux: http.NewServeMux()}
+		log: cfg.Log, now: cfg.Now, jobs: cfg.Jobs, ledger: cfg.Ledger, reads: ratelimit.New(readBurst, readWindow), mux: http.NewServeMux()}
 	if h.now == nil {
 		h.now = time.Now
 	}
@@ -108,6 +120,15 @@ func New(cfg Config) (*Handler, error) {
 	h.handle("GET /keys", h.session(h.listKeys))
 	h.handle("POST /keys", h.session(h.createKey))
 	h.handle("DELETE /keys/{id}", h.session(h.revokeKey))
+	h.handle("GET /balance", h.session(h.read(h.balance)))
+	h.handle("GET /transactions", h.session(h.read(h.transactions)))
+	h.handle("GET /usage", h.session(h.read(h.usage)))
+	h.handle("GET /jobs", h.session(h.read(h.job(JobRoutes.List))))
+	h.handle("GET /jobs/{id}", h.session(h.read(h.job(JobRoutes.Get))))
+	h.handle("POST /jobs/{id}/cancel", h.session(h.job(JobRoutes.Cancel)))
+	h.handle("GET /jobs/{id}/events", h.session(h.read(h.job(JobRoutes.Events))))
+	h.handle("GET /jobs/{id}/logs", h.session(h.read(h.job(JobRoutes.Logs))))
+	h.handle("GET /jobs/{id}/artifacts", h.session(h.read(h.job(JobRoutes.Artifacts))))
 	h.mux.HandleFunc(Prefix+"/", func(w http.ResponseWriter, _ *http.Request) { notFound(w) })
 	return h, nil
 }
