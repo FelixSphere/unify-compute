@@ -48,16 +48,11 @@ services:
       ARTIFACTS_TOKEN_SECRET: ${ARTIFACTS_TOKEN_SECRET:-}
       # Where job nodes reach this compute-api to upload their outputs.
       PUBLIC_URL: ${PUBLIC_URL:-}
-      # Compute's own accounts (ADR-0011). `console` (the default) keeps the
-      # Unify API bridge; `local` turns on accounts, uck_ keys, the local
-      # biller and /dashboard/v1 on APP_ORIGIN. These were read by the binary
-      # but never passed in, so setting them in .env alone changed nothing.
+      # Accounts (ADR-0011): console (default) or local.
       ACCOUNTS_BACKEND: ${ACCOUNTS_BACKEND:-console}
       ACCOUNTS_COMPUTE_DEFAULT: ${ACCOUNTS_COMPUTE_DEFAULT:-}
       APP_ORIGIN: ${APP_ORIGIN:-}
-      # Mail: with ACCOUNTS_BACKEND=local and no SES_SENDER, compute-api
-      # refuses to boot unless ENVIRONMENT=development (then it writes .eml
-      # files to MAIL_OUTBOX_DIR instead of sending).
+      # local accounts need SES_SENDER unless ENVIRONMENT=development.
       ENVIRONMENT: ${ENVIRONMENT:-}
       SES_SENDER: ${SES_SENDER:-}
       SES_CONFIGURATION_SET: ${SES_CONFIGURATION_SET:-}

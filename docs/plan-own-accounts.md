@@ -322,6 +322,13 @@ on migration numbers (A1 takes `0005`, A6 takes `0006`).
   in test mode unless O6 is done. Confirm that an `sk-` key from
   app.unifyapi.ai is now `401 missing_key`.
 - **Done when:** release record written; O8 requested.
+- **Status (2026-10-03): done.** Production switched by the CI/CD agent
+  (record `deploy/releases/2026-10-03-production-accounts-live.md`). Two
+  deviations, both operator decisions: B2 (refunds) is not on staging, and
+  Stripe went straight to live (Unify API's live key and a new endpoint),
+  with no test phase. O8 recommended, not done (UnifyAPI side).
+  `console_url`/`bridge_enabled` were left as they are in Terraform and
+  `.env` (local mode ignores them; kept for rollback).
 
 ### C2 — Remove the bridge from compute
 
