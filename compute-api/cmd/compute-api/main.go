@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/FelixSphere/unify-compute/compute-api/internal/api"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/artifacts"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/awsv4"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/console"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/quota"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/sku"
@@ -77,6 +79,34 @@ func main() {
 
 	handler := api.New(Build, cat, upstreams, log)
 	handler.Templates = templates
+
+	// Artifact storage (ADR-0005). Built at boot so a half-configured
+	// environment fails the deploy rather than the first upload. The routes
+	// still answer 501 until the job store and owner resolution are wired.
+	if bucket := os.Getenv("ARTIFACTS_BUCKET"); bucket != "" {
+		region := env("AWS_REGION", "us-east-1")
+		var creds awsv4.CredentialSource = &awsv4.IMDS{}
+		if c, ok := awsv4.FromEnv(); ok {
+			creds = c
+		}
+		art, err := artifacts.New(artifacts.Config{
+			Bucket:        bucket,
+			WriterRoleARN: os.Getenv("ARTIFACTS_WRITER_ROLE_ARN"),
+			PublicURL:     os.Getenv("PUBLIC_URL"),
+			TokenSecret:   []byte(os.Getenv("ARTIFACTS_TOKEN_SECRET")),
+			Creds:         creds,
+			Client:        &awsv4.Client{Region: region},
+		})
+		if err != nil {
+			log.Error("artifacts", "err", err)
+			os.Exit(1)
+		}
+		handler.Artifacts = art
+		log.Info("artifact storage configured", "bucket", bucket)
+	} else {
+		log.Warn("ARTIFACTS_BUCKET unset; spec.outputs cannot be uploaded and artifact routes answer 501")
+	}
+
 	srv := &http.Server{
 		Addr:              env("LISTEN_ADDR", "127.0.0.1:8080"),
 		Handler:           handler,
