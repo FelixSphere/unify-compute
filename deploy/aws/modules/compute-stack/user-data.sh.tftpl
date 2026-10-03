@@ -111,6 +111,10 @@ COMPUTE_BRIDGE_SECRET=$(get_param '${ssm_bridge_secret}' 2>/dev/null || true)
 COMPUTE_BRIDGE_SECRET=
 %{ endif ~}
 
+# Signs job upload tokens. Optional: missing means compute-api cannot
+# accept spec.outputs, which is how it behaved before ADR-0005.
+ARTIFACTS_TOKEN_SECRET=$(get_param '${ssm_artifacts_token}' 2>/dev/null || true)
+
 # Our images come from the runtime registry (ADR-0009, "Runtime registry:
 # ECR"), with this instance's role. The token lasts 12 hours, which is enough
 # for this boot; every release logs in again before it pulls.
@@ -142,6 +146,11 @@ CONSOLE_URL=%{ if bridge_enabled }${console_url}%{ endif }
 COMPUTE_API_BIND=0.0.0.0
 SITE_BIND=0.0.0.0
 DATA_DIR=/data
+AWS_REGION=${region}
+ARTIFACTS_BUCKET=${artifacts_bucket}
+ARTIFACTS_WRITER_ROLE_ARN=${artifacts_writer_role}
+ARTIFACTS_TOKEN_SECRET=$ARTIFACTS_TOKEN_SECRET
+PUBLIC_URL=${public_url}
 %{ if console_enabled ~}
 CONSOLE_IMAGE=${console_image}
 REDIS_PASSWORD=$REDIS_PASSWORD

@@ -186,3 +186,15 @@ variable "ssm_bridge_secret" {
   type    = string
   default = null
 }
+
+variable "artifacts_retention_days" {
+  description = "Days a job's outputs are kept after upload before S3 deletes them (ADR-0005). The storage meter stops at the same point (metering.md)."
+  type        = number
+  default     = 30
+}
+
+variable "artifacts_log_retention_days" {
+  description = "Days the artifacts bucket's server access logs are kept. The egress meter reads them daily; the rest of the window is for disputes about a download."
+  type        = number
+  default     = 90
+}
