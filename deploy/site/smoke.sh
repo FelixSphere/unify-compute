@@ -71,6 +71,13 @@ for page in / /start /privacy; do
   if grep -q 'app\.unifyapi\.ai' "$tmp/links"; then
     echo "FAIL $page: links to the Unify API console"; fail=1; links_ok=0
   fi
+  # The footer's Terms link is FelixSphere's Terms and Conditions (app/links.ts
+  # TERMS_URL; ADR-0011 D2). compute.unifyai.us/terms never existed.
+  grep -qF '<a href="https://felixsphere.com/legal/terms">Terms</a>' "$tmp/links" \
+    || { echo "FAIL $page: footer has no Terms link to https://felixsphere.com/legal/terms"; fail=1; links_ok=0; }
+  if grep -q 'compute\.unifyai\.us/terms' "$tmp/links"; then
+    echo "FAIL $page: links to compute.unifyai.us/terms, which does not exist"; fail=1; links_ok=0
+  fi
 done
 curl -s "$base/start" > "$tmp/links"
 for href in 'mailto:contactus@felixsphere.com?subject=Unify%20Compute%20early%20access' 'https://api.compute.unifyai.us/compute/v1/openapi.json'; do
@@ -198,6 +205,22 @@ for app_host in app.compute.unifyai.us app.staging.compute.unifyai.us; do
     grep -q 'challenges.cloudflare.com' "$tmp/body" \
       && { echo "FAIL $app_host $path: Turnstile is off (ADR-0011 D5)"; fail=1; }
   done
+  # Terms and Conditions are FelixSphere's (app/links.ts TERMS_URL), both in
+  # the sign-up consent line and under the card on every auth page.
+  grep -qF '<p class="legal">By signing up you agree to the <a href="https://felixsphere.com/legal/terms">Terms and Conditions</a> and <a href="https://compute.unifyai.us/privacy">Privacy Policy</a>.</p>' "$tmp/body" \
+    || { echo "FAIL $app_host /signup: consent line does not link Terms and Conditions to https://felixsphere.com/legal/terms"; fail=1; }
+  for path in /signup /login; do
+    check "$path" 200
+    grep -qF '<a href="https://compute.unifyai.us/privacy">Privacy</a> · <a href="https://felixsphere.com/legal/terms">Terms</a></p>' "$tmp/body" \
+      || { echo "FAIL $app_host $path: footer Terms link is not https://felixsphere.com/legal/terms"; fail=1; }
+  done
+  for entry in "${app_pages[@]}"; do
+    path=${entry%%|*}
+    if curl -s -H "Host:$app_host" "$base$path" | grep -q 'compute\.unifyai\.us/terms'; then
+      echo "FAIL $app_host $path: links to compute.unifyai.us/terms, which does not exist"; fail=1
+    fi
+  done
+  check /signup 200
   [ "$(grep -o 'id="password_confirm"' "$tmp/body" | wc -l)" -eq 1 ] \
     || { echo "FAIL $app_host /signup: no Confirm password field"; fail=1; }
   [ "$(grep -o 'class="toggle"' "$tmp/body" | wc -l)" -eq 2 ] \

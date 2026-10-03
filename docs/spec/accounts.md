@@ -612,9 +612,40 @@ pair is `/unify-compute-<env>/stripe_secret_key` and
 `/unify-compute-<env>/stripe_webhook_secret` (SecureString, written by the
 operator; `docs/staging.md`, "Stripe top-ups").
 
+## Terms and Conditions
+
+On 2026-10-03 the operator decided that Unify Compute uses FelixSphere's
+existing Terms and Conditions at https://felixsphere.com/legal/terms, since
+FelixSphere LLC is the contracting entity (ADR-0011 D2). The sign-up consent
+line and the footers of the marketing site and the app host link there; the
+URL is `TERMS_URL` in `app/links.ts`, which `dashboard/vite.config.ts` also
+imports. compute.unifyai.us has no `/terms` page.
+
+Two known gaps, left for the legal review before the first live top-up
+(ADR-0011 D6; `plan-own-accounts.md` O5):
+
+1. **Refunds.** The document is a generic template whose refund clause is
+   written for physical goods (returns, shipping), not for prepaid compute
+   credit that is spent per second. Refunds of unused balance, including at
+   account close, are not covered.
+2. **Acceptable use.** It has no acceptable-use policy: nothing forbids
+   cryptocurrency mining, abuse of GPUs, or the other uses the upstream GPU
+   providers' own terms require us to prohibit and enforce.
+
+The privacy policy (`app/privacy/page.tsx`) names FelixSphere LLC, 6 Karen
+Ct, CA 94010, as the Company and data controller to match (operator decision,
+2026-10-03). The footers keep the brand's "© <year> UnifyAI" company line
+from `~/unifyai-brand-kit/UI-STANDARD.md`, which is not the legal entity.
+
+Both depart from UI-STANDARD, which allows no felixsphere.com link other than
+the contact address and no "FelixSphere LLC". The brand owner has been asked
+to allow them in Compute's legal pages; until then `check-consistency.sh`
+item 4 flags them.
+
 ## Open points
 
 1. Decisions D1–D8 in ADR-0011.
 2. Whether `pending` users can be purged earlier than 7 days under abuse.
 3. A per-key monthly spend cap (the console's token quota) if a customer asks.
 4. Breached-password checking, TOTP, organisations and invitations: later.
+5. The Terms and Conditions' refund and acceptable-use gaps (above).

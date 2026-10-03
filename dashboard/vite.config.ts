@@ -2,6 +2,7 @@ import { copyFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
+import { TERMS_URL } from '../app/links';
 
 // The app host's pages (app.compute.unifyai.us), built apart from the
 // marketing site's vinext export. vinext streams each page's RSC payload as
@@ -25,6 +26,8 @@ const brandFiles = [
   'brand/unifyai-lockup-horizontal-black.svg',
   'brand/unifyai-mark-black.svg',
 ];
+
+const PRIVACY_URL = 'https://compute.unifyai.us/privacy';
 
 const ICON_ATTRS =
   'xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"';
@@ -126,7 +129,9 @@ const partials: Record<string, (arg: string) => string> = {
           </div>
         </form>
       </dialog>`,
-  below: () => `<p class="below">© ${new Date().getFullYear()} UnifyAI · <a href="https://compute.unifyai.us/privacy">Privacy</a> · <a href="https://compute.unifyai.us/terms">Terms</a></p>`,
+  legal: () =>
+    `<p class="legal">By signing up you agree to the <a href="${TERMS_URL}">Terms and Conditions</a> and <a href="${PRIVACY_URL}">Privacy Policy</a>.</p>`,
+  below: () => `<p class="below">© ${new Date().getFullYear()} UnifyAI · <a href="${PRIVACY_URL}">Privacy</a> · <a href="${TERMS_URL}">Terms</a></p>`,
 };
 
 function htmlPartials(): Plugin {
