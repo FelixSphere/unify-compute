@@ -338,6 +338,10 @@ jobs:
 
       - run: make tf-validate
 
+      # A variable compose passes to compute-api that user-data never writes
+      # is one a rebuilt host silently runs on compose's default.
+      - run: make tf-test
+
       # Catches a malformed compose file before it reaches an instance, where
       # the failure mode is a boot that silently does nothing.
       - run: make compose-config

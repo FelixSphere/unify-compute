@@ -9,7 +9,7 @@ BUILD       := $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 IMAGE       ?= ghcr.io/felixsphere/unify-compute-api:$(BUILD)
 BASE_URL    ?= http://127.0.0.1:8080
 
-.PHONY: dev test image compose-config tf-fmt tf-validate smoke verify
+.PHONY: dev test image compose-config tf-fmt tf-validate tf-test smoke verify
 
 dev: ## run compute-api locally on 127.0.0.1:8080
 	cd compute-api && go run -ldflags "-X main.Build=$(BUILD)" ./cmd/compute-api
@@ -55,7 +55,14 @@ tf-validate: tf-fmt
 		terraform -chdir=$$d validate; \
 	done
 
+# Renders user-data for production's and staging's shapes with a mocked AWS
+# provider (no credentials, no state) and checks the .env it writes against
+# what docker-compose.yml passes to compute-api.
+tf-test:
+	terraform -chdir=$(TF_ROOT)/modules/compute-stack init -backend=false -input=false >/dev/null
+	terraform -chdir=$(TF_ROOT)/modules/compute-stack test
+
 smoke: ## probe a running compute-api; BASE_URL=https://staging.compute.unifyai.us for staging
 	BASE_URL=$(BASE_URL) CONSOLE_URL=$(CONSOLE_URL) scripts/smoke.sh
 
-verify: test compose-config tf-validate
+verify: test compose-config tf-validate tf-test
