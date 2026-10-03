@@ -198,3 +198,22 @@ variable "artifacts_log_retention_days" {
   type        = number
   default     = 90
 }
+
+variable "skypilot" {
+  description = <<-EOT
+    The SkyPilot API server on this host, from modules/gpu-workers through the
+    environment root (ADR-0010). Null means none: no overlay, no launch-role
+    permission. Set, it adds docker-compose.skypilot.yml to the host and lets
+    the instance role assume launch_role_arn.
+  EOT
+  type = object({
+    config          = string
+    launch_role_arn = string
+  })
+  default = null
+}
+
+variable "ssm_skypilot_admin_password" {
+  type    = string
+  default = null
+}

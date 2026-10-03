@@ -82,6 +82,15 @@ Current status (say what exists rather than describing targets as shipped):
   from OpenAI Sites to production's ALB on 2026-10-02 (Route53 change
   `C07235422LT740FCOOAEW`). The Sites project and its two TXT records remain
   as the rollback path.
+- GPU workers and the SkyPilot API server
+  ([ADR-0010](docs/adr/0010-gpu-workers-in-the-shared-account.md),
+  **Proposed**): `deploy/aws/modules/gpu-workers/`, called by staging, and
+  `deploy/compose/docker-compose.skypilot.yml`. **Defined, not applied**:
+  no workers VPC, launch role or reaper exists, and the staging host does not
+  run SkyPilot. Production has the same module behind
+  `gpu_workers_enabled = false`. The account's G/VT GPU quota was 0 vCPU on
+  2026-10-03, so nothing could launch anyway. Apply steps are in
+  `docs/staging.md`.
 
 ## Licence boundary — the expensive mistake
 

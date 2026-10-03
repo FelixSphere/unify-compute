@@ -38,7 +38,10 @@ the same pair the local profile uses:
   `console` on first boot.
 - `console`, `redis` — the console overlay. Own database, own admin, own
   bridge secret. Production has neither.
-- `skypilot` — compose profile, off by default until the backend exists.
+- `skypilot` — the SkyPilot API server, `docker-compose.skypilot.yml`
+  ([ADR-0010](adr/0010-gpu-workers-in-the-shared-account.md)). **Defined, not
+  applied:** the running host does not have it yet; see "GPU workers and
+  SkyPilot" below.
 
 All images are pinned by digest in `deploy/aws/envs/staging/variables.tf`
 (ours and the console) or in the compose files (Postgres, Redis). Ours are
@@ -138,6 +141,111 @@ session-manager-plugin, so it works from a machine that does not have one.
 3. Set the same `COMPUTE_BRIDGE_SECRET` value in the console's environment
    (compose `.env`) once the console ships the bridge routes. Until then the
    routes are dark and compute-api's submit returns `503 console_unavailable`.
+
+## GPU workers and SkyPilot
+
+**Status: defined, not applied (2026-10-03).** Nothing below exists in AWS
+yet. The design and the isolation argument are in
+[ADR-0010](adr/0010-gpu-workers-in-the-shared-account.md).
+
+What `terraform apply` on `deploy/aws/envs/staging` adds: the workers VPC
+`unify-compute-staging-workers` (10.73/16, five public subnets, no NAT),
+its security group, the launch role `unify-compute-staging-skypilot`, the
+worker role and profile `unify-compute-staging-worker`, and the reaper (Lambda,
+EventBridge rule, SNS topic, two alarms). What it changes in place on the
+host: the instance role may now assume the launch role, and the instance
+type goes t4g.small → t4g.medium, which is a **stop/start of staging** (a few minutes down; the Elastic IP, the data
+volume and the stack come back by themselves). The read-only plan on
+2026-10-03 was **47 to add, 2 to change, 0 to destroy**. 29 of the adds are
+these, and 18 are ADR-0005's artifacts bucket, logs bucket and writer role
+(#38), merged but not applied yet. The instance is updated, not replaced.
+Production's plan gains nothing from this (`gpu_workers_enabled = false`);
+its only pending adds are ADR-0005's 18.
+
+User-data is ignored after first boot, so the running host gets SkyPilot from
+the same setup script user-data would run, sent once over SSM. Order matters:
+each step depends on the one before.
+
+```bash
+# 0. GPU quota. On 2026-10-03 both G/VT quotas were 0 vCPU, so nothing can
+#    launch until this is granted. Filed by the operator, not by an agent:
+aws service-quotas request-service-quota-increase --region us-east-1 \
+  --service-code ec2 --quota-code L-DB2E81BA --desired-value 8
+#    (Running On-Demand G and VT instances. 8 vCPU = two g5.xlarge: one job
+#    plus the overlap while an attempt is torn down and the next comes up. 4
+#    is the minimum for one. Spot, L-3819A6DF, is not needed: the spot SKU is
+#    unavailable and the launch role cannot request spot.) If AWS asks for a
+#    use case: "Batch inference on one NVIDIA A10G (g5.xlarge) at a time in
+#    us-east-1 for a staging environment, launched by SkyPilot, every
+#    instance terminated within 26 hours by an automated reaper."
+
+# 1. the admin password for the SkyPilot API server (hex, like the others)
+scripts/staging-secrets.sh --env staging        # creates skypilot_admin_password, keeps the rest
+
+# 2. cost allocation tag (account-wide, so not in Terraform; not
+#    retroactive). Without it the budget in step 3 sees nothing.
+aws ce update-cost-allocation-tags-status \
+  --cost-allocation-tags-status TagKey=Project,Status=Active
+
+# 3. the budget, its own stack
+terraform -chdir=deploy/aws/shared/gpu-budget init
+terraform -chdir=deploy/aws/shared/gpu-budget plan -var alert_email=<address> -out=budget.tfplan   # 1 to add
+terraform -chdir=deploy/aws/shared/gpu-budget apply budget.tfplan
+
+# 4. staging. Set gpu_alert_email in envs/staging/variables.tf (or -var) so
+#    reaper reports reach someone; the address must confirm the SNS mail.
+terraform -chdir=deploy/aws/envs/staging plan -out=staging.tfplan
+#    expect 47 to add (48 with gpu_alert_email; 18 are ADR-0005's artifacts
+#    resources if they are still unapplied), 2 to change, 0 to destroy:
+#    module.stack.aws_instance.this updated in place (instance_type only) and
+#    module.stack.aws_iam_role_policy.secrets (sts:AssumeRole). Anything
+#    replacing aws_instance.this or touching aws_ebs_volume.data is a stop.
+terraform -chdir=deploy/aws/envs/staging apply staging.tfplan
+
+# 5. SkyPilot on the running host, once. Takes the ops lock; assumes the
+#    launch role (fails here if step 4 did not happen); writes the overlay,
+#    its config and the credential timer; brings the stack up; mints
+#    compute-api's service-account token on the host.
+terraform -chdir=deploy/aws/envs/staging output -raw skypilot_host_setup > skypilot-setup.sh
+scripts/ssm-run.sh "$(terraform -chdir=deploy/aws/envs/staging output -raw instance_id)" \
+  skypilot-setup.sh "skypilot setup staging" 900
+#    ends with SKYPILOT_SETUP_DONE all
+
+# 6. a release, so host.sh's checks (every container healthy and stable,
+#    skypilot now included) and smoke run against the new shape. Same digests
+#    as now is fine: it verifies and reports NOOP.
+```
+
+What to exercise afterwards, on the host (SSM), before calling it done:
+
+- `docker compose ps`: `skypilot` running and healthy; `compute-api`
+  restarted once by step 5.
+- `docker compose exec skypilot sky check aws`: AWS enabled, identity is
+  `assumed-role/unify-compute-staging-skypilot/skypilot-staging`.
+- `docker network inspect compose_skypilot --format '{{range .Containers}}{{.Name}} {{end}}'`
+  lists exactly the `skypilot` and `compute-api` containers (the project is
+  named after `/opt/unify-compute/compose`). The console, Redis, Postgres and
+  the site are not on it.
+- `docker compose exec skypilot aws sts get-caller-identity` names the launch
+  role, `assumed-role/unify-compute-staging-skypilot/skypilot-staging`
+  (credentials from the file, not IMDS).
+- `docker compose exec skypilot curl -s -o /dev/null -w '%{http_code}' http://skypilot:46580/api/status`
+  answers 401 without the token.
+- `systemctl list-timers unify-compute-skypilot-credentials.timer` shows the
+  next run within 20 minutes.
+- Invoke the reaper once (`aws lambda invoke --function-name
+  unify-compute-staging-gpu-reaper out.json`): it reports zero workers.
+- The first real launch, after the quota is granted, is the test of
+  everything IAM can only simulate. Run one `a10g-24gb-x1` job and confirm
+  that the worker has `Project=unify-compute-workers`, `Environment=staging`,
+  the `unify-compute-staging-worker` profile, sits in a 10.73 subnet with only
+  the workers security group; that `/down` terminates it; and that a
+  `UnauthorizedOperation` anywhere in the launch is decoded
+  (`aws sts decode-authorization-message`) before any permission is widened.
+
+Changing the SkyPilot version later: edit the digest in
+`docker-compose.skypilot.yml` and rerun step 5. Releases do not manage that
+image (host.sh changes only `COMPUTE_API_IMAGE` and `SITE_IMAGE`).
 
 ## Acceptance
 

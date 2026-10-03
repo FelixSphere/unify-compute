@@ -40,6 +40,23 @@ locals {
   # compute-api leaves artifact uploads off.
   ssm_artifacts_token_secret = "${local.ssm_prefix}/artifacts_token_secret"
 
+  skypilot_enabled            = var.skypilot != null
+  ssm_skypilot_admin_password = coalesce(var.ssm_skypilot_admin_password, "${local.ssm_prefix}/skypilot_admin_password")
+
+  # scripts/skypilot-host-setup.sh with its inputs prepended, as release.yml
+  # does for host.sh. user-data runs it at first boot; on a host that booted
+  # before it existed, the same text is sent once over SSM (docs/staging.md).
+  # No secrets: the script reads the admin password from SSM on the host.
+  skypilot_host_setup = local.skypilot_enabled ? join("\n", [
+    "ENV_NAME='${var.environment}'",
+    "REGION='${var.region}'",
+    "LAUNCH_ROLE_ARN='${var.skypilot.launch_role_arn}'",
+    "SSM_ADMIN_PASSWORD='${local.ssm_skypilot_admin_password}'",
+    "OVERLAY_B64='${base64encode(file("${local.compose_dir}/docker-compose.skypilot.yml"))}'",
+    "SKY_CONFIG_B64='${base64encode(var.skypilot.config)}'",
+    file("${path.module}/../../../../scripts/skypilot-host-setup.sh"),
+  ]) : ""
+
   compose_dir = "${path.module}/../../../compose"
 
   # The runtime registry (deploy/aws/shared/ecr). Our images are pulled from
@@ -95,6 +112,18 @@ data "aws_iam_policy_document" "secrets" {
       "ecr:BatchCheckLayerAvailability",
     ]
     resources = [for r in local.ecr_repositories : "arn:aws:ecr:${var.region}:${data.aws_caller_identity.current.account_id}:repository/${r}"]
+  }
+
+  # The host assumes the SkyPilot launch role and hands the session to the
+  # SkyPilot container alone (scripts/skypilot-host-setup.sh). The launch
+  # role's trust policy names this role and nothing else.
+  dynamic "statement" {
+    for_each = local.skypilot_enabled ? [var.skypilot.launch_role_arn] : []
+    content {
+      sid       = "AssumeTheSkyPilotLaunchRole"
+      actions   = ["sts:AssumeRole"]
+      resources = [statement.value]
+    }
   }
 
   statement {
@@ -165,6 +194,8 @@ locals {
     artifacts_writer_role = aws_iam_role.artifacts_writer.arn
     ssm_artifacts_token   = local.ssm_artifacts_token_secret
     public_url            = "https://${var.api_domain}"
+    skypilot_enabled      = local.skypilot_enabled
+    skypilot_host_setup   = local.skypilot_host_setup
   })
 }
 
@@ -179,7 +210,12 @@ resource "aws_instance" "this" {
   # only decides what an explicit `-replace` does with it: render it fresh.
   user_data_replace_on_change = true
 
-  user_data = local.user_data
+  # Gzipped when SkyPilot is on: the setup script and its embedded files take
+  # the rendered script past EC2's 16 KB, and cloud-init decompresses gzip
+  # user data itself. Plain otherwise, so a stack without SkyPilot renders
+  # exactly what it always has.
+  user_data        = local.skypilot_enabled ? null : local.user_data
+  user_data_base64 = local.skypilot_enabled ? base64gzip(local.user_data) : null
 
   root_block_device {
     volume_size = 16
@@ -224,7 +260,7 @@ resource "aws_instance" "this" {
     #      mounted filesystem otherwise);
     #   3. terraform apply -replace='module.stack.aws_instance.this'
     # and in production only after the same replace has been run on staging.
-    ignore_changes = [user_data]
+    ignore_changes = [user_data, user_data_base64]
 
     precondition {
       condition     = var.name == "unify-compute-${var.environment}"
@@ -250,8 +286,10 @@ resource "aws_instance" "this" {
     # EC2 rejects user data over 16 KB, but only at apply, after the plan
     # looked fine. The compose files are embedded verbatim, so growing them
     # grows this; staging rendered at ~12 KB on 2026-10-02.
+    # Gzipped, the limit applies to the compressed bytes: 16384 raw is 21848
+    # characters of base64.
     precondition {
-      condition     = length(local.user_data) <= 16384
+      condition     = local.skypilot_enabled ? length(base64gzip(local.user_data)) <= 21848 : length(local.user_data) <= 16384
       error_message = "Rendered user_data exceeds EC2's 16 KB limit; trim the template or the embedded compose files."
     }
   }

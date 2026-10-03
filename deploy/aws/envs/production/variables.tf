@@ -39,3 +39,15 @@ variable "ami_id" {
   type        = string
   default     = ""
 }
+
+variable "gpu_workers_enabled" {
+  description = "The SkyPilot API server on the production host and production's GPU workers (ADR-0010). False until staging has run real jobs through the same setup."
+  type        = bool
+  default     = false
+}
+
+variable "gpu_alert_email" {
+  description = "Where production's GPU reaper reports go, once gpu_workers_enabled."
+  type        = string
+  default     = null
+}
