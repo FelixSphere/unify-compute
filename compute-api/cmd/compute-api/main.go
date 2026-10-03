@@ -17,6 +17,7 @@ import (
 	"github.com/FelixSphere/unify-compute/compute-api/internal/backend"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/console"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/jobs"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/mailer"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/quota"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/sku"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/store"
@@ -104,25 +105,17 @@ func main() {
 	// someone creates it, and a host without one must still boot (the
 	// CONSOLE_URL crash loop of 2026-10-02 is the lesson). The routes answer
 	// 501 until the job store and owner resolution are wired as well.
+	creds := awsCredentials(log)
 	var art *artifacts.Service
 	bucket, tokenSecret := os.Getenv("ARTIFACTS_BUCKET"), os.Getenv("ARTIFACTS_TOKEN_SECRET")
 	if bucket != "" && tokenSecret != "" {
-		region := env("AWS_REGION", "us-east-1")
-		var creds awsv4.CredentialSource = &awsv4.IMDS{}
-		if path := os.Getenv("INSTANCE_ROLE_CREDENTIALS_FILE"); path != "" {
-			creds = &awsv4.File{Path: path}
-			log.Info("aws credentials from file", "path", path)
-		}
-		if c, ok := awsv4.FromEnv(); ok {
-			creds = c
-		}
 		art, err = artifacts.New(artifacts.Config{
 			Bucket:        bucket,
 			WriterRoleARN: os.Getenv("ARTIFACTS_WRITER_ROLE_ARN"),
 			PublicURL:     os.Getenv("PUBLIC_URL"),
 			TokenSecret:   []byte(tokenSecret),
 			Creds:         creds,
-			Client:        &awsv4.Client{Region: region},
+			Client:        &awsv4.Client{Region: env("AWS_REGION", "us-east-1")},
 		})
 		if err != nil {
 			log.Error("artifacts", "err", err)
@@ -136,6 +129,34 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// Account mail (ADR-0011). With ACCOUNTS_BACKEND=local a deployment that
+	// cannot send refuses to start: Unify Data's silent outbox fallback
+	// meant production signups that never got their code. Nothing calls the
+	// mailer yet; A4 hands it to the accounts routes.
+	mailSettings := mailer.SettingsFromEnv(os.Getenv)
+	mail, err := mailer.New(mailSettings, &awsv4.Client{Region: env("AWS_REGION", "us-east-1")}, creds)
+	if err != nil {
+		log.Error("mailer", "err", err)
+		os.Exit(1)
+	}
+	switch {
+	case mail == nil:
+		log.Info("mailer off: SES_SENDER unset and ACCOUNTS_BACKEND is not local")
+	case mailSettings.Required():
+		if err := mail.Transport.Check(ctx); err != nil {
+			log.Error("mailer cannot send", "err", err)
+			os.Exit(1)
+		}
+		fallthrough
+	default:
+		switch t := mail.Transport.(type) {
+		case *mailer.Outbox:
+			log.Warn("mailer writes to an outbox directory, not SES (ENVIRONMENT=development)", "dir", t.Dir)
+		case *mailer.SES:
+			log.Info("mailer sends through SES", "from", mail.From.String(), "configuration_set", t.ConfigurationSet)
+		}
+	}
 
 	// The job store is the switch between the dark build and a working one.
 	// Without DATABASE_URL every job route keeps answering 501 after
@@ -238,6 +259,20 @@ func openStore(ctx context.Context, log *slog.Logger, dsn string) (*store.Store,
 		case <-time.After(2 * time.Second):
 		}
 	}
+}
+
+// awsCredentials is the instance role: from the file the host refreshes on
+// the hosted environments (ADR-0005, amendment of 2026-10-03), from IMDS
+// elsewhere on EC2, or from the AWS_* variables off EC2.
+func awsCredentials(log *slog.Logger) awsv4.CredentialSource {
+	if c, ok := awsv4.FromEnv(); ok {
+		return c
+	}
+	if path := os.Getenv("INSTANCE_ROLE_CREDENTIALS_FILE"); path != "" {
+		log.Info("aws credentials from file", "path", path)
+		return &awsv4.File{Path: path}
+	}
+	return &awsv4.IMDS{}
 }
 
 func env(key, fallback string) string {
