@@ -6,8 +6,8 @@
   below carries an ID (`B…`, `H…`, `R…`) so C5 can name a test after it.
 - Depends on: [`job-api.md`](job-api.md) (job states, the `usage` object),
   [`console-billing-bridge.md`](console-billing-bridge.md) (the verbs),
-  ADR-0001 (the console owns the balance), ADR-0005 (artifacts in our S3;
-  **Proposed**, not yet on `main` — it lives in the finetune worktree), and
+  ADR-0001 (the console owns the balance), [ADR-0005](../adr/0005-artifact-storage.md) (artifacts in our S3;
+  **Proposed**), and
   [ADR-0008](../adr/0008-zero-balance-policy.md) (what happens at zero balance;
   **Proposed**).
 - All prices below are **placeholders**. They exist so the arithmetic can be
@@ -19,7 +19,7 @@
 |---|---|---|---|
 | **Unit** | second | GB-hour (1 GB = 2^30 bytes) | GB (1 GB = 2^30 bytes) |
 | **What is measured** | Seconds a job's cluster is `UP` and the job is still the customer's (see end events below), summed over attempts | Bytes stored under the job's artifact prefix `jobs/<job_id>/`, integrated over time | Bytes sent by S3 in response to GET requests on objects under `jobs/<job_id>/` |
-| **Source** | SkyPilot cluster and job lifecycle, observed by compute-api's backend poller (C4): cluster `UP`, job process exit, cluster down, preemption | `ListObjectsV2` over the prefix, summing `Size`, once an hour per retained job, plus one sample at terminal state and one at deletion | S3 server access logs on the artifacts bucket (`Bytes Sent` field, keyed by object key → job id) |
+| **Source** | SkyPilot cluster and job lifecycle, observed by compute-api's backend poller (C4): cluster `UP`, job process exit, cluster down, preemption | `ListObjectsV2` over the prefix with the instance role (its `ListBucket` is limited to `jobs/`, ADR-0005), summing `Size` including `_manifest.json`, once an hour per retained job, plus one sample at terminal state and one at deletion. Not the manifest's sizes: S3 is what we pay for | S3 server access logs on the artifacts bucket (`Bytes Sent` field, keyed by object key → job id) |
 | **Rounding** | Integer seconds per attempt, fractional second truncated. Cost computed exactly on cumulative seconds and rounded half-up once, to the quota unit | Byte-seconds accumulated as an integer; cost rounded half-up once per daily charge | Bytes summed as an integer; cost rounded half-up once per daily charge |
 | **Price source** | `compute-api/config/skus.json`, `price_usd_per_hour` (exists) | `compute-api/config/meters.json`, `storage_usd_per_gb_month` (**proposed**, see below) | `compute-api/config/meters.json`, `egress_usd_per_gb` (**proposed**) |
 | **Placeholder price** | whatever `skus.json` says (A10G `1.2000`/h today, itself a placeholder) | `0.1000` per GB-month | `0.1000` per GB |
@@ -33,8 +33,11 @@ What the meters do **not** cover, so nobody goes looking for it:
   inputs, calling out to the internet). The upstream charges us for that; it is
   folded into the SKU's hourly rate. If a workload makes that unprofitable it
   is a SKU price change, not a fourth meter.
-- Reading inputs from the customer's own bucket. That traffic is on their
-  account (ADR-0005: inputs stay where the customer put them).
+- Reading inputs. They are https URLs the customer supplies (ADR-0005); the
+  download is the instance's own traffic, above, and serving it is on
+  whoever hosts the URL.
+- Uploading outputs. It happens in the run step, so it is GPU time; S3
+  charges nothing for data in.
 - Logs. Retained 7 days after terminal state (`job-api.md`) and not billed.
 - Storage of outputs **while the job is non-terminal**. Whatever the workload
   writes during the run is covered by the GPU rate; the storage meter starts at
@@ -103,8 +106,9 @@ and this spec round once.)
 - Artifacts of `failed`, `interrupted` and `cancelled` jobs are retained and
   billed exactly like those of `succeeded` jobs. A customer who wants them gone
   sooner needs a delete endpoint, which v1 does not have (open point below).
-- A later job that references an earlier job's artifacts (ADR-0005) reads the
-  same prefix; the bytes are billed once, to the job that wrote them.
+- A later job that reads an earlier job's artifacts (ADR-0005: by passing a
+  download URL as an input) is billed as egress on that download; the bytes
+  are stored, and billed as storage, once, to the job that wrote them.
 
 Daily cost for one account = `round_half_up(Σ byte_seconds × r_month / 730 /
 (2^30 × 3600) × 500000)` over all its jobs for that UTC day, where `r_month` is
@@ -125,9 +129,11 @@ same price in February as in March.
   returns `402`. This bounds unbilled egress to what one hour of signed URLs can
   pull. It is a check against `verify`, not a hold, because egress is collected
   daily, not per job.
-- Server access logs are not enabled by ADR-0005 or by anything in
-  `deploy/aws/staging/` today. Turning them on, and the log bucket, belongs to
-  task I1; this spec depends on it.
+- Server access logs are enabled by ADR-0005 in
+  `deploy/aws/modules/compute-stack/artifacts.tf` (not yet applied): they go
+  to `unify-compute-<env>-artifacts-logs-<account>` under `s3/`,
+  partitioned by event date, kept 90 days. The collector, and its read
+  permission on that bucket, are C5's.
 
 Daily cost for one account = `round_half_up(Σ bytes × r_gb / 2^30 × 500000)`
 over the log records charged that day.
@@ -326,6 +332,7 @@ points.
   charges before 30-day retention. Small, worth adding in P1.
 - **Queue timeout.** A job can sit `queued` holding balance with no limit
   stated anywhere. H6 bounds the hold's life, not the queue.
-- **S3 access logs** must be enabled by I1 before egress can be metered.
+- **S3 access logs** are defined (ADR-0005) and take effect when staging and
+  production are applied; egress cannot be metered before that.
 - **`job-api.md` SKU section's "rounded to 6 decimals"** wording should be
   aligned with the single-rounding rule above when that section is next edited.

@@ -39,6 +39,7 @@ OpenAI-style envelope so existing client error handling carries over:
 | 501 | `not_implemented` | Route exists, backend not built (current state) |
 | 503 | `console_unavailable` | Key could not be verified or hold could not be placed |
 | 503 | `upstream_unavailable` | The SKU is sound but no provider it offers is enabled in this deployment |
+| 503 | `storage_unavailable` | Artifact storage could not be reached |
 
 ## Objects
 
@@ -57,7 +58,7 @@ OpenAI-style envelope so existing client error handling carries over:
     "image": "ghcr.io/acme/embed:1.4",
     "command": ["python", "run.py", "--input", "/mnt/in", "--output", "/mnt/out"],
     "env": { "BATCH_SIZE": "256" },
-    "inputs": [ { "source": "s3://acme-data/docs/", "mount": "/mnt/in" } ],
+    "inputs": [ { "source": "https://acme-data.s3.amazonaws.com/docs.jsonl?X-Amz-Signature=…", "mount": "/mnt/in" } ],
     "outputs": [ { "mount": "/mnt/out" } ],
     "max_runtime_seconds": 7200
   },
@@ -72,6 +73,15 @@ OpenAI-style envelope so existing client error handling carries over:
   "metadata": { "pipeline": "nightly-embed" }
 }
 ```
+
+`inputs[].source` is an `https://` URL, public or presigned by the customer.
+The run step downloads it into the `mount` directory, named after the URL's
+last path segment, before the command runs. `s3://` and other sources are
+refused by the backend when the job is launched, until customer buckets are
+read through a cross-account role (a later ADR; ADR-0005). Submit does not
+check them yet. `outputs[].mount` is a directory the job writes. Everything
+under it is uploaded when the command exits (see
+[Artifacts](#get-computev1jobsidartifacts)).
 
 `placement` is null until the job is `running` and says where it landed.
 The backend writes it from SkyPilot's cluster record when the cluster is
@@ -219,9 +229,48 @@ Plain-text stdout/stderr. `follow=true` streams as `text/event-stream`
 
 ### `GET /compute/v1/jobs/{id}/artifacts`
 
-Lists files written under `outputs[].mount`, each with a signed download URL
-valid for 1 hour (*planned; storage location is an open question in
-`architecture.md`*).
+Lists the files the job wrote under `outputs[].mount`, each with a presigned
+download URL ([ADR-0005](../adr/0005-artifact-storage.md), Proposed).
+Implemented; answers `501` in a deployment until the job store, owner
+resolution and artifact storage are all configured. `404` if the job does not
+belong to the calling key's user.
+
+```json
+{
+  "object": "list",
+  "data": [
+    { "object": "compute.artifact", "path": "/mnt/out/results.jsonl", "size": 18234,
+      "sha256": "9f86d08…", "url": "https://unify-compute-production-artifacts-….s3.us-east-1.amazonaws.com/jobs/job_…/mnt/out/results.jsonl?X-Amz-…",
+      "expires_at": 1757523600 }
+  ],
+  "complete": true,
+  "truncated": false
+}
+```
+
+- `path` is where the job wrote the file. `sha256` is the hex SHA-256 that
+  S3 verified when the file was uploaded.
+- `url` is valid until `expires_at`: at most one hour, less if the
+  credentials that signed it expire sooner. Call again for fresh URLs.
+- `complete` is `false` until the job's upload has finished and written the
+  manifest. It stays `false` while the job runs, after a job that ended
+  without reaching its upload (cancelled, preempted, stopped at
+  `max_runtime_seconds`), and after retention has deleted the files. `data`
+  is then empty.
+- `truncated` is `true` if the job wrote more than 10 000 files; only the
+  first 10 000 by path are listed.
+- Outputs are uploaded from the end of the job's own run, whether the command
+  succeeded or failed. That time is billed and counts against
+  `max_runtime_seconds`, so leave headroom. One file is at most 5 GiB.
+- Retained 30 days from upload, then deleted.
+- *Planned:* `402` instead of URLs when the account is in arrears (ADR-0008).
+  It needs the ledger.
+
+The job's run step uses two internal routes, authenticated by the job's own
+upload token rather than a customer key:
+`POST /compute/v1/internal/jobs/{id}/artifacts/uploads` (one presigned PUT
+per file) and `…/complete` (writes the manifest). Both refuse a terminal job
+with `409`. They are not part of the customer contract.
 
 ## Metering and settlement (*planned*)
 
@@ -245,8 +294,8 @@ settlement cadence, interruption and retry — are in
   console is unreachable for that long, with `error.code = billing_unavailable`.
 - At terminal state, a final `settle` releases the remainder of the hold.
 - Artifact storage (GB-hours, from terminal state until deletion) and egress
-  (GB downloaded) are charged once a day per account, not against the job's
-  hold.
+  (GB downloaded, from the artifacts bucket's S3 server access logs) are
+  charged once a day per account, not against the job's hold.
 
 ## Rate limits
 
