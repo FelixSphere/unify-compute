@@ -218,10 +218,16 @@ step left is step 0, the quota (request `d81c8fcd…`, CASE_OPENED). A
 staging job fails today with `capacity_exhausted`, and AWS says
 `VcpuLimitExceeded … limit of 0`. The quota to ask for is now 4 vCPU, not 8
 (ADR-0010, "Start small"); answer the open case rather than filing another.
-The budget and its automatic stop (step 4) are not applied: they require
-`alert_email`, and none has been given. The operator set the budget to
-**USD 50/month** (2026-10-03, "start small"), which is now the stack's
-default. Record:
+The budget and its automatic stop (step 4) were applied on 2026-10-03:
+**USD 50/month**, with alerts to the operator's address (AWS asked it to
+confirm the subscription by email). The action is
+`b4302f8f-c1df-40b6-8157-d71a203ae18a`: STANDBY, approval AUTOMATIC, 100% of actual
+spend, `unify-compute-gpu-budget-stop-launches` onto
+`unify-compute-staging-skypilot`. The dry run below passed: `DryRunOperation`
+before, `UnauthorizedOperation` with the policy attached by hand, then
+detached. The start-small Terraform (0 add, 2 change) is applied, and the reaper
+reports `max_age_hours` 5. Records:
+`deploy/releases/2026-10-03-staging-start-small.md`, Record:
 `deploy/releases/2026-10-03-staging-gpu-ready.md`. The design and the isolation argument are in
 [ADR-0010](adr/0010-gpu-workers-in-the-shared-account.md).
 
