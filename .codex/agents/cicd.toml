@@ -49,8 +49,11 @@ account. Two consequences:
   `unify-compute-production-1999053028.us-east-1.elb.amazonaws.com`
   (deletion protection on), daily DLM snapshots. Serves `compute.unifyai.us`,
   `site.compute.unifyai.us` and `api.compute.unifyai.us`. compute-api runs the
-  wired build with no bridge secret and no `CONSOLE_URL`: keyed routes answer
-  `503 console_unavailable`, and public routes work. No console, no SkyPilot
+  wired build. **Console bridge on since 2026-10-03**:
+  `CONSOLE_URL=https://app.unifyapi.ai` and the production bridge secret (set
+  over SSM under the ops lock; backup in
+  `/data/backups/20261003T040909Z-manual-console-bridge/`). Keys from
+  app.unifyapi.ai are verified; a made-up key is `401 invalid_key`. No console, no SkyPilot
   (`gpu_workers_enabled = false`). The artifacts bucket exists (2026-10-03),
   but the host's `.env` has no artifacts lines yet.
 - **Release pipeline:** `.github/workflows/release.yml`, dispatch only.

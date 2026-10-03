@@ -37,7 +37,9 @@ the same pair the local profile uses:
 - `postgres` — default database `compute`; the console overlay creates
   `console` on first boot.
 - `console`, `redis` — the console overlay. Own database, own admin, own
-  bridge secret. Production has neither.
+  bridge secret. Production has no console container: its compute-api uses
+  the production console's bridge on `app.unifyapi.ai` (see "Production
+  console bridge").
 - `skypilot` — the SkyPilot API server, `docker-compose.skypilot.yml`
   ([ADR-0010](adr/0010-gpu-workers-in-the-shared-account.md)). Installed on the
   running host on 2026-10-03; see "GPU workers and SkyPilot" below.
@@ -140,6 +142,73 @@ session-manager-plugin, so it works from a machine that does not have one.
 3. Set the same `COMPUTE_BRIDGE_SECRET` value in the console's environment
    (compose `.env`) once the console ships the bridge routes. Until then the
    routes are dark and compute-api's submit returns `503 console_unavailable`.
+
+## Production console bridge
+
+**Status: on since 2026-10-03** (operator-approved, cross-product; record
+`deploy/releases/2026-10-03-production-console-bridge.md`). Production
+compute-api verifies `sk-` keys, and will place and settle holds, against the
+real Unify API account system (ADR-0001). GPUs are still off, so a valid
+submit ends at `503 upstream_unavailable` before any hold is placed
+(`submitWired`: placement and the backend check come before
+`JobService.Submit`).
+
+| | Value |
+|---|---|
+| `CONSOLE_URL` | `https://app.unifyapi.ai` |
+| compute side secret | us-east-1 `/unify-compute-production/bridge_secret` (SecureString) |
+| console side secret | ap-southeast-5 `/unifyapi/console/compute_bridge_secret` (SecureString), the console's `COMPUTE_BRIDGE_SECRET` |
+| rebuilt host | `bridge_enabled = true` in `envs/production/main.tf`; user-data renders both lines |
+| running host | `scripts/console-bridge-host.sh` over SSM, under the ops lock |
+
+The two parameters hold **one value**, 64 hex characters, generated once and
+never printed. It is distinct from both staging secrets. `staging-secrets.sh`
+does not create it: a value created there would match nothing.
+
+Why `app.unifyapi.ai` and not some other origin: there is no edge in front of
+it. It is an A alias straight to the console's ALB in ap-southeast-5, with no
+WAF in that region and no CloudFront. Measured from the production host on
+2026-10-03, both `X-Compute-*` headers arrive intact (a fresh timestamp is
+answered `invalid_signature`, not `invalid_timestamp`). It takes 0.22 s to
+connect and 0.66 s for a cold TLS request. compute-api's bridge timeout is
+10 s. `api-edge.unifyapi.ai` (CloudFront) is the wrong choice: its origin is
+the stopped us-east-1 stack.
+
+The console side belongs to the UnifyAPI release owner. Its procedure is the
+same-image swap (`infra/scripts/console-swap.sh` in FelixSphere/unifyapi):
+add the variable to `/opt/unifyapi/.env` and the compose file, then swap to the
+image already running. That way the instance is never stopped and started (no
+user_data apply).
+
+### Rollback: one step per side, compute first
+
+```bash
+# compute (us-east-1). Keyed routes go back to 503 console_unavailable.
+sed 's/^MODE=.*/MODE=off/' scripts/console-bridge-host.sh > /tmp/bridge-off.sh
+scripts/ssm-run.sh i-07dd2f6d313a0dafd /tmp/bridge-off.sh "console bridge off" 900
+
+# console (ap-southeast-5, UnifyAPI's host). The routes go back to an empty 404.
+#   cd /opt/unifyapi && sed -i '/^COMPUTE_BRIDGE_SECRET=/d' .env \
+#     && sed -i '/- COMPUTE_BRIDGE_SECRET=/d' docker-compose.yml \
+#     && bash ./console-swap.sh "$(grep -m1 'image: ghcr.io/felixsphere/unifyapi-console:' docker-compose.yml | sed -E 's/^ *image: *//')"
+```
+
+Both edit lines rather than restoring a backup, so they stay correct after
+later releases have changed the image pins. To make a rollback survive a
+rebuild, also set `bridge_enabled = false` in a PR.
+
+### Known risk: one rate-limit bucket, spent before the signature check
+
+The console's bridge limiter (`COMPUTE_BRIDGE_RATE_LIMIT`, default 50/s,
+burst 100) is one bucket per console process, and it takes a token
+**before** it checks the HMAC. Measured 2026-10-03: 200 unsigned requests
+from inside the host got 62 `429`s. Anyone on the internet can therefore
+starve compute's bridge calls with about 50 requests a second. The
+per-IP global limiter deliberately does not cover these routes. There is no
+money risk: a starved call is `console_unavailable`, and no hold is placed or
+settled. It is an availability risk to fix in the console (verify first, or
+limit per IP before the shared bucket) before compute takes paying traffic.
+It is reported to UnifyAPI.
 
 ## GPU workers and SkyPilot
 

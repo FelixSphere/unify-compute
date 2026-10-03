@@ -51,8 +51,8 @@ check "GET /compute/v1/jobs without key -> 401" 401 "$(code "$BASE_URL/compute/v
 
 # A made-up key. A build with a job store verifies it through the console
 # bridge and refuses it before validation: 401 invalid_key where the bridge
-# answers, 503 console_unavailable where it is dark or CONSOLE_URL is unset
-# (production today). The dark build (no DATABASE_URL) checks only the key's
+# answers (staging and production since 2026-10-03), 503 console_unavailable
+# where it is dark or CONSOLE_URL is unset. The dark build (no DATABASE_URL) checks only the key's
 # shape, so the request reaches validation: 400 unknown_sku, then 501.
 # Accepting both keeps the smoke meaningful across a rollback.
 made_up() {

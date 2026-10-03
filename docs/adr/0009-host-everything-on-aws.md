@@ -456,3 +456,15 @@ next staging release is what brings it up.
 - ECR storage is $0.10/GB-month, layers shared between copies are stored
   once, and pulls within the region are free. Not measured yet; expect
   cents to a few dollars a month at 30 copies.
+
+## Amendment, 2026-10-03: the production bridge is on
+
+Two facts in "Hosts" above are no longer true. Production's
+`COMPUTE_BRIDGE_SECRET` is now read from SSM (`bridge_enabled = true`), and
+production has a `bridge_secret` parameter whose value equals the production
+console's. Turning it on did **not** replace the instance. `user_data` and
+`user_data_base64` are in `ignore_changes`, so the flag reaches only a
+rebuilt host. The running host got the same two `.env` lines over SSM. The
+procedure and rollback are in `docs/staging.md`, "Production console bridge",
+and the record is `deploy/releases/2026-10-03-production-console-bridge.md`.
+The reasoning above is unchanged.

@@ -62,8 +62,14 @@ Current status (say what exists rather than describing targets as shipped):
   `503 upstream_unavailable`. Not built: resuming live jobs after a restart
   (`docs/spec/backend.md` open question 2), webhook registration, storage
   and egress metering.
-- The console bridge's server half is merged in `unifyapi-console` (#225)
-  but not released (`docs/spec/console-billing-bridge.md`).
+- The console bridge's server half (`unifyapi-console` #225) is live on
+  production `app.unifyapi.ai` since 2026-10-03 (v0.1.144, which lacks
+  console #233 and #243). Production compute-api calls it, so **production
+  compute is connected to the Unify API account system**: an `sk-` key from
+  app.unifyapi.ai is verified there, and a made-up one is `401 invalid_key`.
+  GPUs are still off in production, so a valid submit ends at
+  `503 upstream_unavailable` before any hold. Record:
+  `deploy/releases/2026-10-03-production-console-bridge.md`.
 - The AWS Terraform — one module (`deploy/aws/modules/compute-stack/`) with
   staging and production callers under `deploy/aws/envs/`, plus GitHub OIDC
   deploy roles in `deploy/aws/shared/github-oidc/` and the runtime image
@@ -76,9 +82,9 @@ Current status (say what exists rather than describing targets as shipped):
   (built from e5ce490, 2026-10-03; records in `deploy/releases/`). That is the
   wired job API. Staging also runs its own console (UnifyAPI trial build
   `e3cef17`, with the bridge on), SkyPilot, and artifact storage; a real key
-  there gets a job accepted and held. Production's compute-api has no bridge
-  secret and no `CONSOLE_URL`, so every keyed route answers
-  `503 console_unavailable` there. Both hosts are IMDS-locked (hop limit 1). `compute.unifyai.us` was cut over
+  there gets a job accepted and held. Production's compute-api has
+  `CONSOLE_URL=https://app.unifyapi.ai` and the production bridge secret
+  (2026-10-03), and no SkyPilot. Both hosts are IMDS-locked (hop limit 1). `compute.unifyai.us` was cut over
   from OpenAI Sites to production's ALB on 2026-10-02 (Route53 change
   `C07235422LT740FCOOAEW`). The Sites project and its two TXT records remain
   as the rollback path.
