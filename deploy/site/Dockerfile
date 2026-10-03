@@ -24,7 +24,12 @@ RUN npm run build \
  && test -f dist/client/privacy.html \
  && test -f dist/client/privacy.txt \
  && test -f dist/client/404.html \
- && rm -rf dist/client/.vite dist/client/vinext-client-entry-manifest.json
+ && rm -rf dist/client/.vite dist/client/vinext-client-entry-manifest.json \
+ && for page in index signup login verify forgot-password reset-password 404; do \
+      test -f "dist/app/$page.html" || { echo "missing dist/app/$page.html"; exit 1; }; \
+    done \
+ && test -f dist/app/brand/unifyai-lockup-horizontal-black.svg \
+ && ! grep -lE '<script>|<script type="module">|<style' dist/app/*.html
 
 # caddy:2.11.4-alpine
 FROM caddy:2.11.4-alpine@sha256:6aeddd44c3078b0f9a35206472a11420648a79c184603ef95957d0a20044cb2b
@@ -36,13 +41,10 @@ ARG SITE_BUILD_ID=dev
 ENV XDG_DATA_HOME=/tmp/caddy-data XDG_CONFIG_HOME=/tmp/caddy-config
 COPY deploy/site/Caddyfile /etc/caddy/Caddyfile
 COPY --from=build /src/dist/client /srv
-# The app host's root (app.compute.unifyai.us): a placeholder until the
-# dashboard export replaces it (plan task A7b). Its own copies of the tokens
-# and brand files, so nothing on that host is served from the marketing root.
-COPY deploy/site/app-placeholder /srv-app
-COPY app/unifyai-tokens.css /srv-app/unifyai-tokens.css
-COPY public/favicon.ico public/icon-v4.svg /srv-app/
-COPY public/brand/unifyai-lockup-horizontal-black.svg /srv-app/brand/
+# The app host's root (app.compute.unifyai.us): the dashboard pages, a
+# separate Vite build (dashboard/vite.config.ts) with its own copies of the
+# brand files, so nothing on that host is served from the marketing root.
+COPY --from=build /src/dist/app /srv-app
 LABEL org.opencontainers.image.source="https://github.com/FelixSphere/unify-compute" \
       org.opencontainers.image.description="compute.unifyai.us marketing site and app.compute.unifyai.us pages (static, served by Caddy)" \
       org.opencontainers.image.revision="${SITE_BUILD_ID}"

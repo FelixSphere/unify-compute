@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <!-- @head -->
+    <title>Sign up — Unify Compute</title>
+    <link rel="stylesheet" href="/src/app.css" />
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body data-page="signup">
+    <main class="page">
+      <div class="card">
+        <!-- @brand -->
+        <h1>Create your Unify Compute account</h1>
+        <!-- @form-error -->
+        <form id="form" method="post" novalidate>
+          <div class="field">
+            <label for="email">Email</label>
+            <input id="email" name="email" type="email" autocomplete="email" required aria-describedby="email-error" />
+            <p class="field-error" id="email-error" hidden></p>
+          </div>
+          <div class="field">
+            <label for="password">Password</label>
+            <div class="password">
+              <input id="password" name="password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required aria-describedby="password-hint password-error" />
+              <!-- @toggle:password -->
+            </div>
+            <p class="hint" id="password-hint">At least 12 characters.</p>
+            <p class="field-error" id="password-error" hidden></p>
+          </div>
+          <div class="field">
+            <label for="password_confirm">Confirm password</label>
+            <div class="password">
+              <input id="password_confirm" name="password_confirm" type="password" autocomplete="new-password" required aria-describedby="password_confirm-error" />
+              <!-- @toggle:password_confirm -->
+            </div>
+            <p class="field-error" id="password_confirm-error" hidden></p>
+          </div>
+          <!-- Honeypot (ADR-0011 D5: no Turnstile). Off-screen, out of the tab
+               order and the accessibility tree; a person never fills it. -->
+          <div class="hp" aria-hidden="true">
+            <label for="website">Website</label>
+            <input id="website" name="website" type="text" tabindex="-1" autocomplete="off" />
+          </div>
+          <button class="primary" type="submit">Sign up</button>
+        </form>
+        <p class="legal">By signing up you agree to the <a href="https://compute.unifyai.us/terms">Terms</a> and <a href="https://compute.unifyai.us/privacy">Privacy Policy</a>.</p>
+        <p class="switch">Already have an account? <a href="/login">Log in</a></p>
+      </div>
+      <!-- @below -->
+    </main>
+  </body>
+</html>

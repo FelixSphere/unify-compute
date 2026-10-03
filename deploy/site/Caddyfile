@@ -57,11 +57,11 @@
 	# no challenges.cloudflare.com because Turnstile is off (ADR-0011 D5);
 	# turning it on adds that origin to script-src and frame-src here.
 	#
-	# No 'unsafe-inline' anywhere. The placeholder needs none. The dashboard
-	# export (plan task A7b) must fit this policy or change it here, in review:
-	# if vinext's inline flight-payload scripts come with it, the choice is
-	# per-build hashes or 'unsafe-inline' with the reason written down, not a
-	# quiet loosening.
+	# No 'unsafe-inline' anywhere, and no hashes: the pages are a plain Vite
+	# build (dashboard/), not the vinext export, so every script and
+	# stylesheet is an external file from this origin. The Dockerfile refuses
+	# an export with an inline <script> or <style>. Anything that needs one
+	# changes this policy here, in review.
 	#
 	# connect-src 'self' covers /dashboard/v1/*, which is this same origin.
 	# form-action 'self' keeps a forged form from posting credentials away.
@@ -114,6 +114,10 @@ http://app.compute.unifyai.us:8080, http://app.staging.compute.unifyai.us:8080 {
 	}
 
 	import static_types
+
+	# Content-hashed by Vite, like /_next/static on the marketing host.
+	@app_hashed path /assets/*
+	header @app_hashed Cache-Control "public, max-age=31536000, immutable"
 
 	handle {
 		header ?Cache-Control no-cache

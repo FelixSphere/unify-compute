@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <!-- @head -->
+    <title>Unify Compute</title>
+    <link rel="stylesheet" href="/src/app.css" />
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body data-page="home">
+    <header class="app-header">
+      <div class="brand">
+        <img src="/brand/unifyai-lockup-horizontal-black.svg" alt="UnifyAI" width="148" height="51" loading="eager" />
+        <span class="divider" aria-hidden="true"></span>
+        <span class="descriptor">Compute</span>
+      </div>
+      <img class="mark" src="/brand/unifyai-mark-black.svg" alt="UnifyAI" width="32" height="32" loading="eager" />
+      <button class="ghost" type="button" id="logout" hidden>Log out</button>
+    </header>
+    <main class="content">
+      <!-- @form-error -->
+      <p class="status" id="loading" role="status">Loading your account…</p>
+      <section id="account" hidden>
+        <p class="eyebrow">Signed in</p>
+        <h1 id="account-email"></h1>
+        <p class="lead">Balance, API keys and jobs will appear here. The dashboard is in development.</p>
+      </section>
+    </main>
+  </body>
+</html>

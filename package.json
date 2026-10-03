@@ -7,9 +7,10 @@
   },
   "scripts": {
     "dev": "vinext dev",
-    "build": "vinext build",
+    "build": "vinext build && npm run build:app",
     "lint": "oxlint",
-    "format": "oxfmt"
+    "format": "oxfmt",
+    "build:app": "vite build --config dashboard/vite.config.ts"
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",

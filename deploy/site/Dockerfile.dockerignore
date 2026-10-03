@@ -13,5 +13,5 @@
 !hooks/
 !lib/
 !public/
+!dashboard/
 !deploy/site/Caddyfile
-!deploy/site/app-placeholder/

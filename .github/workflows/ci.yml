@@ -73,7 +73,7 @@ jobs:
       # Scoped to our code. components/ui and hooks are generated shadcn
       # output and fail oxlint's a11y and react-compiler rules as shipped; see
       # AGENTS.md. Formatting is not checked yet: app/ predates .oxfmtrc.json.
-      - run: npx oxlint app lib
+      - run: npx oxlint app lib dashboard
       - run: npm run build
 
   # The site container, run for real: every route the export must answer, the
