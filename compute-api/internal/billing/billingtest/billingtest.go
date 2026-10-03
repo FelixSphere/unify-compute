@@ -5,7 +5,6 @@ package billingtest
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -15,14 +14,6 @@ import (
 	"github.com/FelixSphere/unify-compute/compute-api/internal/console/consoletest"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/store"
 )
-
-// LocalBillerPrefix marks the parity run: a test whose name starts with it
-// builds its console fake on the local biller (Parity). Test helpers check it
-// so the same test bodies run against both.
-const LocalBillerPrefix = "TestLocalBiller/"
-
-// Parity reports whether t is part of a local-biller parity run.
-func Parity(t *testing.T) bool { return strings.HasPrefix(t.Name(), LocalBillerPrefix) }
 
 // New returns a local biller on db, a store migrated through 0006 (the
 // accounts of 0005 and the ledger of 0006).

@@ -16,7 +16,6 @@ import (
 
 	"github.com/FelixSphere/unify-compute/compute-api/internal/backend"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/backend/skypilottest"
-	"github.com/FelixSphere/unify-compute/compute-api/internal/billing/billingtest"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/console/consoletest"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/events"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/jobs"
@@ -87,11 +86,6 @@ func newWorld(t *testing.T) *world {
 	fc := consoletest.New([]byte(secret))
 	t.Cleanup(fc.Close)
 	fc.SetNow(c.Now)
-	if billingtest.Parity(t) {
-		book, local := billingtest.Book(t, st.Pool(), c.Now)
-		fc.UseBook(book)
-		t.Cleanup(func() { billingtest.AssertInvariant(t, local) })
-	}
 	fc.SeedUser(consoletest.User{ID: userID, Quota: 1_000_000_000})
 	fc.SeedKey(consoletest.Key{Key: "sk-resume-0000000001", TokenID: tokenID, UserID: userID, Unlimited: true})
 

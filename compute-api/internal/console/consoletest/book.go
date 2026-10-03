@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sync/atomic"
 
 	"github.com/FelixSphere/unify-compute/compute-api/internal/console"
 )
@@ -40,6 +41,23 @@ func (s *Server) UseBook(b Book) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.book = b
+}
+
+var bookFactory atomic.Pointer[func(*Server) Book]
+
+// SetBookFactory makes every Server that New creates from now on use the
+// Book f returns for it (UseBook), until it is called with nil. It lets a
+// parity run send existing tests, unchanged, through another Book: a
+// sequential top-level test sets it, runs those tests as its subtests, and
+// clears it in its cleanup. Nothing else runs meanwhile, because Go starts
+// top-level parallel tests only after every sequential one has finished.
+// f gets the new Server so its Book can share the fake's clock.
+func SetBookFactory(f func(*Server) Book) {
+	if f == nil {
+		bookFactory.Store(nil)
+		return
+	}
+	bookFactory.Store(&f)
 }
 
 func (s *Server) currentBook() Book {

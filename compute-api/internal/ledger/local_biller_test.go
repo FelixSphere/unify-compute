@@ -8,11 +8,12 @@ import (
 
 // localBillerParity is every harness test, run a second time with the
 // console fake's balances and holds kept by the local biller (task A6,
-// ADR-0011). The bodies and their expectations are the console tests',
-// unchanged: newHarness sees the TestLocalBiller/ prefix and puts the local
-// biller behind the fake (consoletest.Server.UseBook), so the engine, the
-// fault injection and every assertion are the same and only the book under
-// them differs. After each one the balance invariant is checked as well.
+// ADR-0011). The bodies, their helpers and their expectations are the
+// console tests', unchanged: while this test runs, every console fake keeps
+// its balances and holds in a local biller (billingtest.UseLocalBooks), so
+// the engine, the fault injection and every assertion are the same and only
+// the book under them differs. At the end the balance invariant is checked
+// for every local biller used.
 var localBillerParity = []struct {
 	name string
 	fn   func(*testing.T)
@@ -52,6 +53,7 @@ var localBillerParity = []struct {
 }
 
 func TestLocalBiller(t *testing.T) {
+	billingtest.UseLocalBooks(t)
 	for _, tc := range localBillerParity {
 		t.Run(tc.name, tc.fn)
 	}

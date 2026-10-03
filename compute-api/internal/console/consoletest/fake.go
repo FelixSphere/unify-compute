@@ -245,6 +245,9 @@ func New(secret []byte) *Server {
 		events:   map[string]settledEvent{},
 		extends:  map[string]extendRecord{},
 	}
+	if f := bookFactory.Load(); f != nil {
+		s.book = (*f)(s)
+	}
 	s.Server = httptest.NewServer(s.handler())
 	return s
 }

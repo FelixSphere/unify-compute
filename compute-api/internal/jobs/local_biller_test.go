@@ -8,10 +8,10 @@ import (
 
 // localBillerParity is every test built on newWorld (the restart tests and
 // the platform limit), run a second time with the console fake's balances
-// and holds kept by the local biller (task A6, ADR-0011). The bodies are
-// unchanged: newWorld sees the TestLocalBiller/ prefix and puts the local
-// biller behind the fake, so restarts, lost responses and the final checks
-// run against it, followed by the balance invariant.
+// and holds kept by the local biller (task A6, ADR-0011). The bodies and
+// newWorld are unchanged: while this test runs every console fake uses a
+// local biller (billingtest.UseLocalBooks), so restarts, lost responses and
+// the final checks run against it, followed by the balance invariant.
 var localBillerParity = []struct {
 	name string
 	fn   func(*testing.T)
@@ -30,6 +30,7 @@ var localBillerParity = []struct {
 }
 
 func TestLocalBiller(t *testing.T) {
+	billingtest.UseLocalBooks(t)
 	for _, tc := range localBillerParity {
 		t.Run(tc.name, tc.fn)
 	}

@@ -174,7 +174,8 @@ expired other accounts' holds; locally that waits for the account's next
 call or the sweep. No answer differs.
 
 Tests: the ledger's harness tests and the restart tests run a second time
-with the local biller behind the console fake (`consoletest.Server.UseBook`),
+with the local biller behind every console fake (`consoletest.SetBookFactory`,
+`billingtest.UseLocalBooks`), test files unchanged,
 and the fake's hold contract runs against the fake, the local biller and the
 local biller over HTTP, plus a randomised sequence compared step by step
 with the fake (`internal/billing`).
