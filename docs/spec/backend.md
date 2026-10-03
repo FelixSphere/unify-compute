@@ -120,8 +120,8 @@ objects in them, which embed stack-trace paths, are replaced by a placeholder.
 | `spec.image` | `resources.image_id: docker:<image>` | |
 | `spec.command` | `run`: argv shell-quoted so it reaches the process unchanged under `bash -c` | |
 | `spec.env` | `envs` | Names checked against SkyPilot's `^[a-zA-Z_][a-zA-Z0-9_]*$` |
-| `spec.inputs` | `file_mounts: {mount: source}` (COPY) | A customer bucket is never mounted read-write |
-| `spec.outputs` | **refused** (`ErrOutputsUnsupported`) | Open question 1 |
+| `spec.inputs` | `https://` source: fetched with curl into the `mount` directory, under the URL's last path segment, at the start of `run`; a failed fetch stops the command. Any other source: refused with `TaskOptions.HTTPSInputsOnly` (`ErrInputSource`), which a deployment sets (ADR-0005); without it, `file_mounts: {mount: source}` (COPY) | SkyPilot reads an `https://` file mount as Azure Blob (`sky/cloud_stores.py:1053`). Any other source would be copied with SkyPilot's credentials, which are ours. The `file_mounts` path stays for the recorded goldens and the cross-account role. A customer bucket is never mounted read-write |
+| `spec.outputs` | With `TaskOptions.Outputs` set (`internal/artifacts`): `run` becomes the upload script, `envs` gains `UNIFY_COMPUTE_ARTIFACTS_URL` and `UNIFY_COMPUTE_ARTIFACTS_TOKEN`. Without it: **refused** (`ErrOutputsUnsupported`) | ADR-0005. Never a file mount. Customer env names starting `UNIFY_COMPUTE_` are refused (`ErrReservedEnv`) |
 | `max_runtime_seconds` | enforced by compute-api (below) | Not in the task |
 | teardown | `resources.autostop: {idle_minutes: 5, down: true}` (`schemas.py:128`) | Backstop only |
 
@@ -240,13 +240,14 @@ Instead:
 
 ## Open questions
 
-1. **Outputs.** SkyPilot cannot MOUNT a prefix of a bucket, and mounting the
-   shared artifact bucket would expose every other job's artifacts. The
-   choices: a bucket per job (mountable, isolated, but bucket sprawl and a
-   copy into ADR-0005's layout); write to local disk and upload from the
-   node after exit (needs credentials and a CLI on the node, and an upload
-   step before `/down`); or a sidecar. This blocks the reference fine-tune
-   (R1), which writes a model. It belongs with ADR-0005.
+1. **Outputs.** *Proposed answer in ADR-0005:* the run step uploads the
+   output mounts from an EXIT trap, with curl and one presigned PUT per file
+   from compute-api, so the node holds no AWS credentials and nothing is
+   mounted. The upload runs inside the SkyPilot job, so it finishes before
+   the backend sees the job end and calls `/down`. A job ended by cancel,
+   preemption or `max_runtime_seconds` is torn down without uploading.
+   Files over 5 GiB, which R1's merged weights would be, need multipart
+   (ADR-0005, open question 1).
 2. **Restart.** Attempt state, including `UpAt`, is in memory. After a
    compute-api restart the cluster can be found by name and the launch by
    `/api/status?cluster_name=`, but `UpAt` has to come back from the ledger

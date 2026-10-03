@@ -4,10 +4,12 @@
 #   scripts/staging-secrets.sh [--env staging|production] [--prefix /<name>] [--force]
 #
 # --env picks the prefix and the parameter set: staging runs its own console
-# and needs four; production runs no console and no Redis and keeps the
-# bridge dark (bridge_enabled = false), so it needs only postgres_password.
-# Creating a production bridge_secret here would be a secret nothing reads,
-# waiting to be mistaken for the real one.
+# and needs four, plus artifacts_token_secret; production runs no console and
+# no Redis and keeps the bridge dark (bridge_enabled = false), so it needs
+# only postgres_password and artifacts_token_secret. Creating a production
+# bridge_secret here would be a secret nothing reads, waiting to be mistaken
+# for the real one. artifacts_token_secret signs job upload tokens (ADR-0005);
+# rotating it only invalidates the tokens of jobs running at that moment.
 #
 # Why this is a script and not four `aws ssm put-parameter` lines in a runbook:
 #
@@ -46,8 +48,8 @@ done
 # which are derived from the stack's name (unify-compute-<env>). The IAM read
 # policy is scoped to the same prefix.
 case "$ENV_NAME" in
-  staging)    KEYS="postgres_password redis_password session_secret bridge_secret" ;;
-  production) KEYS="postgres_password" ;;
+  staging)    KEYS="postgres_password redis_password session_secret bridge_secret artifacts_token_secret" ;;
+  production) KEYS="postgres_password artifacts_token_secret" ;;
   *) echo "unknown --env: $ENV_NAME (staging or production)" >&2; exit 2 ;;
 esac
 PREFIX="${PREFIX:-/unify-compute-$ENV_NAME}"

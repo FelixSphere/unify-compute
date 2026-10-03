@@ -31,6 +31,10 @@
     {
       "name": "meta",
       "description": "Service metadata and health."
+    },
+    {
+      "name": "internal",
+      "description": "Called by a job's own run step with its upload token. Not part of the customer contract."
     }
   ],
   "security": [
@@ -501,7 +505,7 @@
           "jobs"
         ],
         "summary": "Job artifacts",
-        "description": "Files written under `outputs[].mount`, each with a signed download URL valid for 1 hour. Storage location is an open question (architecture.md). Currently returns `501 not_implemented`.",
+        "description": "Files the job wrote under `spec.outputs[].mount`, each with a presigned download URL (ADR-0005, Proposed), owner-scoped like `GET /compute/v1/jobs/{id}`. Currently returns `501 not_implemented`: the route is built, but the binary has no job store or key-to-owner resolver until the console bridge lands, and no artifact storage until its bucket and token secret are configured. *Planned:* `402` instead of URLs while the account is in arrears (ADR-0008).",
         "parameters": [
           {
             "$ref": "#/components/parameters/JobID"
@@ -527,8 +531,28 @@
           "429": {
             "$ref": "#/components/responses/RateLimited"
           },
+          "500": {
+            "description": "`internal_error`: the job could not be read. *Planned:* not returned by the current build.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
           "501": {
             "$ref": "#/components/responses/NotImplemented"
+          },
+          "503": {
+            "description": "`console_unavailable`: the key could not be verified; or `storage_unavailable`: artifact storage could not be reached. *Planned:* not returned by the current build.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -623,6 +647,209 @@
           }
         }
       }
+    },
+    "/compute/v1/internal/jobs/{id}/artifacts/uploads": {
+      "post": {
+        "operationId": "presignArtifactUpload",
+        "tags": [
+          "internal"
+        ],
+        "summary": "Upload URL for one output file (job run step only)",
+        "description": "Called by the job's own run step, not by customers: one file's absolute `path`, `size` and hex `sha256` in, a presigned PUT out, valid for at most an hour, that S3 accepts only with `x-amz-checksum-sha256` set to the returned value. Currently returns `501 not_implemented`.",
+        "security": [
+          {
+            "uploadToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/JobID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "`<base64 sha256> <url>\\n`, so bash can read it without a JSON parser. *Planned:* not returned by the current build.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_path`, `invalid_size`, `invalid_sha256`, `no_outputs` or `malformed_body`. *Planned:* not returned by the current build.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`invalid_upload_token`. *Planned:* not returned by the current build.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "`job_terminal`: the job has ended and its token with it. *Planned:* not returned by the current build.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`file_too_large`: over 5 GiB. *Planned:* not returned by the current build.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "501": {
+            "$ref": "#/components/responses/NotImplemented"
+          },
+          "503": {
+            "description": "`storage_unavailable`. *Planned:* not returned by the current build.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "path",
+                  "size",
+                  "sha256"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "size": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 5368709120
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/compute/v1/internal/jobs/{id}/artifacts/complete": {
+      "post": {
+        "operationId": "completeArtifactUpload",
+        "tags": [
+          "internal"
+        ],
+        "summary": "Write the output manifest (job run step only)",
+        "description": "Called by the job's own run step after its uploads: compute-api lists the job's prefix and writes `jobs/<job_id>/_manifest.json` from what S3 holds. Calling it again rewrites it. Currently returns `501 not_implemented`.",
+        "security": [
+          {
+            "uploadToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/JobID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The manifest was written. *Planned:* not returned by the current build.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "object",
+                    "files",
+                    "truncated"
+                  ],
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "const": "compute.artifact_manifest"
+                    },
+                    "files": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "truncated": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`invalid_upload_token`. *Planned:* not returned by the current build.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "`job_terminal`: the job has ended and its token with it. *Planned:* not returned by the current build.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "501": {
+            "$ref": "#/components/responses/NotImplemented"
+          },
+          "503": {
+            "description": "`storage_unavailable`. *Planned:* not returned by the current build.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -632,6 +859,11 @@
         "scheme": "bearer",
         "bearerFormat": "sk-...",
         "description": "The customer's existing UnifyAPI key, the same one that calls api.unifyapi.ai/v1. Currently only the shape is checked (prefix `sk-`, at least 8 characters); verification through the console bridge, cached for at most 60 seconds, is planned."
+      },
+      "uploadToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A job's own upload token, from `UNIFY_COMPUTE_ARTIFACTS_TOKEN` in its environment. Valid for that job only, until launch + `max_runtime_seconds` + 2 h, and only while the job is not terminal."
       }
     },
     "parameters": {
@@ -819,7 +1051,8 @@
           "console_unavailable": [],
           "upstream_unavailable": [
             "upstream_unavailable"
-          ]
+          ],
+          "storage_unavailable": []
         },
         "description": "`type` is the class (a closed set); `code` is the specific reason. Codes the current build emits are listed per type in `x-error-codes`; clients must tolerate codes not listed there.",
         "properties": {
@@ -836,7 +1069,8 @@
               "internal_error",
               "not_implemented",
               "console_unavailable",
-              "upstream_unavailable"
+              "upstream_unavailable",
+              "storage_unavailable"
             ]
           },
           "code": {
@@ -1102,10 +1336,11 @@
         "properties": {
           "source": {
             "type": "string",
-            "description": "e.g. `s3://bucket/prefix/`."
+            "description": "An `https://` URL, public or presigned by you (ADR-0005). Other sources, such as `s3://`, are refused by the backend when the job is launched; submit does not check them yet."
           },
           "mount": {
-            "type": "string"
+            "type": "string",
+            "description": "Absolute directory. The run step downloads `source` into it, named after the URL's last path segment, before the command runs."
           }
         }
       },
@@ -1116,7 +1351,8 @@
         ],
         "properties": {
           "mount": {
-            "type": "string"
+            "type": "string",
+            "description": "Absolute directory (not `/`); every regular file under it is uploaded when the command exits, whatever its status. At most 5 GiB per file and 10 000 files per job."
           }
         }
       },
@@ -1375,7 +1611,9 @@
         "type": "object",
         "required": [
           "object",
-          "data"
+          "data",
+          "complete",
+          "truncated"
         ],
         "properties": {
           "object": {
@@ -1385,9 +1623,16 @@
           "data": {
             "type": "array",
             "items": {
-              "type": "object",
-              "description": "One file with a signed download URL valid for 1 hour. Fields not yet specified."
+              "$ref": "#/components/schemas/Artifact"
             }
+          },
+          "complete": {
+            "type": "boolean",
+            "description": "False until the job's upload has finished and written its manifest: while the job runs, after a job that ended without reaching its upload (cancelled, preempted, stopped at `max_runtime_seconds`), and after retention deleted the files. `data` is then empty."
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "The job wrote more than 10 000 files; only the first 10 000 by path are listed."
           }
         }
       },
@@ -1650,6 +1895,45 @@
           "headroom": {
             "type": "integer",
             "description": "`max - used`, never negative: the most a submit could ask for now."
+          }
+        }
+      },
+      "Artifact": {
+        "type": "object",
+        "required": [
+          "object",
+          "path",
+          "size",
+          "sha256",
+          "url",
+          "expires_at"
+        ],
+        "description": "One output file (ADR-0005). Retained 30 days from upload.",
+        "properties": {
+          "object": {
+            "type": "string",
+            "const": "compute.artifact"
+          },
+          "path": {
+            "type": "string",
+            "description": "Where the job wrote the file, under one of `spec.outputs[].mount`."
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sha256": {
+            "type": "string",
+            "description": "Hex SHA-256, verified by S3 when the file was uploaded."
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Presigned GET."
+          },
+          "expires_at": {
+            "type": "integer",
+            "description": "Unix seconds when `url` stops working: at most one hour from the call, sooner if the signing credentials expire first."
           }
         }
       }

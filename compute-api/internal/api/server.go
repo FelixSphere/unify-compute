@@ -55,6 +55,11 @@ type Server struct {
 
 	submits *ratelimit.Limiter
 	reads   *ratelimit.Limiter
+
+	// Unset until the binary opens the job store; the artifact routes
+	// answer 501 until both they and Owner are set.
+	Jobs      JobReader
+	Artifacts ArtifactStore
 }
 
 // Per-key budgets from docs/spec/job-api.md, "Rate limits".
@@ -114,8 +119,12 @@ func New(build string, cat *sku.Catalogue, reg *upstream.Registry, log *slog.Log
 	s.mux.Handle("GET /compute/v1/jobs/{id}", s.auth(s.limit(s.reads, s.notImplemented("job lookup"))))
 	s.mux.Handle("POST /compute/v1/jobs/{id}/cancel", s.auth(s.notImplemented("job cancel")))
 	s.mux.Handle("GET /compute/v1/jobs/{id}/logs", s.auth(s.limit(s.reads, s.notImplemented("job logs"))))
-	s.mux.Handle("GET /compute/v1/jobs/{id}/artifacts", s.auth(s.limit(s.reads, s.notImplemented("job artifacts"))))
+	s.mux.Handle("GET /compute/v1/jobs/{id}/artifacts", s.auth(s.limit(s.reads, http.HandlerFunc(s.listArtifacts))))
 	s.mux.Handle("GET /compute/v1/jobs/{id}/events", s.auth(s.limit(s.reads, http.HandlerFunc(s.listEvents))))
+	// Called by a job's own run step with its upload token, not a customer
+	// key (internal/artifacts, ADR-0005). Not part of the customer contract.
+	s.mux.HandleFunc("POST /compute/v1/internal/jobs/{id}/artifacts/uploads", s.presignUpload)
+	s.mux.HandleFunc("POST /compute/v1/internal/jobs/{id}/artifacts/complete", s.completeUpload)
 	return s
 }
 

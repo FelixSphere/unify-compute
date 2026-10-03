@@ -3,6 +3,7 @@ package backend
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"path"
 	"regexp"
 	"sort"
@@ -40,6 +41,9 @@ type Job struct {
 	Spec       Spec
 	SKU        sku.SKU
 	Candidates []sku.Provider
+	// Owner is the billing identity that submitted the job; the artifact
+	// upload binds its token to it.
+	Owner string
 }
 
 // Task is a SkyPilot task (sky/utils/schemas.py get_task_schema). Marshalled
@@ -74,12 +78,30 @@ var (
 	// (sky/data/storage.py, StorageModeError "MOUNT mode does not support
 	// mounting specific files"), so jobs/<job_id>/ of a shared artifact
 	// bucket cannot be the output mount, and mounting the whole bucket would
-	// expose every other job's artifacts. Refused until ADR-0005 picks an
-	// upload path; see backend.md, open questions.
+	// expose every other job's artifacts. Outputs are uploaded by the run
+	// step instead (ADR-0005), which needs TaskOptions.Outputs; without one
+	// they are still refused.
 	ErrOutputsUnsupported = errors.New("backend: spec.outputs is not supported yet")
 	ErrBadMount           = errors.New("backend: mount must be an absolute path")
 	ErrBadEnv             = errors.New("backend: env names must match [A-Za-z_][A-Za-z0-9_]*")
 )
+
+// ReservedEnvPrefix is the upload step's own variables; a customer env name
+// with it is refused (ErrReservedEnv) so it cannot shadow them.
+const ReservedEnvPrefix = "UNIFY_COMPUTE_"
+
+var (
+	ErrReservedEnv = errors.New("backend: env names starting with " + ReservedEnvPrefix + " are reserved")
+	ErrInputSource = errors.New("backend: inputs must be https:// URLs with a file name")
+)
+
+// OutputUploader turns spec.outputs into the attempt's run step: it returns
+// the env the upload needs and a run script that runs command and then
+// uploads the output mounts, whatever command's exit status
+// (internal/artifacts).
+type OutputUploader interface {
+	OutputStep(j Job, command string) (envs map[string]string, run string, err error)
+}
 
 // The pattern SkyPilot's task schema enforces on envs keys.
 var envName = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
@@ -99,6 +121,14 @@ type TaskOptions struct {
 	// IdleMinutesToDown is SkyPilot's own autodown, the backstop that tears
 	// the cluster down if compute-api is not there to do it.
 	IdleMinutesToDown int
+	// Outputs builds the upload of spec.outputs. Nil refuses outputs.
+	Outputs OutputUploader
+	// HTTPSInputsOnly refuses every input that is not an https:// URL. A
+	// deployment sets it (ADR-0005): any other source is copied by SkyPilot
+	// with its own cloud credentials, which are ours, so a customer could
+	// name a bucket only we should read. False keeps the recorded task
+	// shapes that SkyPilot accepted (testdata/) reproducible.
+	HTTPSInputsOnly bool
 }
 
 // TaskFor translates one attempt into a SkyPilot task.
@@ -117,11 +147,36 @@ func TaskFor(j Job, opt TaskOptions) (Task, error) {
 		if !envName.MatchString(k) {
 			return Task{}, fmt.Errorf("%w: %q", ErrBadEnv, k)
 		}
+		if strings.HasPrefix(k, ReservedEnvPrefix) {
+			return Task{}, fmt.Errorf("%w: %q", ErrReservedEnv, k)
+		}
 	}
 	mounts := map[string]string{}
+	var fetch []string
 	for _, in := range s.Inputs {
 		if !path.IsAbs(in.Mount) {
 			return Task{}, fmt.Errorf("%w: %q", ErrBadMount, in.Mount)
+		}
+		// SkyPilot reads an https:// file-mount source as Azure Blob
+		// (sky/cloud_stores.py:1053, "Azure URL starts with https://"), so a
+		// public or presigned URL is fetched by the run step instead, into
+		// the mount directory under the URL's last path segment, which for
+		// a presigned S3 URL is the object's name.
+		if strings.HasPrefix(in.Source, "https://") {
+			u, err := url.Parse(in.Source)
+			name := ""
+			if err == nil {
+				name = path.Base(path.Clean("/" + u.Path))
+			}
+			if name == "/" || name == "." || name == ".." || u.Host == "" {
+				return Task{}, fmt.Errorf("%w: %q has no file name", ErrInputSource, in.Source)
+			}
+			fetch = append(fetch, fmt.Sprintf("mkdir -p -- %s && curl -fsSL --retry 3 -o %s %s",
+				shellJoin([]string{in.Mount}), shellJoin([]string{path.Join(in.Mount, name)}), shellJoin([]string{in.Source})))
+			continue
+		}
+		if opt.HTTPSInputsOnly {
+			return Task{}, fmt.Errorf("%w: %q", ErrInputSource, in.Source)
 		}
 		// A bare URI is a COPY: inputs are read before the run starts and a
 		// customer's bucket is never mounted read-write. SkyPilot refuses a
@@ -130,8 +185,26 @@ func TaskFor(j Job, opt TaskOptions) (Task, error) {
 		// prefix, so it is trimmed.
 		mounts[in.Mount] = strings.TrimRight(in.Source, "/")
 	}
+	run, envs := shellJoin(s.Command), s.Env
+	if len(fetch) > 0 {
+		run = strings.Join(append(fetch, run), " && ")
+	}
 	if len(s.Outputs) > 0 {
-		return Task{}, ErrOutputsUnsupported
+		if opt.Outputs == nil {
+			return Task{}, ErrOutputsUnsupported
+		}
+		extra, script, err := opt.Outputs.OutputStep(j, run)
+		if err != nil {
+			return Task{}, err
+		}
+		envs = make(map[string]string, len(s.Env)+len(extra))
+		for k, v := range s.Env {
+			envs[k] = v
+		}
+		for k, v := range extra {
+			envs[k] = v
+		}
+		run = script
 	}
 	idle := opt.IdleMinutesToDown
 	if idle <= 0 {
@@ -144,8 +217,8 @@ func TaskFor(j Job, opt TaskOptions) (Task, error) {
 			ImageID:   "docker:" + s.Image,
 			Autostop:  Autostop{IdleMinutes: idle, Down: true},
 		},
-		Envs: s.Env,
-		Run:  shellJoin(s.Command),
+		Envs: envs,
+		Run:  run,
 	}
 	if len(mounts) > 0 {
 		t.FileMounts = mounts

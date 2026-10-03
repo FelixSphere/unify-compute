@@ -160,5 +160,6 @@ incident, it is a production one.
    `a10g-24gb-x1` on AWS; a neocloud second, for the price delta.
 4. **Where job results live.** Object storage in our account with signed URLs,
    or the customer's bucket. Affects egress cost and data-residency story.
-   ADR-0005 (Proposed, in the finetune worktree, not on `main`) proposes our
-   S3; until it is accepted this stays open.
+   [ADR-0005](adr/0005-artifact-storage.md) (Proposed) proposes our S3,
+   uploaded by the run step with presigned URLs; until it is accepted this
+   stays open.
