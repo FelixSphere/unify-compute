@@ -11,8 +11,12 @@ import (
 	"time"
 
 	"github.com/FelixSphere/unify-compute/compute-api/internal/api"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/artifacts"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/awsv4"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/console"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/quota"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/sku"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/template"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/upstream"
 )
 
@@ -26,6 +30,25 @@ func main() {
 	cat, err := sku.Load(env("SKU_FILE", "config/skus.json"))
 	if err != nil {
 		log.Error("load sku catalogue", "err", err)
+		os.Exit(1)
+	}
+
+	// Quotas are validated at boot like the catalogue, so a bad file fails
+	// the deploy. They are not enforced yet: enforcement needs the owner a
+	// key resolves to, which arrives with the console bridge's verify, and
+	// the job store, which this binary does not open yet.
+	quotas, err := quota.Load(env("QUOTA_FILE", "config/quotas.json"))
+	if err != nil {
+		log.Error("load quotas", "err", err)
+		os.Exit(1)
+	}
+	log.Info("quotas loaded", "overrides", len(quotas.Owners), "enforced", false)
+
+	// Templates are checked against the catalogue they sell from, so a
+	// template naming a SKU that was removed fails the deploy, not a submit.
+	templates, err := template.Load(env("TEMPLATE_FILE", "config/templates.json"), cat, api.MaxRuntimeSeconds)
+	if err != nil {
+		log.Error("load templates", "err", err)
 		os.Exit(1)
 	}
 
@@ -54,16 +77,50 @@ func main() {
 		log.Warn("CONSOLE_URL unset; job routes will refuse until it is")
 	}
 
+	handler := api.New(Build, cat, upstreams, log)
+	handler.Templates = templates
+
+	// Artifact storage (ADR-0005). Built at boot so a bad configuration
+	// fails the deploy rather than the first upload. The token secret is the
+	// switch: hosts get the bucket from Terraform but the secret only once
+	// someone creates it, and a host without one must still boot (the
+	// CONSOLE_URL crash loop of 2026-10-02 is the lesson). The routes answer
+	// 501 until the job store and owner resolution are wired as well.
+	bucket, tokenSecret := os.Getenv("ARTIFACTS_BUCKET"), os.Getenv("ARTIFACTS_TOKEN_SECRET")
+	if bucket != "" && tokenSecret != "" {
+		region := env("AWS_REGION", "us-east-1")
+		var creds awsv4.CredentialSource = &awsv4.IMDS{}
+		if c, ok := awsv4.FromEnv(); ok {
+			creds = c
+		}
+		art, err := artifacts.New(artifacts.Config{
+			Bucket:        bucket,
+			WriterRoleARN: os.Getenv("ARTIFACTS_WRITER_ROLE_ARN"),
+			PublicURL:     os.Getenv("PUBLIC_URL"),
+			TokenSecret:   []byte(tokenSecret),
+			Creds:         creds,
+			Client:        &awsv4.Client{Region: region},
+		})
+		if err != nil {
+			log.Error("artifacts", "err", err)
+			os.Exit(1)
+		}
+		handler.Artifacts = art
+		log.Info("artifact storage configured", "bucket", bucket)
+	} else {
+		log.Warn("ARTIFACTS_BUCKET or ARTIFACTS_TOKEN_SECRET unset; spec.outputs cannot be uploaded and artifact routes answer 501")
+	}
+
 	srv := &http.Server{
 		Addr:              env("LISTEN_ADDR", "127.0.0.1:8080"),
-		Handler:           api.New(Build, cat, upstreams, log),
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	go func() {
-		log.Info("listening", "addr", srv.Addr, "build", Build, "skus", len(cat.SKUs))
+		log.Info("listening", "addr", srv.Addr, "build", Build, "skus", len(cat.SKUs), "templates", len(templates.Templates))
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("serve", "err", err)
 			os.Exit(1)

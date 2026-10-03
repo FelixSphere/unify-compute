@@ -35,6 +35,21 @@ output "data_volume_id" {
   value = aws_ebs_volume.data.id
 }
 
+output "artifacts_bucket" {
+  description = "Job outputs, under jobs/<job_id>/ (ADR-0005). Also in SSM /<name>/artifacts_bucket."
+  value       = aws_s3_bucket.artifacts.id
+}
+
+output "artifacts_writer_role_arn" {
+  description = "Assumed by compute-api per job with a prefix session policy. Also in SSM /<name>/artifacts_writer_role_arn."
+  value       = aws_iam_role.artifacts_writer.arn
+}
+
+output "artifacts_logs_bucket" {
+  description = "Server access logs of the artifacts bucket: the egress meter's source."
+  value       = aws_s3_bucket.artifacts_logs.id
+}
+
 output "instance_role_arn" {
   description = "The only principal the GPU workers' launch role trusts (modules/gpu-workers)."
   value       = aws_iam_role.instance.arn

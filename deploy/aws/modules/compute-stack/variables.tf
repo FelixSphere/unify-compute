@@ -187,13 +187,24 @@ variable "ssm_bridge_secret" {
   default = null
 }
 
+variable "artifacts_retention_days" {
+  description = "Days a job's outputs are kept after upload before S3 deletes them (ADR-0005). The storage meter stops at the same point (metering.md)."
+  type        = number
+  default     = 30
+}
+
+variable "artifacts_log_retention_days" {
+  description = "Days the artifacts bucket's server access logs are kept. The egress meter reads them daily; the rest of the window is for disputes about a download."
+  type        = number
+  default     = 90
+}
+
 variable "skypilot" {
   description = <<-EOT
     The SkyPilot API server on this host, from modules/gpu-workers through the
     environment root (ADR-0010). Null means none: no overlay, no launch-role
-    permission, IMDS left as it is. Set, it adds docker-compose.skypilot.yml to
-    the host, lets the instance role assume launch_role_arn, and lowers the
-    IMDS hop limit to 1 so that no container can reach the instance role.
+    permission. Set, it adds docker-compose.skypilot.yml to the host and lets
+    the instance role assume launch_role_arn.
   EOT
   type = object({
     config          = string

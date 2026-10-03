@@ -38,6 +38,13 @@ services:
       # console bridge is released on app.unifyapi.ai.
       COMPUTE_BRIDGE_SECRET: ${COMPUTE_BRIDGE_SECRET:-}
       DATABASE_URL: postgresql://unify:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/compute
+      # Artifact storage (ADR-0005). Empty token secret leaves it off.
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      ARTIFACTS_BUCKET: ${ARTIFACTS_BUCKET:-}
+      ARTIFACTS_WRITER_ROLE_ARN: ${ARTIFACTS_WRITER_ROLE_ARN:-}
+      ARTIFACTS_TOKEN_SECRET: ${ARTIFACTS_TOKEN_SECRET:-}
+      # Where job nodes reach this compute-api to upload their outputs.
+      PUBLIC_URL: ${PUBLIC_URL:-}
     depends_on:
       postgres:
         condition: service_healthy

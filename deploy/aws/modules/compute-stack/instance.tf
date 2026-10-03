@@ -36,6 +36,9 @@ locals {
   ssm_redis_password    = coalesce(var.ssm_redis_password, "${local.ssm_prefix}/redis_password")
   ssm_session_secret    = coalesce(var.ssm_session_secret, "${local.ssm_prefix}/session_secret")
   ssm_bridge_secret     = coalesce(var.ssm_bridge_secret, "${local.ssm_prefix}/bridge_secret")
+  # Signs job upload tokens (internal/artifacts). Optional: without it
+  # compute-api leaves artifact uploads off.
+  ssm_artifacts_token_secret = "${local.ssm_prefix}/artifacts_token_secret"
 
   skypilot_enabled            = var.skypilot != null
   ssm_skypilot_admin_password = coalesce(var.ssm_skypilot_admin_password, "${local.ssm_prefix}/skypilot_admin_password")
@@ -187,6 +190,10 @@ locals {
     ssm_redis_password    = local.ssm_redis_password
     ssm_session_secret    = local.ssm_session_secret
     ssm_bridge_secret     = local.ssm_bridge_secret
+    artifacts_bucket      = aws_s3_bucket.artifacts.id
+    artifacts_writer_role = aws_iam_role.artifacts_writer.arn
+    ssm_artifacts_token   = local.ssm_artifacts_token_secret
+    public_url            = "https://${var.api_domain}"
     skypilot_enabled      = local.skypilot_enabled
     skypilot_host_setup   = local.skypilot_host_setup
   })
@@ -218,13 +225,13 @@ resource "aws_instance" "this" {
 
   metadata_options {
     http_tokens = "required" # IMDSv2 only
-    # 1 when SkyPilot runs here: an IMDSv2 token response then cannot cross
-    # the extra hop into a bridge-networked container, so no container (the
-    # console included) can obtain the instance role, and with it the right
-    # to assume the launch role. Host processes are unaffected. Null leaves
-    # the AMI's default (2 on AL2023), so a stack without SkyPilot plans no
-    # change. Changing it is an in-place ModifyInstanceMetadataOptions.
-    http_put_response_hop_limit = local.skypilot_enabled ? 1 : null
+    # compute-api runs in a container, one hop beyond the instance, and
+    # needs the instance role for artifact storage (ADR-0005); with a limit
+    # of 1 the IMDSv2 token response never reaches it. The AL2023 AMI already
+    # defaults to 2 (both instances showed 2 on 2026-10-02, so this changes
+    # nothing); it is written here because it is now load-bearing. It also
+    # means every container on the host can reach the role; see ADR-0005.
+    http_put_response_hop_limit = 2
   }
 
   # Name and Project are what the GitHub deploy roles match on

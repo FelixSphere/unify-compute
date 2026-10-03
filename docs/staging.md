@@ -153,13 +153,14 @@ What `terraform apply` on `deploy/aws/envs/staging` adds: the workers VPC
 its security group, the launch role `unify-compute-staging-skypilot`, the
 worker role and profile `unify-compute-staging-worker`, and the reaper (Lambda,
 EventBridge rule, SNS topic, two alarms). What it changes in place on the
-host: the instance role may now assume the launch role; the IMDS hop limit
-goes 2 → 1; and the instance type goes t4g.small → t4g.medium, which is a
-**stop/start of staging** (a few minutes down; the Elastic IP, the data
+host: the instance role may now assume the launch role, and the instance
+type goes t4g.small → t4g.medium, which is a **stop/start of staging** (a few minutes down; the Elastic IP, the data
 volume and the stack come back by themselves). The read-only plan on
-2026-10-03 was **29 to add, 2 to change, 0 to destroy**; the instance is
-updated, not replaced. Production's plan is unchanged (`gpu_workers_enabled =
-false`).
+2026-10-03 was **47 to add, 2 to change, 0 to destroy**. 29 of the adds are
+these, and 18 are ADR-0005's artifacts bucket, logs bucket and writer role
+(#38), merged but not applied yet. The instance is updated, not replaced.
+Production's plan gains nothing from this (`gpu_workers_enabled = false`);
+its only pending adds are ADR-0005's 18.
 
 User-data is ignored after first boot, so the running host gets SkyPilot from
 the same setup script user-data would run, sent once over SSM. Order matters:
@@ -194,9 +195,9 @@ terraform -chdir=deploy/aws/shared/gpu-budget apply budget.tfplan
 # 4. staging. Set gpu_alert_email in envs/staging/variables.tf (or -var) so
 #    reaper reports reach someone; the address must confirm the SNS mail.
 terraform -chdir=deploy/aws/envs/staging plan -out=staging.tfplan
-#    expect 29 to add (30 with gpu_alert_email), 2 to change, 0 to destroy:
-#    module.stack.aws_instance.this updated in place (instance_type,
-#    metadata_options.http_put_response_hop_limit) and
+#    expect 47 to add (48 with gpu_alert_email; 18 are ADR-0005's artifacts
+#    resources if they are still unapplied), 2 to change, 0 to destroy:
+#    module.stack.aws_instance.this updated in place (instance_type only) and
 #    module.stack.aws_iam_role_policy.secrets (sts:AssumeRole). Anything
 #    replacing aws_instance.this or touching aws_ebs_volume.data is a stop.
 terraform -chdir=deploy/aws/envs/staging apply staging.tfplan
@@ -225,10 +226,9 @@ What to exercise afterwards, on the host (SSM), before calling it done:
   lists exactly the `skypilot` and `compute-api` containers (the project is
   named after `/opt/unify-compute/compose`). The console, Redis, Postgres and
   the site are not on it.
-- `docker compose exec skypilot curl -sS -m 3 -X PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 60'`
-  times out (hop limit 1: no container, SkyPilot's included, reaches IMDS),
-  while `docker compose exec skypilot aws sts get-caller-identity` names the
-  launch role (credentials from the file).
+- `docker compose exec skypilot aws sts get-caller-identity` names the launch
+  role, `assumed-role/unify-compute-staging-skypilot/skypilot-staging`
+  (credentials from the file, not IMDS).
 - `docker compose exec skypilot curl -s -o /dev/null -w '%{http_code}' http://skypilot:46580/api/status`
   answers 401 without the token.
 - `systemctl list-timers unify-compute-skypilot-credentials.timer` shows the

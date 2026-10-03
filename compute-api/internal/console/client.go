@@ -24,6 +24,11 @@ const (
 	basePath        = "/api/compute/v1"
 )
 
+// MaxRequestBody is the console's limit on a bridge request body. Larger
+// bodies are refused with 413 payload_too_large, so the client does not send
+// them at all.
+const MaxRequestBody = 32 << 10
+
 // Canonical returns the string both sides sign: METHOD, PATH, TIMESTAMP and
 // the exact body, newline-separated. The console's test suite must pin the
 // same vector as TestSignatureVector in client_test.go.
@@ -70,6 +75,8 @@ const (
 	CodeBridgeDisabled      = "bridge_disabled"
 	CodeHoldNotFound        = "hold_not_found"
 	CodeIdempotencyConflict = "idempotency_conflict"
+	CodeInternalError       = "internal_error"
+	CodePayloadTooLarge     = "payload_too_large"
 )
 
 // Values of Error.AccountStatus on a 403 from verify.
@@ -81,6 +88,9 @@ const (
 var (
 	ErrBridgeDisabled = errors.New("console bridge: " + CodeBridgeDisabled)
 	ErrHoldNotFound   = errors.New("console bridge: " + CodeHoldNotFound)
+	// ErrRequestTooLarge is local: the request was not sent, so nothing moved
+	// on the console. It is not a *Error, which always means the console answered.
+	ErrRequestTooLarge = errors.New("console bridge: request body over 32 KiB, not sent")
 )
 
 // Error is a non-2xx bridge response. Status carries the console's HTTP code
@@ -120,6 +130,9 @@ func (c *Client) post(ctx context.Context, path string, in, out any) error {
 	body, err := json.Marshal(in)
 	if err != nil {
 		return err
+	}
+	if len(body) > MaxRequestBody {
+		return fmt.Errorf("%w (%d bytes)", ErrRequestTooLarge, len(body))
 	}
 	fullPath := basePath + path
 	ts := c.Now().Unix()
@@ -259,4 +272,14 @@ func (c *Client) Release(ctx context.Context, holdID string) (*ReleaseResult, er
 		return nil, err
 	}
 	return &out, nil
+}
+
+// Owner is the billing identity compute-api scopes jobs and quotas to: the
+// tenant when the key belongs to one, else the user, matching which balance
+// remain_quota reports.
+func (id Identity) Owner() string {
+	if id.TenantID > 0 {
+		return fmt.Sprintf("tenant:%d", id.TenantID)
+	}
+	return fmt.Sprintf("user:%d", id.UserID)
 }

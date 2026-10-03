@@ -9,7 +9,7 @@
 
 ## Authentication
 
-`Authorization: Bearer sk-…` with the customer's existing UnifyAPI key. The
+`Authorization: Bearer sk-…` with the customer's existing Unify API key. The
 same key that calls `api.unifyapi.ai/v1`. compute-api verifies it through the
 console bridge (`console-billing-bridge.md` → `verify`) and caches the result
 for at most 60 seconds; a revoked key stops working within that window.
@@ -31,12 +31,15 @@ OpenAI-style envelope so existing client error handling carries over:
 | 400 | `invalid_request` | Malformed body, unknown SKU, runtime over the ceiling |
 | 401 | `authentication_error` | Missing, malformed, revoked, or expired key |
 | 402 | `insufficient_balance` | Hold refused: balance below the estimate |
+| 403 | `quota_exceeded` | Submit would exceed an account quota; `error.quotas` lists each limit with usage and headroom ([`quotas.md`](quotas.md)). Never a partial grant, no `Retry-After` |
 | 404 | `not_found` | Job id unknown *for this key* (no existence leak across users) |
 | 409 | `conflict` | Idempotency-Key reused with a different body; cancel on a terminal job |
-| 429 | `rate_limited` | Per-key submit rate exceeded |
+| 429 | `rate_limited` | Per-key submit or read rate exceeded; always with `Retry-After` |
+| 500 | `internal_error` | Placement failed for a reason the API does not distinguish (`placement_failed`); not expected in normal operation |
 | 501 | `not_implemented` | Route exists, backend not built (current state) |
 | 503 | `console_unavailable` | Key could not be verified or hold could not be placed |
 | 503 | `upstream_unavailable` | The SKU is sound but no provider it offers is enabled in this deployment |
+| 503 | `storage_unavailable` | Artifact storage could not be reached |
 
 ## Objects
 
@@ -55,7 +58,7 @@ OpenAI-style envelope so existing client error handling carries over:
     "image": "ghcr.io/acme/embed:1.4",
     "command": ["python", "run.py", "--input", "/mnt/in", "--output", "/mnt/out"],
     "env": { "BATCH_SIZE": "256" },
-    "inputs": [ { "source": "s3://acme-data/docs/", "mount": "/mnt/in" } ],
+    "inputs": [ { "source": "https://acme-data.s3.amazonaws.com/docs.jsonl?X-Amz-Signature=…", "mount": "/mnt/in" } ],
     "outputs": [ { "mount": "/mnt/out" } ],
     "max_runtime_seconds": 7200
   },
@@ -71,8 +74,19 @@ OpenAI-style envelope so existing client error handling carries over:
 }
 ```
 
-`placement` is null until the job is `running` and says where it landed
-(*planned*; the backend fills it from SkyPilot's cluster record).
+`inputs[].source` is an `https://` URL, public or presigned by the customer.
+The run step downloads it into the `mount` directory, named after the URL's
+last path segment, before the command runs. `s3://` and other sources are
+refused by the backend when the job is launched, until customer buckets are
+read through a cross-account role (a later ADR; ADR-0005). Submit does not
+check them yet. `outputs[].mount` is a directory the job writes. Everything
+under it is uploaded when the command exits (see
+[Artifacts](#get-computev1jobsidartifacts)).
+
+`placement` is null until the job is `running` and says where it landed.
+The backend writes it from SkyPilot's cluster record when the cluster is
+first seen `UP`, before the job reads `running` ([`backend.md`](backend.md)).
+It is not served yet, because the backend is not wired to submit.
 
 Money is a decimal string in USD, never a float. Timestamps are Unix seconds.
 
@@ -134,6 +148,13 @@ regions. See [`upstreams.md`](upstreams.md) and ADR-0006.
 
 ## Endpoints
 
+The machine-readable form of this contract is
+[`openapi.json`](openapi.json) (OpenAPI 3.1), served by every build at
+`GET /compute/v1/openapi.json` (public). The canonical file is
+`compute-api/internal/api/openapi.json`, embedded in the binary; the copy here
+is kept byte-identical by a test, and a test fails if a route is registered
+without an entry there. A change to an endpoint below changes both.
+
 ### `GET /compute/v1/skus`
 
 Lists offered SKUs. Public (no auth) so the pricing page can render from it.
@@ -157,12 +178,22 @@ Body: the `spec` object above plus `sku` (required), optional `providers`
 (a subset of the SKU's provider clouds, to pin placement; default all), and
 optional `metadata` (≤ 16 string pairs). Server fills everything else.
 
+Optional `template`: the id of a template from `GET /compute/v1/templates`.
+The template supplies the spec and the default `sku`; the body may then set
+only the fields that template lists as overridable, and binds a `source` to
+each of its input mounts. The resolved spec goes through the validation below
+unchanged. Rules and the template error codes are in
+[`templates.md`](templates.md).
+
 Validated before anything is held or persisted, in this order: body parses
 (`malformed_body`), `sku` present (`missing_sku`) and offered (`unknown_sku`)
 and sold (`sku_unavailable`), `spec.max_runtime_seconds` positive
 (`missing_max_runtime`) and at most 86400 (`runtime_over_ceiling`), every
-entry of `providers` offered by the SKU (`provider_not_offered`), and at
-least one candidate enabled in this deployment (`503 upstream_unavailable`).
+entry of `providers` offered by the SKU (`provider_not_offered`), at
+least one candidate enabled in this deployment (`503 upstream_unavailable`),
+and, last, the account's quotas (`403 quota_exceeded`, [`quotas.md`](quotas.md);
+the check exists in the handler but is not enabled in a deployment until key
+verification and the job store are wired).
 
 Flow (*planned*): verify key → price estimate = `max_runtime_seconds × sku rate`
 → `hold` on the console for `sku rate × min(max_runtime_seconds, 7200)`
@@ -198,9 +229,48 @@ Plain-text stdout/stderr. `follow=true` streams as `text/event-stream`
 
 ### `GET /compute/v1/jobs/{id}/artifacts`
 
-Lists files written under `outputs[].mount`, each with a signed download URL
-valid for 1 hour (*planned; storage location is an open question in
-`architecture.md`*).
+Lists the files the job wrote under `outputs[].mount`, each with a presigned
+download URL ([ADR-0005](../adr/0005-artifact-storage.md), Proposed).
+Implemented; answers `501` in a deployment until the job store, owner
+resolution and artifact storage are all configured. `404` if the job does not
+belong to the calling key's user.
+
+```json
+{
+  "object": "list",
+  "data": [
+    { "object": "compute.artifact", "path": "/mnt/out/results.jsonl", "size": 18234,
+      "sha256": "9f86d08…", "url": "https://unify-compute-production-artifacts-….s3.us-east-1.amazonaws.com/jobs/job_…/mnt/out/results.jsonl?X-Amz-…",
+      "expires_at": 1757523600 }
+  ],
+  "complete": true,
+  "truncated": false
+}
+```
+
+- `path` is where the job wrote the file. `sha256` is the hex SHA-256 that
+  S3 verified when the file was uploaded.
+- `url` is valid until `expires_at`: at most one hour, less if the
+  credentials that signed it expire sooner. Call again for fresh URLs.
+- `complete` is `false` until the job's upload has finished and written the
+  manifest. It stays `false` while the job runs, after a job that ended
+  without reaching its upload (cancelled, preempted, stopped at
+  `max_runtime_seconds`), and after retention has deleted the files. `data`
+  is then empty.
+- `truncated` is `true` if the job wrote more than 10 000 files; only the
+  first 10 000 by path are listed.
+- Outputs are uploaded from the end of the job's own run, whether the command
+  succeeded or failed. That time is billed and counts against
+  `max_runtime_seconds`, so leave headroom. One file is at most 5 GiB.
+- Retained 30 days from upload, then deleted.
+- *Planned:* `402` instead of URLs when the account is in arrears (ADR-0008).
+  It needs the ledger.
+
+The job's run step uses two internal routes, authenticated by the job's own
+upload token rather than a customer key:
+`POST /compute/v1/internal/jobs/{id}/artifacts/uploads` (one presigned PUT
+per file) and `…/complete` (writes the manifest). Both refuse a terminal job
+with `409`. They are not part of the customer contract.
 
 ## Metering and settlement (*planned*)
 
@@ -224,13 +294,20 @@ settlement cadence, interruption and retry — are in
   console is unreachable for that long, with `error.code = billing_unavailable`.
 - At terminal state, a final `settle` releases the remainder of the hold.
 - Artifact storage (GB-hours, from terminal state until deletion) and egress
-  (GB downloaded) are charged once a day per account, not against the job's
-  hold.
+  (GB downloaded, from the artifacts bucket's S3 server access logs) are
+  charged once a day per account, not against the job's hold.
 
 ## Rate limits
 
-Per key: 60 submits/hour, 600 reads/minute. Returned as `429` with
-`Retry-After`. (*planned; the skeleton enforces none.*)
+Per key: 60 submits/hour, 600 reads/minute (`GET` on `/jobs`, `/jobs/{id}`,
+`/logs`, `/artifacts`, `/events`). Returned as `429` with `Retry-After` in
+seconds.
+Enforced per process, in memory; details and limits of that in
+[`quotas.md`](quotas.md#per-key-rate-limits). Cancel is not limited yet.
+
+Account quotas (concurrent jobs and GPUs per tier) are a separate mechanism,
+per billing entity rather than per key, and refuse with `403`; see
+[`quotas.md`](quotas.md).
 
 ## Not in v1
 

@@ -1,0 +1,13 @@
+{
+  "note": "Per-owner concurrency limits (docs/spec/quotas.md). Defaults apply to every account; an override raises or lowers individual fields for one owner and must say why. A change to this file is reviewed like a price change: it decides how much upstream capacity and balance one account can commit at once.",
+  "defaults": {
+    "max_active_jobs": 2,
+    "max_queued_jobs": 2,
+    "max_gpus": {
+      "hyperscaler": 2,
+      "neocloud": 2,
+      "marketplace": 0
+    }
+  },
+  "owners": {}
+}

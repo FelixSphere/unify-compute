@@ -70,20 +70,26 @@ its own, rather than mixed into the host's SSM and ECR policy. And CloudTrail
 then shows every EC2 call SkyPilot makes as session `skypilot-<env>` of a role
 that does nothing else.
 
-The credentials reach the SkyPilot container and **no other container**:
+How the credentials reach the SkyPilot container:
 
-- The host's IMDS hop limit drops to 1 when SkyPilot is enabled. An IMDSv2
-  token response then cannot cross the extra hop into a bridge-networked
-  container, so no container (the console included) can obtain the instance
-  role, and through it the launch role. Host processes are unaffected.
-  Nothing in our containers uses IMDS. This is an in-place
-  `ModifyInstanceMetadataOptions`.
 - A systemd timer on the host assumes the launch role every 20 minutes and
   writes the session, mode 0600, to `/data/skypilot-aws/credentials.json`.
   Only the SkyPilot container mounts that directory, read-only. Its
   `AWS_CONFIG_FILE` sets `credential_process = cat …`, which botocore treats
   as refreshable credentials. Role chaining caps a session at an hour, so
-  there are always at least 40 minutes left.
+  there are always at least 40 minutes left. SkyPilot never uses IMDS.
+- **What this does not close.** The host's IMDS hop limit is 2, because
+  compute-api reads the instance role from its container for artifact storage
+  ([ADR-0005](0005-artifact-storage.md)). Every container on the host can
+  therefore obtain the instance role, and the instance role may assume the
+  launch role. A compromised staging console could launch workers. That is
+  ADR-0005's open question 3, and its proposed fix (a `DOCKER-USER` rule
+  that drops 169.254.169.254 from every container but compute-api) closes
+  it here too. SkyPilot is then unaffected, because it reads the file and
+  not IMDS. Until then the bound is the launch role's policy below. Such a
+  container still cannot touch another product, launch anything but a
+  tagged g5.xlarge in the workers VPC, or get past the quota, the reaper
+  and the budget. Production runs no console.
 
 The API server is reachable only by compute-api: it has no host port and no
 ALB rule. It sits on an internal compose network shared with compute-api
@@ -231,16 +237,15 @@ alarms and SNS cost cents.
   Letting a node terminate *only itself* needs a condition binding the
   resource to `ec2:SourceInstanceARN`. That is not verified, so it is not
   here.
-- File mounts from S3 run on the worker with the worker's credentials. With a
-  deny-all role, a private customer bucket cannot be read, and neither can
-  the artifact bucket. Backend.md open question 1 (outputs) now also covers
-  inputs. This blocks the first workload as it is written:
-  `batch-infer-vllm` (`compute-api/config/templates.json`) reads
-  `/mnt/in/requests.jsonl` and writes `/mnt/out/results.jsonl`. Its image
-  (`vllm/vllm-openai`, Docker Hub) and its model (Hugging Face, not gated)
-  need only the open egress. Until the storage decision (ADR-0005) says
-  which bucket and prefix a worker may read and write, the first real run
-  needs an input that is reachable without AWS credentials.
+- A deny-all worker works for the first workload because of
+  [ADR-0005](0005-artifact-storage.md): inputs are `https://` URLs fetched
+  with curl in the run step, and outputs are uploaded by the job through
+  presigned URLs that compute-api mints. Neither needs AWS credentials on the
+  node. `batch-infer-vllm` reads `/mnt/in/requests.jsonl` and writes
+  `/mnt/out/results.jsonl` that way. Its image (`vllm/vllm-openai`, Docker
+  Hub) and model (Hugging Face, not gated) need only the open egress. An
+  `s3://` input or mount would need credentials on the node, and that would
+  be the first narrowing of the worker's Deny.
 - The SkyPilot image is upstream's `berkeleyskypilot/skypilot:0.13.0`,
   pinned by digest, which is the multi-arch index with linux/arm64. It is
   built from the same commit as the `FelixSphere/skypilot` pin (tag v0.13.0,
@@ -284,6 +289,6 @@ be unwound.
 - The quota to request. 8 vCPU (two g5.xlarge) is proposed in
   `docs/staging.md`; 4 is the minimum for one.
 - The budget amount (USD 300) and the alert address.
-- What the worker role may do in S3 for `batch-infer-vllm`'s input and
-  output mounts, which would be the first narrowing of its Deny, scoped to
-  one job's prefix. That is ADR-0005's to decide.
+- Closing IMDS to every container but compute-api (ADR-0005 open question
+  3), which would also stop a compromised console from assuming the launch
+  role.
