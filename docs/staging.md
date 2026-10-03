@@ -567,8 +567,10 @@ what Terraform renders with the host's `.env`, secrets masked on the host:
 
 ```sh
 ENV=production   # or staging
-echo 'regex("(?s)<<ENV\n(.*?)\nENV\n", module.stack.user_data)[0]' \
-  | terraform -chdir=deploy/aws/envs/$ENV console | sed '1d;$d' | sort >rendered.env
+# printf, not echo: zsh's echo turns the \n below into newlines and the
+# console then reports "Unterminated template string".
+printf '%s\n' 'regex("(?s)<<ENV\n(.*?)\nENV\n", module.stack.user_data)[0]' \
+  | terraform -chdir=deploy/aws/envs/$ENV console -no-color | sed '1d;$d' | sed -E 's/^ +//' | sort >rendered.env
 cat >/tmp/env-masked.sh <<'SH'
 sed -E 's/^(POSTGRES_PASSWORD|REDIS_PASSWORD|SESSION_SECRET|COMPUTE_BRIDGE_SECRET|ARTIFACTS_TOKEN_SECRET|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET)=.+/\1=$\1/' \
   /opt/unify-compute/compose/.env | sort
@@ -583,6 +585,13 @@ the host what was released last), `COMPOSE_FILE` and any lines the IMDS and
 SkyPilot setup scripts append (they run at first boot too), and lines the
 host has that compute-api ignores, such as production's `CONSOLE_URL` and
 bridge secret. Any accounts, mail or Stripe line that differs is a defect.
+Checked on 2026-10-03 (5d065d0): no accounts, mail or Stripe line differs on
+either host. One real difference: **a rebuilt production host also gets
+ADR-0005's artifact settings** (`AWS_REGION`, `ARTIFACTS_BUCKET`,
+`ARTIFACTS_WRITER_ROLE_ARN`, `ARTIFACTS_TOKEN_SECRET`, `PUBLIC_URL`), which
+the running production host never received. So artifact storage is off on
+production today and would be on after a rebuild. Staging renders empty
+`STRIPE_*=` lines where the live `.env` has none; the effect is the same.
 A secret shown as `NAME=` rather than `NAME=$NAME` is empty on the host.
 
 **Rollback** (one step, production host, over SSM):
