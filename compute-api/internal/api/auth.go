@@ -69,6 +69,11 @@ func (v *Verifier) Verify(ctx context.Context, key string) (console.Identity, er
 		return c.id, c.err
 	}
 
+	if v.Console.BaseURL == "" {
+		// No console configured (CONSOLE_URL unset): expected, not an error
+		// worth a log line per request.
+		return console.Identity{}, ErrConsoleUnavailable
+	}
 	var res verified
 	id, err := v.Console.Verify(ctx, key)
 	var ce *console.Error
