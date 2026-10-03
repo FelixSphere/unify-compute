@@ -39,9 +39,8 @@ the same pair the local profile uses:
 - `console`, `redis` — the console overlay. Own database, own admin, own
   bridge secret. Production has neither.
 - `skypilot` — the SkyPilot API server, `docker-compose.skypilot.yml`
-  ([ADR-0010](adr/0010-gpu-workers-in-the-shared-account.md)). **Defined, not
-  applied:** the running host does not have it yet; see "GPU workers and
-  SkyPilot" below.
+  ([ADR-0010](adr/0010-gpu-workers-in-the-shared-account.md)). Installed on the
+  running host on 2026-10-03; see "GPU workers and SkyPilot" below.
 
 All images are pinned by digest in `deploy/aws/envs/staging/variables.tf`
 (ours and the console) or in the compose files (Postgres, Redis). Ours are
@@ -144,8 +143,13 @@ session-manager-plugin, so it works from a machine that does not have one.
 
 ## GPU workers and SkyPilot
 
-**Status: defined, not applied (2026-10-03).** Nothing below exists in AWS
-yet. The design and the isolation argument are in
+**Status: applied to staging on 2026-10-03** (47 added, 2 changed, 0
+destroyed; SkyPilot set up over SSM, ending `SKYPILOT_SETUP_DONE all`). The only
+step left is step 0, the quota (request `d81c8fcd…`, CASE_OPENED). A
+staging job fails today with `capacity_exhausted`, and AWS says
+`VcpuLimitExceeded … limit of 0`. The budget (step 3) is not applied: it
+requires `alert_email`, and none has been given. Record:
+`deploy/releases/2026-10-03-staging-gpu-ready.md`. The design and the isolation argument are in
 [ADR-0010](adr/0010-gpu-workers-in-the-shared-account.md).
 
 What `terraform apply` on `deploy/aws/envs/staging` adds: the workers VPC
@@ -249,8 +253,10 @@ image (host.sh changes only `COMPUTE_API_IMAGE` and `SITE_IMAGE`).
 
 ## IMDS lockdown
 
-**Status: defined here, applied to neither host.** Neither running host has it
-yet: both show hop limit 2, and neither has the firewall unit. Until a host
+**Status: applied to both hosts on 2026-10-03** (staging, then production:
+`IMDS_LOCKDOWN_DONE all`, `CHECK_IMDS_OK`, hop limit 1 by Terraform,
+`CHECK_IMDS_OK` again). Staging also passed after the t4g.medium stop/start,
+which exercised the boot-ordering path. Until a host
 is locked down, `release.yml` refuses to release or roll back on it
 (`host.sh`). The decision and the reasoning are in
 [ADR-0005](adr/0005-artifact-storage.md), amendment of 2026-10-03.
