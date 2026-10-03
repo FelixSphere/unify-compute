@@ -3,12 +3,14 @@
 - **Status:** Spec, partially implemented. What exists in `compute-api/`:
   the event log and the delivery queue (`internal/store`, migration `0003`),
   the event types and the webhook delivery worker (`internal/events`), and
-  `GET /compute/v1/jobs/{id}/events` (route wired; answers `501` until the
-  binary has a store and a key-to-owner resolver, which arrive with the
-  console bridge). **Not built:** webhook registration
-  (`/compute/v1/webhooks`), anything that emits events (the SkyPilot backend,
-  C4, and metering, C5, are the emitters), and the worker running in the
-  binary. Sections below say which is which.
+  `GET /compute/v1/jobs/{id}/events` (answers `501` only in the dark build,
+  without a job store), the emitters (`internal/jobs`: every `job.*` type
+  except `job.failover`, and `billing.balance_exhausted`), and the delivery
+  worker running in the binary every 5 s. **Not built:** webhook
+  registration (`/compute/v1/webhooks`), `job.failover` (the backend does
+  not observe a failover between candidates yet) and
+  `billing.hold_extended` (the ledger does not report a successful extend).
+  Sections below say which is which.
 - Product rationale: `docs/product-design.md` — CoreWeave's "health as visible
   events" and Vast.ai's signed webhooks (task C6).
 
@@ -75,11 +77,18 @@ The four terminal types correspond one-to-one with the four terminal job
 statuses (`interrupted` → `job.preempted`). Exactly one terminal event is
 emitted per job.
 
-*Emitters are not built.* C4 emits the `job.*` types from SkyPilot status,
-C5 emits `billing.*`. A status change and its event should be written in one
-transaction so a crash between the two cannot lose the terminal webhook;
-`store.AppendEvent` is the single-statement half of that and C4 will need a
-transactional variant alongside `UpdateStatus`.
+*Emitters are implemented* in `internal/jobs`. `job.queued` is written in
+the same transaction as the job row; every later `job.*` event in the same
+transaction as the status change or placement it announces
+(`store.UpdateStatusWithEvent`, `store.SetPlacementWithEvent`), so a crash
+between the two cannot lose the terminal webhook and a refused transition
+writes no event. `job.placed` precedes `job.running`. `job.preempted` covers
+every `interrupted` job, preemption or provider fault; its `provider` is
+`"unknown"` when the job never reached a placement. `job.cancelled.reason`
+is `customer` unless compute-api stopped the job (`balance_exhausted`,
+`billing_unavailable`). `billing.balance_exhausted` is written on the first
+refused extension (metering.md H4), about 50 minutes before the job would be
+stopped.
 
 ## `GET /compute/v1/jobs/{id}/events?after=evt_…&limit=50`
 
@@ -136,7 +145,7 @@ or an operator writes (`store.CreateWebhook`), pointing at trusted URLs.
 { "id": "wh_01J8Q7…", "object": "compute.webhook", "url": "https://hooks.acme.dev/compute", "event_types": ["job.succeeded", "job.failed", "job.cancelled", "job.preempted"], "created_at": 1757520000 }
 ```
 
-### Delivery — implemented (worker), not running in the binary yet
+### Delivery — implemented, running in the binary
 
 When an event is appended, the same statement creates one delivery for every
 webhook of the job's owner that matches the job's key (or has no key) and

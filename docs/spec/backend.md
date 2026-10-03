@@ -2,9 +2,10 @@
 
 - **Status:** Spec + partial. `compute-api/internal/backend/` implements
   launch, observation, logs, cancel and teardown against the SkyPilot API
-  server, and the lifecycle events below. It is **not wired** to
-  `POST /compute/v1/jobs`, which still returns `501`. Wiring the backend
-  and the ledger (C5) into submit is a later task. Nothing has been launched
+  server, and the lifecycle events below. `internal/jobs` wires it to
+  `POST /compute/v1/jobs`, the ledger (C5) and the event log: its store
+  writes each status change with its event, its sink feeds the ledger, and
+  the ledger's stop requests reach `Backend.Stop`. Nothing has been launched
   on a real cloud.
 - Task: C4 in [`product-design.md`](../product-design.md).
 - Depends on: [ADR-0003](../adr/0003-skypilot-orchestration-foundation.md)
@@ -251,8 +252,12 @@ Instead:
 2. **Restart.** Attempt state, including `UpAt`, is in memory. After a
    compute-api restart the cluster can be found by name and the launch by
    `/api/status?cluster_name=`, but `UpAt` has to come back from the ledger
-   (C5's `cluster_up` row). The wiring task needs a `Resume` that takes it.
-   Until then a restart loses track of live attempts. SkyPilot's autodown
+   (C5's `cluster_up` row). The wiring (`internal/jobs`) did not add that
+   `Resume`; it is still needed. Until it exists a restart loses track of
+   live attempts: the binary logs each non-terminal job it finds at boot as
+   "not resumed", the job reads its last status indefinitely, its metering
+   stops at the last observed `UP`, and its hold stays locked until the
+   console's sweeper expires it (H6). SkyPilot's autodown
    reaps their clusters 5 minutes after the job ends.
 3. **Max runtime without compute-api.** If compute-api is down past a job's
    cap, the job keeps running at our cost (the customer's bill is still

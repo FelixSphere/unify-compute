@@ -1,9 +1,13 @@
 # Metering — three meters, what is billed when, and how it reaches the console
 
-- **Status:** Spec, not implemented. Nothing here is built. `compute-api` has
-  the SKU catalogue and `sku.EstimateQuota`; the ledger, settlement loop,
-  storage sampler and egress collector are task C5. Every row in the tables
-  below carries an ID (`B…`, `H…`, `R…`) so C5 can name a test after it.
+- **Status:** Spec, partially implemented. The GPU meter is built and wired:
+  the ledger and settlement loop (`internal/ledger`, C5) hold at submit
+  (H1, H2), meter from the backend's lifecycle edges, settle every 300 s and
+  at terminal (R1–R4), extend (H3), and stop a job the hold can no longer
+  cover (H4, H5), driven by `internal/jobs`. **Not built:** the storage
+  sampler, the egress collector, the daily charges (R5) and the expired-hold
+  fallback that needs them (R6). Every row in the tables below carries an ID
+  (`B…`, `H…`, `R…`) so a test can be named after it.
 - Depends on: [`job-api.md`](job-api.md) (job states, the `usage` object),
   [`console-billing-bridge.md`](console-billing-bridge.md) (the verbs),
   ADR-0001 (the console owns the balance), [ADR-0005](../adr/0005-artifact-storage.md) (artifacts in our S3;

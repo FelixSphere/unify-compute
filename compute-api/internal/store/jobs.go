@@ -98,11 +98,17 @@ type Job struct {
 // against the API contract is the handler's job; the store only enforces what
 // the schema can (a JSON object spec, a non-empty owner and SKU).
 type NewJob struct {
+	// ID is the job's id when the caller needs it before the row exists (the
+	// console hold names the job); empty means the store picks one.
+	ID       string
 	Owner    string
 	TokenID  *int64
 	SKU      string
 	Spec     json.RawMessage
 	Metadata map[string]string
+	// Events are appended in the insert's transaction, so a job never
+	// exists without its job.queued event. JobID is filled in.
+	Events []NewEvent
 }
 
 // Idempotency carries a submit's Idempotency-Key. RequestHash is the caller's
@@ -183,11 +189,15 @@ func insertJob(ctx context.Context, tx pgx.Tx, nj NewJob, idem *Idempotency) (jo
 		return Job{}, false, err
 	}
 
+	id := nj.ID
+	if id == "" {
+		id = NewJobID(time.Now())
+	}
 	job, err = scanJob(tx.QueryRow(ctx, `
 		INSERT INTO jobs (id, owner, token_id, sku, spec, metadata)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING `+jobColumns,
-		NewJobID(time.Now()), nj.Owner, nj.TokenID, nj.SKU, []byte(nj.Spec), metaJSON))
+		id, nj.Owner, nj.TokenID, nj.SKU, []byte(nj.Spec), metaJSON))
 	if err != nil {
 		return Job{}, false, fmt.Errorf("store: insert job: %w", err)
 	}
@@ -209,6 +219,12 @@ func insertJob(ctx context.Context, tx pgx.Tx, nj NewJob, idem *Idempotency) (jo
 		}
 		if err != nil {
 			return Job{}, false, fmt.Errorf("store: bind idempotency key: %w", err)
+		}
+	}
+	for _, ne := range nj.Events {
+		ne.JobID = job.ID
+		if _, err := appendEventTx(ctx, tx, ne); err != nil {
+			return Job{}, false, err
 		}
 	}
 	return job, false, nil
@@ -323,6 +339,47 @@ func (s *Store) List(ctx context.Context, p ListParams) (Page, error) {
 // The check and the write are one statement, so two racing updates cannot
 // both succeed from the same source state.
 func (s *Store) UpdateStatus(ctx context.Context, id string, to Status, jobErr *JobError) (Job, error) {
+	return updateStatus(ctx, s.pool, id, to, jobErr)
+}
+
+// UpdateStatusWithEvent is UpdateStatus and the event that announces it, in
+// one transaction (docs/spec/events.md): a crash between the two cannot leave
+// a terminal job without its terminal webhook, and a refused transition
+// writes no event. event builds the event from the updated job; nil from it
+// means none.
+func (s *Store) UpdateStatusWithEvent(ctx context.Context, id string, to Status, jobErr *JobError, event func(Job) (*NewEvent, error)) (Job, error) {
+	var job Job
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		if job, err = updateStatus(ctx, tx, id, to, jobErr); err != nil {
+			return err
+		}
+		return appendBuilt(ctx, tx, job, event)
+	})
+	if err != nil {
+		return Job{}, err
+	}
+	return job, nil
+}
+
+func appendBuilt(ctx context.Context, tx pgx.Tx, job Job, event func(Job) (*NewEvent, error)) error {
+	if event == nil {
+		return nil
+	}
+	ne, err := event(job)
+	if err != nil || ne == nil {
+		return err
+	}
+	ne.JobID = job.ID
+	_, err = appendEventTx(ctx, tx, *ne)
+	return err
+}
+
+type rowQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func updateStatus(ctx context.Context, q rowQuerier, id string, to Status, jobErr *JobError) (Job, error) {
 	if !to.Valid() {
 		return Job{}, fmt.Errorf("%w: %q", ErrInvalidStatus, to)
 	}
@@ -334,7 +391,7 @@ func (s *Store) UpdateStatus(ctx context.Context, id string, to Status, jobErr *
 		}
 		errJSON = b
 	}
-	job, err := scanJob(s.pool.QueryRow(ctx, `
+	job, err := scanJob(q.QueryRow(ctx, `
 		UPDATE jobs SET
 			status      = $2,
 			error       = COALESCE($3::jsonb, error),
@@ -351,7 +408,7 @@ func (s *Store) UpdateStatus(ctx context.Context, id string, to Status, jobErr *
 		return Job{}, err
 	}
 	var from string
-	err = s.pool.QueryRow(ctx, `SELECT status FROM jobs WHERE id = $1`, id).Scan(&from)
+	err = q.QueryRow(ctx, `SELECT status FROM jobs WHERE id = $1`, id).Scan(&from)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Job{}, ErrNotFound
 	}
@@ -359,6 +416,19 @@ func (s *Store) UpdateStatus(ctx context.Context, id string, to Status, jobErr *
 		return Job{}, err
 	}
 	return Job{}, fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, from, to)
+}
+
+// ActiveJobs returns every job not yet in a terminal state, across owners,
+// oldest first. The caller is the process itself at boot, not a customer.
+func (s *Store) ActiveJobs(ctx context.Context) ([]Job, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT `+jobColumns+` FROM jobs
+		WHERE status IN ('queued', 'provisioning', 'running')
+		ORDER BY created_at, id`)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (Job, error) { return scanJob(r) })
 }
 
 // PurgeExpiredIdempotencyKeys deletes keys older than IdempotencyRetention

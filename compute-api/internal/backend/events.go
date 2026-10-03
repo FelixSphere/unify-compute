@@ -90,3 +90,12 @@ type Sink interface {
 type SinkFunc func(ctx context.Context, e Event) error
 
 func (f SinkFunc) Emit(ctx context.Context, e Event) error { return f(ctx, e) }
+
+// UpObserver is an optional extension of Sink. A sink that implements it is
+// told each time a running attempt is observed with its cluster UP and its job
+// not ended, so metering can advance to that moment (metering.md I3: never
+// past the last observation). It is informational: an error is logged and
+// does not hold the attempt back.
+type UpObserver interface {
+	ObservedUp(ctx context.Context, jobID string, attempt int, at time.Time) error
+}

@@ -1,0 +1,434 @@
+// Package jobs is the wiring between the pieces that run a compute job: the
+// job store, the console hold and usage ledger, the SkyPilot backend and the
+// event log (docs/spec/job-api.md, metering.md, backend.md, events.md). The
+// HTTP handlers in package api call it; it knows nothing about HTTP.
+//
+// Three adapters live here, each the "for the wiring task" half of an
+// interface another package defined:
+//
+//   - backendStore (backend.Store): every status change the backend makes is
+//     written together with its job.* event, in one transaction;
+//   - sink (backend.Sink, backend.UpObserver): lifecycle edges become ledger
+//     Lifecycle calls, so GPU metering starts at cluster UP and stops at the
+//     attempt's end;
+//   - actions (ledger.Actions): the ledger's decision to stop a job is
+//     carried out through the backend, and its notices become events.
+package jobs
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/url"
+	"sync"
+	"time"
+
+	"github.com/FelixSphere/unify-compute/compute-api/internal/backend"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/console"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/events"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/ledger"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/quota"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/sku"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/store"
+)
+
+var (
+	// ErrBackendUnavailable: this deployment has no SkyPilot API server, so
+	// nothing can be launched (upstreams.md: 503 upstream_unavailable).
+	ErrBackendUnavailable = errors.New("jobs: no SkyPilot API server is configured")
+	// ErrConsoleUnavailable: the hold could not be placed because the console
+	// did not answer usably. Nothing was persisted.
+	ErrConsoleUnavailable = errors.New("jobs: console bridge unavailable")
+	// ErrTerminal refuses a cancel of a job whose outcome is already decided.
+	ErrTerminal = errors.New("jobs: job has already ended")
+	// ErrUnrunnable is a spec the API accepted but the backend cannot
+	// translate: a validation gap, not a customer error.
+	ErrUnrunnable = errors.New("jobs: spec cannot be launched")
+)
+
+// Intervals of the background loops. LedgerTick is the settlement cadence
+// (metering.md R1).
+const (
+	PollInterval     = 15 * time.Second
+	LedgerTick       = ledger.SettleInterval
+	DeliveryInterval = 5 * time.Second
+	PurgeInterval    = time.Hour
+)
+
+type Config struct {
+	Store   *store.Store
+	Console *console.Client
+	// SkyPilot is the API server client; nil leaves the service able to read
+	// and cancel jobs but not to submit them.
+	SkyPilot  *backend.Client
+	Catalogue *sku.Catalogue
+	// Quota, when set, is enforced inside the admission transaction.
+	Quota *quota.Enforcer
+	// Outputs uploads spec.outputs (internal/artifacts); nil refuses them.
+	Outputs backend.OutputUploader
+	Now     func() time.Time
+	Log     *slog.Logger
+}
+
+type Service struct {
+	Store   *store.Store
+	Ledger  *ledger.Engine
+	Backend *backend.Backend
+	Events  *events.Worker
+
+	catalogue *sku.Catalogue
+	quota     *quota.Enforcer
+	task      backend.TaskOptions
+	now       func() time.Time
+	log       *slog.Logger
+
+	mu sync.Mutex
+	// ended holds each attempt's ended edge from Emit until the status write
+	// it precedes, which needs its Failure and Placement for the event.
+	ended map[string]backend.Event
+	// stops are the ledger's requests to stop a job, carried out by the
+	// backend loop. They cannot be carried out inside Actions.Stop: the
+	// ledger calls it holding its lock, and stopping a job reports the end
+	// back to the ledger.
+	stops map[string]ledger.EndReason
+}
+
+func New(cfg Config) *Service {
+	now := cfg.Now
+	if now == nil {
+		now = time.Now
+	}
+	// Every input that is not an https:// URL would be copied with our own
+	// cloud credentials (ADR-0005), so a deployment never launches one.
+	task := backend.TaskOptions{Outputs: cfg.Outputs, HTTPSInputsOnly: true}
+	s := &Service{
+		Store: cfg.Store, catalogue: cfg.Catalogue, quota: cfg.Quota, task: task, now: now, log: cfg.Log,
+		ended: map[string]backend.Event{}, stops: map[string]ledger.EndReason{},
+	}
+	s.Ledger = ledger.New(cfg.Store.Pool(), cfg.Console, actions{s}, now)
+	if cfg.SkyPilot != nil {
+		s.Backend = backend.New(cfg.SkyPilot, backendStore{s}, sink{s}, backend.Config{
+			Task: task, Now: now,
+			Logf: func(format string, args ...any) { s.log.Warn(fmt.Sprintf(format, args...)) },
+		})
+	}
+	s.Events = events.NewWorker(cfg.Store, cfg.Log)
+	s.Events.Now = now
+	return s
+}
+
+// --- submit --------------------------------------------------------------
+
+// Submission is a validated, placed submit. Candidates is what
+// upstream.Registry.Place resolved.
+type Submission struct {
+	Owner       string
+	UserID      int
+	TokenID     int
+	SKU         sku.SKU
+	Candidates  []sku.Provider
+	Spec        backend.Spec
+	Metadata    map[string]string
+	Idempotency *store.Idempotency
+}
+
+// Submit runs job-api.md's submit flow after validation: quota and the
+// console hold inside one admission transaction, the job persisted queued
+// with its job.queued event, then handed to the backend. created is false on
+// an idempotent replay, which returns the original job and touches nothing.
+//
+// A refused hold returns *ledger.InsufficientBalanceError and a quota
+// refusal *quota.ExceededError; in both cases no job exists.
+func (s *Service) Submit(ctx context.Context, sub Submission) (job store.Job, created bool, err error) {
+	if s.Backend == nil {
+		return store.Job{}, false, ErrBackendUnavailable
+	}
+	id := store.NewJobID(s.now())
+	bj := backend.Job{ID: id, Attempt: 1, Spec: sub.Spec, SKU: sub.SKU, Candidates: sub.Candidates, Owner: sub.Owner}
+	if err := s.CheckSpec(bj); err != nil {
+		return store.Job{}, false, fmt.Errorf("%w: %w", ErrUnrunnable, err)
+	}
+	spec, err := json.Marshal(sub.Spec)
+	if err != nil {
+		return store.Job{}, false, err
+	}
+	queued, err := newEvent(events.JobQueued, events.QueuedData{SKU: sub.SKU.ID})
+	if err != nil {
+		return store.Job{}, false, err
+	}
+
+	// touched is set once the console may hold something for this job id,
+	// which a failure after that point must give back.
+	touched := false
+	place := func(ctx context.Context) error {
+		touched = true
+		_, err := s.Ledger.PlaceHold(ctx, ledger.Job{
+			JobID: id, UserID: sub.UserID, TokenID: sub.TokenID, SKU: sub.SKU.ID,
+			RateUSDPerHour: sub.SKU.PriceUSDPerHour, MaxRuntimeSeconds: int64(sub.Spec.MaxRuntimeSeconds),
+			SubmittedAt: s.now(),
+		})
+		var refused *ledger.InsufficientBalanceError
+		switch {
+		case err == nil, errors.As(err, &refused):
+			return err
+		case consoleFailure(err):
+			return fmt.Errorf("%w: %v", ErrConsoleUnavailable, err)
+		}
+		return err
+	}
+	admit := func(ctx context.Context, _ []store.SKUUsage) error { return place(ctx) }
+	if s.quota != nil {
+		admit = s.quota.Admit(sub.Owner, sub.SKU, place)
+	}
+	tokenID := int64(sub.TokenID)
+	job, created, err = s.Store.CreateAdmitted(ctx, store.NewJob{
+		ID: id, Owner: sub.Owner, TokenID: &tokenID, SKU: sub.SKU.ID, Spec: spec, Metadata: sub.Metadata,
+		Events: []store.NewEvent{*queued},
+	}, sub.Idempotency, admit)
+	if err != nil {
+		var refused *ledger.InsufficientBalanceError
+		if touched && !errors.As(err, &refused) {
+			s.abandon(ctx, id)
+		}
+		return store.Job{}, false, err
+	}
+	if !created {
+		return job, false, nil
+	}
+
+	// The job is accepted; from here a failure is the job's, not the
+	// request's. Launch must not die with the customer's connection.
+	if err := s.Backend.Launch(context.WithoutCancel(ctx), bj); err != nil {
+		s.log.Error("launch after persist", "job", id, "err", err)
+	}
+	job, err = s.Store.Get(ctx, sub.Owner, id)
+	return job, true, err
+}
+
+// CheckSpec reports whether the backend can launch j as given, with this
+// deployment's options: the same translation Launch does, so a spec that
+// passes here cannot fail there. The errors are backend's (ErrNoImage,
+// ErrInputSource, ErrOutputsUnsupported, ...).
+func (s *Service) CheckSpec(j backend.Job) error {
+	if j.ID == "" {
+		j.ID = store.NewJobID(s.now())
+	}
+	if j.Attempt == 0 {
+		j.Attempt = 1
+	}
+	_, err := backend.TaskFor(j, s.task)
+	return err
+}
+
+func (s *Service) abandon(ctx context.Context, jobID string) {
+	err := s.Ledger.Abandon(context.WithoutCancel(ctx), jobID)
+	if err != nil && !errors.Is(err, ledger.ErrUnknownJob) {
+		s.log.Error("abandon hold of unpersisted job; the ledger retries the release", "job", jobID, "err", err)
+	}
+}
+
+// consoleFailure is whether err came from talking to the console rather
+// than from our own database.
+func consoleFailure(err error) bool {
+	var ce *console.Error
+	var ue *url.Error
+	return errors.As(err, &ce) || errors.As(err, &ue) || errors.Is(err, console.ErrRequestTooLarge) ||
+		errors.Is(err, context.DeadlineExceeded)
+}
+
+// --- reads and cancel ------------------------------------------------------
+
+// Usage is the ledger's view of one job. A job with no hold (one written
+// straight to the store, never submitted) reads as zero.
+func (s *Service) Usage(ctx context.Context, j store.Job) (ledger.JobUsage, error) {
+	u, err := s.Ledger.Usage(ctx, j.ID)
+	if errors.Is(err, ledger.ErrUnknownJob) {
+		var spec backend.Spec
+		_ = json.Unmarshal(j.Spec, &spec)
+		u = ledger.JobUsage{MaxRuntimeSeconds: int64(spec.MaxRuntimeSeconds)}
+		if item, err := s.catalogue.Get(j.SKU); err == nil {
+			u.RateUSDPerHour = item.PriceUSDPerHour
+		}
+		return u, nil
+	}
+	return u, err
+}
+
+// Cancel ends the job at acceptedAt, which is where GPU metering stops
+// (metering.md B11), whatever the teardown then takes.
+func (s *Service) Cancel(ctx context.Context, owner, id string, acceptedAt time.Time) (store.Job, error) {
+	job, err := s.Store.Get(ctx, owner, id)
+	if err != nil {
+		return store.Job{}, err
+	}
+	if job.Status.Terminal() {
+		return job, ErrTerminal
+	}
+	tracked := false
+	if s.Backend != nil {
+		err := s.Backend.Cancel(context.WithoutCancel(ctx), id, acceptedAt)
+		switch {
+		case errors.Is(err, backend.ErrAlreadyEnded):
+			return job, ErrTerminal
+		case errors.Is(err, backend.ErrUnknownJob):
+		case err != nil:
+			// The end is decided and in the backend's outbox; it becomes
+			// durable on a later step.
+			tracked = true
+			s.log.Warn("cancel: recorded, not yet durable", "job", id, "err", err)
+		default:
+			tracked = true
+		}
+	}
+	if !tracked {
+		if err := s.endUntracked(ctx, id, nil); err != nil {
+			return store.Job{}, err
+		}
+	}
+	return s.Store.Get(ctx, owner, id)
+}
+
+// endUntracked cancels a job the backend is not running: one whose launch
+// never started, or, after a restart, one whose attempt this process does
+// not know (backend.md open question 2).
+func (s *Service) endUntracked(ctx context.Context, id string, jobErr *store.JobError) error {
+	_, err := s.Store.UpdateStatusWithEvent(ctx, id, store.StatusCancelled, jobErr, s.statusEvent(store.StatusCancelled))
+	if err != nil && !errors.Is(err, store.ErrInvalidTransition) {
+		return err
+	}
+	return s.finish(ctx, id)
+}
+
+// Logs copies what the backend can still read of the job's output. Nothing
+// is retained after teardown yet (backend.md open question 4), so a finished
+// or never-launched job has no logs.
+func (s *Service) Logs(ctx context.Context, owner, id string, w interface{ Write([]byte) (int, error) }) error {
+	if _, err := s.Store.Get(ctx, owner, id); err != nil {
+		return err
+	}
+	if s.Backend == nil {
+		return nil
+	}
+	err := s.Backend.Logs(ctx, id, w)
+	if errors.Is(err, backend.ErrUnknownJob) {
+		return nil
+	}
+	return err
+}
+
+// --- background work -------------------------------------------------------
+
+// Step runs one round of the backend loop: every attempt observed once, then
+// the ledger's pending stops carried out. Tests call it to drive time.
+func (s *Service) Step(ctx context.Context) {
+	if s.Backend != nil {
+		s.Backend.StepAll(ctx)
+	}
+	s.ProcessStops(ctx)
+}
+
+// Run starts the background loops and returns when ctx ends and every loop
+// has stopped.
+func (s *Service) Run(ctx context.Context) {
+	var wg sync.WaitGroup
+	every := func(name string, d time.Duration, f func(context.Context) error) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			t := time.NewTicker(d)
+			defer t.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+				}
+				if err := f(ctx); err != nil && ctx.Err() == nil {
+					s.log.Error(name, "err", err)
+				}
+			}
+		}()
+	}
+	every("backend step", PollInterval, func(ctx context.Context) error { s.Step(ctx); return nil })
+	every("ledger tick", LedgerTick, s.Ledger.Tick)
+	every("idempotency purge", PurgeInterval, func(ctx context.Context) error {
+		_, err := s.Store.PurgeExpiredIdempotencyKeys(ctx)
+		return err
+	})
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		s.Events.Run(ctx, DeliveryInterval)
+	}()
+	wg.Wait()
+}
+
+// ProcessStops carries out the ledger's stop requests.
+func (s *Service) ProcessStops(ctx context.Context) {
+	s.mu.Lock()
+	pending := make(map[string]ledger.EndReason, len(s.stops))
+	for id, r := range s.stops {
+		pending[id] = r
+	}
+	s.mu.Unlock()
+	for id, reason := range pending {
+		jobErr := &store.JobError{Code: string(reason), Message: stopMessages[reason]}
+		var err error = backend.ErrUnknownJob
+		if s.Backend != nil {
+			err = s.Backend.Stop(ctx, id, s.now(), &backend.Failure{Code: jobErr.Code, Message: jobErr.Message})
+		}
+		switch {
+		case errors.Is(err, backend.ErrUnknownJob):
+			err = s.endUntracked(ctx, id, jobErr)
+		case errors.Is(err, backend.ErrAlreadyEnded):
+			err = nil
+		case err != nil:
+			s.log.Warn("stop: recorded, not yet durable", "job", id, "reason", reason, "err", err)
+			err = nil
+		}
+		if err != nil {
+			s.log.Error("stop job", "job", id, "reason", reason, "err", err)
+			continue
+		}
+		s.mu.Lock()
+		delete(s.stops, id)
+		s.mu.Unlock()
+	}
+}
+
+var stopMessages = map[ledger.EndReason]string{
+	ledger.EndBalanceExhausted:   "Stopped because the Unify API balance could not cover more runtime. Usage up to the stop is charged; top up to run again.",
+	ledger.EndBillingUnavailable: "Stopped because Unify API billing could not be reached for longer than the job's hold covered. Usage up to the stop is recorded and charged once billing answers.",
+}
+
+// finish closes the job's metering. The ledger commits its own state first
+// and then talks to the console; a console failure after that commit is the
+// ledger's to retry on its next tick, not a reason to hold the job back.
+func (s *Service) finish(ctx context.Context, id string) error {
+	err := s.Ledger.Finished(ctx, id)
+	if err == nil || errors.Is(err, ledger.ErrUnknownJob) {
+		return nil
+	}
+	if h, herr := s.Ledger.Hold(ctx, id); herr == nil && (h.State == "closing" || h.State == "closed") {
+		s.log.Warn("final settle deferred to the ledger tick", "job", id, "err", err)
+		return nil
+	}
+	return err
+}
+
+func newEvent(t events.Type, data any) (*store.NewEvent, error) {
+	raw := json.RawMessage(`{}`)
+	if data != nil {
+		b, err := json.Marshal(data)
+		if err != nil {
+			return nil, err
+		}
+		raw = b
+	}
+	if err := events.Validate(t, raw); err != nil {
+		return nil, err
+	}
+	return &store.NewEvent{Type: string(t), Data: raw}, nil
+}

@@ -1,7 +1,7 @@
 # Compute upstreams — functional requirements
 
 - **Status:** Requirements R1–R9 implemented in `compute-api/` (catalogue,
-  placement, validation, API exposure). R10 is partial (see its row).
+  placement, validation, API exposure) and R10 (placement recorded and served).
   R11–R15 are planned and depend on the job backend, the ledger, or a process
   outside the code. Each item says which.
 - Decision record: [ADR-0006](../adr/0006-upstreams-are-skypilot-clouds.md).
@@ -30,7 +30,7 @@ context, or an SSH node pool.
 | R7 | A submit may restrict placement to a subset of the SKU's providers (`"providers": ["aws"]`). Naming a provider the SKU does not offer is `400 provider_not_offered`. Naming one the deployment has not enabled is `503 upstream_unavailable`. | Implemented |
 | R8 | Placement resolves to one SkyPilot `resources` block. One candidate is emitted flat; several are emitted under `any_of` in catalogue order, and SkyPilot fails over between them on capacity. Catalogue order is therefore the preference order and is a reviewed change. | Implemented: `skypilot.ResourcesFor` |
 | R9 | `max_runtime_seconds` has a platform ceiling of 24 hours. Above it is `400 runtime_over_ceiling`. An `available: false` SKU is `400 sku_unavailable`. Both are checked before anything is persisted or held. | Implemented |
-| R10 | Once a job is running, the Job object records where it landed: `placement: {cloud, region, instance_type}`. Metering, reconciliation, and the customer's invoice line all key off this. | Partial: the backend writes it at cluster `UP` (`store.SetPlacement`, [`backend.md`](backend.md)); not live until the backend is wired to submit |
+| R10 | Once a job is running, the Job object records where it landed: `placement: {cloud, region, instance_type}`. Metering, reconciliation, and the customer's invoice line all key off this. | Implemented: the backend writes it at cluster `UP`, with a `job.placed` event, before the job reads `running` (`store.SetPlacementWithEvent`, [`backend.md`](backend.md)); `GET /jobs/{id}` serves it |
 
 ## Money and trust
 
@@ -46,7 +46,7 @@ context, or an SSH node pool.
 
 - `GET /compute/v1/skus` — SKU objects gain `accelerator`, `tier`, `interruptible`, `providers`.
 - `GET /compute/v1/upstreams` — public; every cloud the catalogue references, whether this deployment has it enabled, and which SKUs it serves.
-- `POST /compute/v1/jobs` — validates `sku`, `providers`, and `spec.max_runtime_seconds` and returns the 400/503 errors above before the `501 not_implemented` that the unbuilt backend still returns.
+- `POST /compute/v1/jobs` — validates `sku`, `providers`, and `spec.max_runtime_seconds` and returns the 400/503 errors above before anything is held; a deployment without a SkyPilot API server (`SKYPILOT_API_SERVER_URL`) is also `503 upstream_unavailable`. The dark build (no job store) still answers what passes `501 not_implemented`.
 
 ## Out of scope for now
 

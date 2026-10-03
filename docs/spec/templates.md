@@ -2,10 +2,11 @@
 
 - **Status:** Spec, partially implemented. The catalogue file, boot
   validation, `GET /compute/v1/templates` and template resolution on
-  `POST /compute/v1/jobs` exist in `compute-api/internal/template/`. Nothing a
-  template resolves to is run yet: submit still ends in `501 not_implemented`
-  because the SkyPilot backend is not wired. No template has been run through
-  compute-api.
+  `POST /compute/v1/jobs` exist in `compute-api/internal/template/`, and a
+  resolved template is submitted and launched like any job wherever the
+  binary has a job store (`internal/jobs`). It has run end to end only
+  against the fake SkyPilot API server in compute-api's tests; no template
+  has run on a real cloud yet.
 - Task C7 in [`product-design.md`](../product-design.md). Field names are
   those of the job spec in [`job-api.md`](job-api.md).
 
@@ -101,7 +102,7 @@ including unavailable ones and their reasons, sorted by id.
   "template": "batch-embed",
   "sku": "a10g-24gb-x1",
   "spec": {
-    "inputs": [{ "source": "s3://acme-data/requests/", "mount": "/mnt/in" }],
+    "inputs": [{ "source": "https://acme-data.s3.amazonaws.com/requests.jsonl?X-Amz-Signature=…", "mount": "/mnt/in" }],
     "env": { "MODEL": "BAAI/bge-m3", "MODEL_REVISION": "" },
     "max_runtime_seconds": 1800
   }
@@ -127,16 +128,19 @@ Validated in this order, after the body parses and before anything
    template error.
 
 What survives is a full spec (`image`, `command`, `env`, `inputs`, `outputs`,
-`max_runtime_seconds`) plus `sku` and `providers`. Today the answer is then
-`501 not_implemented`. *Planned:* the Job object records the template id and
-the resolved spec, so a later change to the template does not change what an
-old job says it ran.
+`max_runtime_seconds`) plus `sku` and `providers`, submitted exactly as a
+hand-written spec would be (`job-api.md`), including its launchability
+checks: every input `source` must be an `https://` URL, and because the run
+step saves it under the URL's last path segment, the batch templates need a
+URL whose path ends in `requests.jsonl`. The Job records the resolved spec,
+so a later change to the template does not change what an old job says it
+ran. *Planned:* the Job also records the template id; it does not yet.
 
 ## Curated templates
 
 | id | Image | Default SKU | Available |
 |---|---|---|---|
-| `batch-embed` | `vllm/vllm-openai:v0.30.0-cu129@sha256:a67f8f18…` | `a10g-24gb-x1` | yes (in the file; nothing runs until the backend exists) |
+| `batch-embed` | `vllm/vllm-openai:v0.30.0-cu129@sha256:a67f8f18…` | `a10g-24gb-x1` | yes (not yet run on a real cloud) |
 | `batch-infer-vllm` | same | `a10g-24gb-x1` | yes (same caveat) |
 | `finetune-lora` | none yet | `a10g-24gb-x1-spot` | no |
 
@@ -191,9 +195,10 @@ expressed as a template. What is missing:
 3. **Runtime enforcement.** The reference run wraps only `train.py` in
    `timeout $MAX_RUNTIME_SECONDS`, leaving time for the last eval and sync.
    SkyPilot has no task-level timeout, so the template drops `timeout` and
-   relies on the backend enforcing `max_runtime_seconds` for the whole job.
-   That enforcement is planned, not built; and a job killed at the limit loses
-   its final eval, which the reference run did not.
+   relies on the backend enforcing `max_runtime_seconds` for the whole job,
+   which it does (`backend.md`, "Max runtime"); a job killed at the limit
+   loses its final eval and its output upload, which the reference run did
+   not.
 4. **Disk.** The reference task asks for `disk_size: 100`. Neither the job spec
    nor the SKU has a disk field.
 5. **Secrets.** `HF_TOKEN` is left out on purpose (Qwen3 is not gated). The job

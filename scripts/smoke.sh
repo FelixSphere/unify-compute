@@ -47,11 +47,25 @@ body_has "staging has aws enabled" '"cloud":"aws","enabled":true'
 valid='{"sku":"a10g-24gb-x1","spec":{"max_runtime_seconds":600}}'
 check "POST /compute/v1/jobs without key -> 401" 401 \
   "$(code -X POST -H 'Content-Type: application/json' -d "$valid" "$BASE_URL/compute/v1/jobs")"
-check "POST /compute/v1/jobs unknown sku -> 400" 400 \
-  "$(code -X POST -H 'Authorization: Bearer sk-smoke-test-key' -H 'Content-Type: application/json' -d '{"sku":"nope","spec":{"max_runtime_seconds":600}}' "$BASE_URL/compute/v1/jobs")"
-body_has "unknown sku is named" '"code":"unknown_sku"'
-check "POST /compute/v1/jobs valid -> 501 (unbuilt)" 501 \
-  "$(code -X POST -H 'Authorization: Bearer sk-smoke-test-key' -H 'Content-Type: application/json' -d "$valid" "$BASE_URL/compute/v1/jobs")"
+check "GET /compute/v1/jobs without key -> 401" 401 "$(code "$BASE_URL/compute/v1/jobs")"
+
+# A made-up key. A build with a job store verifies it through the console
+# bridge and refuses it before validation: 401 invalid_key where the bridge
+# answers, 503 console_unavailable where it is dark or CONSOLE_URL is unset
+# (production today). The dark build (no DATABASE_URL) checks only the key's
+# shape, so the request reaches validation: 400 unknown_sku, then 501.
+# Accepting both keeps the smoke meaningful across a rollback.
+made_up() {
+  local name="$1" body="$2" dark_status="$3" dark_code="$4" got
+  got="$(code -X POST -H 'Authorization: Bearer sk-smoke-test-key' -H 'Content-Type: application/json' -d "$body" "$BASE_URL/compute/v1/jobs")"
+  case "$got" in
+    401) check "$name (bridge live) -> 401" 401 "$got"; body_has "made-up key is refused" '"code":"invalid_key"' ;;
+    503) check "$name (bridge dark) -> 503" 503 "$got"; body_has "key cannot be verified" '"code":"console_unavailable"' ;;
+    *)   check "$name (dark build) -> $dark_status" "$dark_status" "$got"; body_has "dark build answers $dark_code" "\"code\":\"$dark_code\"" ;;
+  esac
+}
+made_up "POST /compute/v1/jobs unknown sku, made-up key" '{"sku":"nope","spec":{"max_runtime_seconds":600}}' 400 unknown_sku
+made_up "POST /compute/v1/jobs valid, made-up key" "$valid" 501 not_implemented
 
 # The compute host must not proxy the console and vice versa.
 check "compute host does not serve console /api/status" 404 "$(code "$BASE_URL/api/status")"

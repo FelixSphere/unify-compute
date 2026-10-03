@@ -42,11 +42,15 @@ func scanEvent(row pgx.Row) (Event, error) {
 // deliveries, which is what makes webhook delivery at-least-once rather than
 // at-most-once. A job id that does not exist is ErrNotFound.
 func (s *Store) AppendEvent(ctx context.Context, ne NewEvent) (Event, error) {
+	return appendEventTx(ctx, s.pool, ne)
+}
+
+func appendEventTx(ctx context.Context, q rowQuerier, ne NewEvent) (Event, error) {
 	data := ne.Data
 	if len(data) == 0 {
 		data = json.RawMessage(`{}`)
 	}
-	ev, err := scanEvent(s.pool.QueryRow(ctx, `
+	ev, err := scanEvent(q.QueryRow(ctx, `
 		WITH ev AS (
 			INSERT INTO job_events (id, job_id, type, data)
 			SELECT $1, id, $3, $4 FROM jobs WHERE id = $2
