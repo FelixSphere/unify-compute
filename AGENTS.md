@@ -64,8 +64,8 @@ Current status (say what exists rather than describing targets as shipped):
   Applied on 2026-10-02: `shared/ecr`, `shared/github-oidc`, staging (VPC
   10.72/16, instance `i-06125c23285803d7a`) and production (VPC 10.71/16,
   instance `i-07dd2f6d313a0dafd`). Both run compute-api and the site at
-  `ec4bd964…`/`cd7077d3…` (built from a8562dd; records in
-  `deploy/releases/`). Staging also runs its own console. Production's
+  compute-api `ec4bd964…` (a8562dd) and site `7b9bb659…` (ea56779, v4 tab
+  icons). Records are in `deploy/releases/`. Staging also runs its own console. Production's
   compute-api is dark: no bridge secret and no `CONSOLE_URL`, and job
   submission returns 501 there as everywhere. `compute.unifyai.us` was cut over
   from OpenAI Sites to production's ALB on 2026-10-02 (Route53 change

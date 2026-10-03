@@ -53,10 +53,12 @@ account. Two consequences:
 - **Release pipeline:** `.github/workflows/release.yml`, dispatch only.
   GitHub environments `staging` and `production` exist, both main-only
   (required reviewers refused on this plan). `mode=status` on staging has run
-  once (run 37050107408). Released `ec4bd964…`/`cd7077d3…` (a8562dd) to
-  staging (runs 37054858851, 37055453977) and production (37058109546);
-  records are in `deploy/releases/`. Production has no `PREVIOUS_RELEASE`
-  yet, so `mode=rollback` refuses there until a second release.
+  once (run 37050107408). Go-live released `ec4bd964…`/`cd7077d3…` (a8562dd)
+  to staging (runs 37054858851, 37055453977) and production (37058109546).
+  `site-icons-v4` then released site `7b9bb659…` (ea56779) with the same
+  compute-api to staging (37083281875) and production (37083501562).
+  Records are in `deploy/releases/`. Both hosts now have a `PREVIOUS_RELEASE`
+  (site `cd7077d3…`, still in ECR), so `mode=rollback` works on both.
   `DNS_CUTOVER=done`, and production's `PUBLIC_ORIGIN` is
   `https://compute.unifyai.us`.
 - **Console:** production `app.unifyapi.ai` belongs to the UnifyAPI CI/CD agent.
