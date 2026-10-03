@@ -59,7 +59,7 @@ states a pipeline waits on, pushed by a signed webhook.
 | `job.preempted` | Job entered `interrupted` (spot preemption, or the provider took the node) | `{ "provider": "aws" }` | **yes** |
 | `job.succeeded` | Process exited 0 | `{}` | **yes** |
 | `job.failed` | Job entered `failed` | `{ "error": { "code", "message" }, "retryable": true }` | **yes** |
-| `job.cancelled` | Job entered `cancelled` | `{ "reason": "customer" \| "balance_exhausted" \| "billing_unavailable" }` | **yes** |
+| `job.cancelled` | Job entered `cancelled` | `{ "reason": "customer" \| "balance_exhausted" \| "billing_unavailable" \| "queue_expired" }` | **yes** |
 | `billing.hold_extended` | `extend` succeeded on the console | `{ "hold_usd": "2.5400", "expires_at": 1757527200 }` | no |
 | `billing.balance_exhausted` | An extension was refused and the job is about to be cancelled | `{}` | no |
 
@@ -82,11 +82,14 @@ the same transaction as the job row; every later `job.*` event in the same
 transaction as the status change or placement it announces
 (`store.UpdateStatusWithEvent`, `store.SetPlacementWithEvent`), so a crash
 between the two cannot lose the terminal webhook and a refused transition
-writes no event. `job.placed` precedes `job.running`. `job.preempted` covers
+writes no event. That is also what keeps a restart from emitting a terminal
+event twice: the process that takes a job over writes the same transition,
+which the store refuses once it has happened. `job.placed` precedes `job.running`. `job.preempted` covers
 every `interrupted` job, preemption or provider fault; its `provider` is
 `"unknown"` when the job never reached a placement. `job.cancelled.reason`
 is `customer` unless compute-api stopped the job (`balance_exhausted`,
-`billing_unavailable`). `billing.balance_exhausted` is written on the first
+`billing_unavailable`), or did not start it in time after a restart
+(`queue_expired`, backend.md "Restart"). `billing.balance_exhausted` is written on the first
 refused extension (metering.md H4), about 50 minutes before the job would be
 stopped.
 

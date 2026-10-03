@@ -79,15 +79,18 @@ type JobError struct {
 }
 
 type Job struct {
-	ID         string
-	Owner      string
-	TokenID    *int64
-	SKU        string
-	Status     Status
-	Spec       json.RawMessage
-	Metadata   map[string]string
-	Error      *JobError
-	Placement  json.RawMessage
+	ID        string
+	Owner     string
+	TokenID   *int64
+	SKU       string
+	Status    Status
+	Spec      json.RawMessage
+	Metadata  map[string]string
+	Error     *JobError
+	Placement json.RawMessage
+	// Candidates is where the job may be placed, as resolved at submit (a
+	// JSON array of sku.Provider); nil for a job stored without them.
+	Candidates json.RawMessage
 	CreatedAt  time.Time
 	StartedAt  *time.Time
 	FinishedAt *time.Time
@@ -106,6 +109,9 @@ type NewJob struct {
 	SKU      string
 	Spec     json.RawMessage
 	Metadata map[string]string
+	// Candidates is kept so a job relaunched by another process goes where
+	// this submit allowed (backend.md, "Restart"). Nil stores nothing.
+	Candidates json.RawMessage
 	// Events are appended in the insert's transaction, so a job never
 	// exists without its job.queued event. JobID is filled in.
 	Events []NewEvent
@@ -123,14 +129,14 @@ type Idempotency struct {
 // A key older than this is treated as unused even before it is purged.
 const IdempotencyRetention = 24 * time.Hour
 
-const jobColumns = `id, owner, token_id, sku, status, spec, metadata, error, placement,
+const jobColumns = `id, owner, token_id, sku, status, spec, metadata, error, placement, candidates,
 	created_at, started_at, finished_at, updated_at`
 
 func scanJob(row pgx.Row) (Job, error) {
 	var j Job
 	var status string
 	var meta, jobErr []byte
-	err := row.Scan(&j.ID, &j.Owner, &j.TokenID, &j.SKU, &status, &j.Spec, &meta, &jobErr, &j.Placement,
+	err := row.Scan(&j.ID, &j.Owner, &j.TokenID, &j.SKU, &status, &j.Spec, &meta, &jobErr, &j.Placement, &j.Candidates,
 		&j.CreatedAt, &j.StartedAt, &j.FinishedAt, &j.UpdatedAt)
 	if err != nil {
 		return Job{}, err
@@ -194,10 +200,10 @@ func insertJob(ctx context.Context, tx pgx.Tx, nj NewJob, idem *Idempotency) (jo
 		id = NewJobID(time.Now())
 	}
 	job, err = scanJob(tx.QueryRow(ctx, `
-		INSERT INTO jobs (id, owner, token_id, sku, spec, metadata)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO jobs (id, owner, token_id, sku, spec, metadata, candidates)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING `+jobColumns,
-		id, nj.Owner, nj.TokenID, nj.SKU, []byte(nj.Spec), metaJSON))
+		id, nj.Owner, nj.TokenID, nj.SKU, []byte(nj.Spec), metaJSON, nullJSON(nj.Candidates)))
 	if err != nil {
 		return Job{}, false, fmt.Errorf("store: insert job: %w", err)
 	}
@@ -228,6 +234,13 @@ func insertJob(ctx context.Context, tx pgx.Tx, nj NewJob, idem *Idempotency) (jo
 		}
 	}
 	return job, false, nil
+}
+
+func nullJSON(b json.RawMessage) []byte {
+	if len(b) == 0 {
+		return nil
+	}
+	return b
 }
 
 func (s *Store) replay(ctx context.Context, owner string, idem *Idempotency) (Job, bool, error) {
@@ -425,6 +438,20 @@ func (s *Store) ActiveJobs(ctx context.Context) ([]Job, error) {
 		SELECT `+jobColumns+` FROM jobs
 		WHERE status IN ('queued', 'provisioning', 'running')
 		ORDER BY created_at, id`)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (Job, error) { return scanJob(r) })
+}
+
+// RecentlyFinished returns every job that reached a terminal state within
+// the last `within`, across owners. The caller is the process itself, looking
+// for clusters an earlier process may have left up.
+func (s *Store) RecentlyFinished(ctx context.Context, within time.Duration) ([]Job, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT `+jobColumns+` FROM jobs
+		WHERE finished_at > now() - make_interval(secs => $1)
+		ORDER BY finished_at, id`, within.Seconds())
 	if err != nil {
 		return nil, err
 	}

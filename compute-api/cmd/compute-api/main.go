@@ -144,8 +144,11 @@ func main() {
 		} else {
 			log.Warn("SKYPILOT_API_SERVER_URL unset; job submission answers 503 upstream_unavailable")
 		}
+		// Elect: only the process holding the store's worker lock drives
+		// jobs, so the old and the new process of a rolling restart never
+		// both do (backend.md, "Restart").
 		cfg := jobs.Config{
-			Store: st, Console: bridge, SkyPilot: sky, Catalogue: cat, Log: log,
+			Store: st, Console: bridge, SkyPilot: sky, Catalogue: cat, Log: log, Elect: true,
 			Quota: &quota.Enforcer{Config: quotas, Catalogue: cat, Usage: st},
 		}
 		if art != nil {
@@ -156,16 +159,10 @@ func main() {
 		handler.Verifier, handler.JobService = verifier, svc
 		handler.Owner, handler.Events, handler.Jobs = verifier.Owner, st, st
 		log.Info("job store open", "quotas_enforced", true, "overrides", len(quotas.Owners))
-		// Attempts live in this process's memory (backend.md open question
-		// 2), so a job that was live when the last process stopped is not
-		// observed again. Say so rather than let it look tracked.
-		if live, err := st.ActiveJobs(ctx); err != nil {
-			log.Error("read live jobs", "err", err)
-		} else if len(live) > 0 {
-			for _, j := range live {
-				log.Warn("live job from an earlier process is not resumed", "job", j.ID, "status", j.Status, "owner", j.Owner)
-			}
-		}
+		// Before serving: a process that gets the lock now takes up every
+		// job an earlier process left live, from the ledger and SkyPilot.
+		// One that does not serves reads and submits and keeps trying.
+		svc.Elect(ctx)
 	}
 
 	srv := &http.Server{

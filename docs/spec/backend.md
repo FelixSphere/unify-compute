@@ -5,8 +5,10 @@
   server, and the lifecycle events below. `internal/jobs` wires it to
   `POST /compute/v1/jobs`, the ledger (C5) and the event log: its store
   writes each status change with its event, its sink feeds the ledger, and
-  the ledger's stop requests reach `Backend.Stop`. Nothing has been launched
-  on a real cloud.
+  the ledger's stop requests reach `Backend.Stop`. A restarted process
+  resumes live jobs from the ledger and SkyPilot, and only the process
+  holding the worker lock drives jobs ([Restart](#restart)). Nothing has
+  been launched on a real cloud.
 - Task: C4 in [`product-design.md`](../product-design.md).
 - Depends on: [ADR-0003](../adr/0003-skypilot-orchestration-foundation.md)
   (SkyPilot through its API server, pinned to v0.13.0),
@@ -219,6 +221,110 @@ becomes `max_runtime` at the cap. The task carries no in-cluster timeout, becaus
 wrapper would depend on coreutils being in the customer's image. Open
 question 3 covers the case where compute-api is not running.
 
+## Restart
+
+Every release restarts compute-api, and a rolling restart briefly runs two
+processes on one database. Attempt state lives in memory, so it is rebuilt
+from what outlives a process.
+
+**One driver.** Only the process holding the *worker lock* drives jobs: the
+backend poll loop, the ledger tick, and carrying out cancels. The lock is a
+session-level Postgres advisory lock, `pg_try_advisory_lock(0x636f6d70,
+hashtext(current_schema()))` (`store.TryWorkerLock`), held on one pooled
+connection for as long as the process drives. Postgres releases it when that
+session ends, including when the process is killed. The holder checks every
+5 s (`jobs.LockCheck`) that its session still holds the lock, and on failure
+stops its workers and forgets every attempt before trying again. A process
+without the lock retries every 5 s (`jobs.LockRetry`) and meanwhile:
+
+- serves every read;
+- accepts submits: the hold is placed and the job persisted `queued`, then
+  left for the holder, which launches it on its next round (within 15 s);
+- accepts cancels: the cancel is recorded with its acceptance time in
+  `job_cancel_requests` (migration `0004`) and the `202` shows the job as it
+  is. The holder carries it out at that acceptance time, so billing stops
+  there (B11) however long the hand-over takes. Every cancel, on the holder
+  too, is recorded first and the request is dropped only once the job has
+  ended, so a cancel also survives the process that accepted it dying.
+
+Webhook delivery and the idempotency purge run in every process; both were
+already safe to run concurrently.
+
+At boot, after `Migrate` and before the listener starts, the process tries
+for the lock once and, if it gets it, reconciles before serving. Each later
+poll round of the holder reconciles again, which is how jobs submitted on
+another process, and every live job after a hand-over, are taken up.
+
+**Rebuilding an attempt** (`jobs.Reconcile`, `Backend.Resume`). For every
+job in `queued`, `provisioning` or `running` that this process does not
+track:
+
+- the cluster name is `ClusterName(job, attempt)`, the attempt being the
+  ledger's newest (1 until retry exists);
+- `UpAt` is the ledger's `metering_attempts.started_at` and the last
+  observation of `UP` its `up_through` (C5 keeps one row per cluster
+  lifetime, written before the job reads `running`);
+- the placement is the job's stored one, and the placement candidates are
+  the ones resolved at submit, now stored on the job (`jobs.candidates`,
+  migration `0004`; a row from before it falls back to the SKU's providers);
+- SkyPilot's launch request for the cluster is found with
+  `/api/status?cluster_name=`, so an in-flight launch is adopted, never sent
+  twice. If SkyPilot no longer has it, the cluster queue is read without a
+  job id and the newest job is taken, as before a launch answer is known.
+
+The resumed attempt is then stepped at once: `/status`, and `/queue` while
+the cluster is `UP`, the same observations as any attempt.
+
+| Found | Action | Billing |
+|---|---|---|
+| `queued`, hold open, runtime left ≥ min(300 s, `max_runtime_seconds`) | Launched now, capped at the runtime left (below) | From the `UP` it is observed at, as any job |
+| `queued` or `provisioning`, less runtime left than that, or hold not open | `cancelled`, `error.code = queue_expired`, `job.cancelled` reason `queue_expired`; a launch in flight is cancelled and the cluster torn down | None; hold released in full (B10) |
+| `provisioning`, never `UP` | Launch request adopted, or the launch sent again under the same name; observed as usual | From observed `UP` (B2) |
+| Ledger attempt open, cluster `UP`, same cluster, job still running | Polling resumes; if the store never reached `running`, the `cluster_up` edge's placement and status write is redone | Downtime billed: metering continues from the last settled interval to the first observation after the restart, then as usual |
+| … job ended on the node (`/queue` terminal) | Ended at the node's `end_at` with the status the exit gives (`succeeded`, `failed`/`nonzero_exit`, `interrupted` for `FAILED_DRIVER`); final settle; terminal event and webhook; torn down | To the process exit (end rule 1), capped at `max_runtime_seconds` |
+| … past the cap while nobody watched | `failed`/`max_runtime_exceeded` at exactly `UpAt + max_runtime_seconds`; torn down | To exactly the cap (B16) |
+| Cluster absent, not `UP`, or `launched_at` later than the attempt's `UpAt` | `interrupted` (`provider_fault` on demand, `preempted` on spot); whatever has the name is torn down | To the last observed `UP`, the ledger's `up_through` (I3); remainder released |
+| Ledger attempt already ended (the store write was lost) | The status the ledger's end reason decides (`cancelled`, `cancelled` + `balance_exhausted`/`billing_unavailable`, `failed`/`max_runtime_exceeded`, `interrupted`); an `exited` end is observed as above, since only SkyPilot knows the exit code | Already in the ledger; unchanged |
+| Job ended, cluster still up (the process died between the end and `/down`) | Torn down. Looked for once per lock term among jobs that ended in the last 24 h, with one `/status` | None |
+
+The downtime is billed only when the cluster was `UP` throughout, which is
+taken from three facts: SkyPilot reports the same cluster `UP` now, its
+`launched_at` is not later than the attempt's `UpAt` (a cluster relaunched
+under the name is not ours), and its job is the one we launched, still
+running or ended by the node itself. compute-api never stops or restarts a
+cluster (autostop is `down: true`), so nothing else can bring one back `UP`.
+
+**Holds after a downtime.** Nothing extended the hold while no process was
+running. Before the first observation reports `UP` again, `ledger.Resume`
+extends it in one call to usage accrued until now plus one hour (H3's
+runway), re-sending first any extend the previous process left pending with
+its own `extend_id`. If the console refuses or cannot answer, the attempt's
+cap is moved back to where the hold ran out with H4's margin left, the latest
+second `s` with `quota(s) ≤ hold − quota(600)`, and the job is stopped with
+`balance_exhausted` or `billing_unavailable`: where it would have stopped
+had compute-api been running. A stop the ledger had already decided but the
+previous process had not carried out is issued again.
+
+**Late launch.** A hold expires `max_runtime_seconds + 48 h` after submit
+(H6), and the last 24 h of that are kept for settlement
+(`jobs.SettlementReserve`). A job that was never `UP` may therefore run for at
+most `min(max_runtime_seconds − billed, expires_at − 24 h − now)` if it is
+launched now. Below `min(300 s, max_runtime_seconds)` it is not started
+(`jobs.MinLaunchRuntime`); otherwise it runs with that cap
+(`Job.RuntimeLimitSeconds`), and ending at it reads
+`failed`/`max_runtime_exceeded` with a message naming both numbers. A job
+resumed within a day of submit always gets its whole `max_runtime_seconds`.
+
+**Replays.** Lifecycle events keep their deterministic IDs
+(`<job_id>/<attempt>/<kind>`), and every ledger call they make is idempotent:
+`Started` for an attempt that exists, and `Stopped`/`Interrupted` for one
+that has ended, change nothing. A status change is written with its event in
+one transaction and a repeated transition is refused (`ErrInvalidTransition`),
+so a terminal `job.*` event, and its webhook, exist once whichever process
+writes the status. A settle carries its usage event's id and an extend its
+`extend_id`, both persisted before the call, so a call the console applied
+but whose answer was lost is re-sent with the same id and charged once.
+
 ## Tests
 
 Docker is not available on the machine this was built on, so the
@@ -238,6 +344,15 @@ Instead:
   never provision anything. It passed against a local 0.13.0 server.
 - `TestBackendWithPostgresStore` (gated on `COMPUTE_TEST_DATABASE_URL`) runs
   one job through the real store.
+- `internal/jobs/resume_test.go` (Postgres) restarts the service around a
+  job: one `jobs.Service` is dropped without shutdown and a new one built on
+  the same database, fake console, fake SkyPilot and fake clock reconciles.
+  It covers a restart mid-run (resumed, downtime billed, every interval
+  once), jobs that ended during the downtime, a vanished and a relaunched
+  cluster, queued jobs launched and late ones capped or cancelled, a hold
+  caught up after a long downtime with a lost extend replayed once, a lost
+  final settle replayed once, a downtime the hold cannot cover, two
+  processes where only the lock holder drives, and the lock itself.
 
 ## Open questions
 
@@ -249,16 +364,27 @@ Instead:
    preemption or `max_runtime_seconds` is torn down without uploading.
    Files over 5 GiB, which R1's merged weights would be, need multipart
    (ADR-0005, open question 1).
-2. **Restart.** Attempt state, including `UpAt`, is in memory. After a
-   compute-api restart the cluster can be found by name and the launch by
-   `/api/status?cluster_name=`, but `UpAt` has to come back from the ledger
-   (C5's `cluster_up` row). The wiring (`internal/jobs`) did not add that
-   `Resume`; it is still needed. Until it exists a restart loses track of
-   live attempts: the binary logs each non-terminal job it finds at boot as
-   "not resumed", the job reads its last status indefinitely, its metering
-   stops at the last observed `UP`, and its hold stays locked until the
-   console's sweeper expires it (H6). SkyPilot's autodown
-   reaps their clusters 5 minutes after the job ends.
+2. **Restart.** Resolved as described in [Restart](#restart). What is still
+   open there:
+   - A job that exits and whose cluster SkyPilot's idle autodown removes
+     (5 minutes after the exit) while compute-api is down is
+     indistinguishable from a vanished cluster: it reads `interrupted` and is
+     billed to the last observed `UP`, even if it succeeded. A downtime under
+     5 minutes after the exit is not affected. Reading the outcome without
+     the cluster would need SkyPilot's cluster history or the job's
+     artifact manifest; neither is used.
+   - A process that loses its database session keeps driving until its
+     next lock check, up to 5 s, while the next holder may already have
+     started. Steps are idempotent against SkyPilot and the ledger, but the
+     ledger's hold row can see two writers in that window.
+   - A submit that fails after its hold was placed on a process without the
+     lock releases the hold itself, which can race the holder's tick
+     releasing it too; the console answers the second release `hold_closed`
+     and the hold ends `closed` with a spurious `hold_expired` notice.
+   - Nothing has run against a real SkyPilot API server across a restart.
+     That `launched_at` stays put for the life of a cluster, and changes when
+     a cluster is launched again under the same name, is assumed; it has not
+     been checked against the 0.13.0 source or observed.
 3. **Max runtime without compute-api.** If compute-api is down past a job's
    cap, the job keeps running at our cost (the customer's bill is still
    capped by B16). An in-cluster backstop needs either a `timeout` the image

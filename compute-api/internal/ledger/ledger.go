@@ -78,8 +78,12 @@ type UsageEvent struct {
 }
 
 // Engine is the GPU meter's ledger and settlement loop. It assumes it is the
-// only writer of its tables: one compute-api process per database. Running
-// several needs a per-job lease, which does not exist yet.
+// only writer of its tables' live rows: only the process holding the store's
+// worker lock runs Tick and the lifecycle calls (internal/jobs). Another
+// process only places holds for its own submits, which Tick does not read
+// while they are pending, and abandons one when its submit fails after the
+// hold, which can race the holder's Tick releasing the same hold
+// (backend.md, "Restart", open points).
 type Engine struct {
 	db      *pgxpool.Pool
 	console *console.Client
