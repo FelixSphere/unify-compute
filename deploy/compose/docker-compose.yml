@@ -1,51 +1,24 @@
-# unify-compute — local and staging profile.
+# unify-compute — the services every environment runs.
 #
-# Two deployables by decision (ADR-0002): the UnifyAPI console (AGPL fork, the
-# account plane) and compute-api (this repo, proprietary). They share nothing
-# but HTTP. Same file locally and on the staging instance; the staging stack
-# renders .env from SSM and sets the *_BIND variables to 0.0.0.0 because the
-# load balancer has to reach the containers.
+# This file alone is production's shape: compute-api, the marketing site and
+# Postgres. Production has no console of its own; its console is
+# app.unifyapi.ai, released by UnifyAPI (ADR-0001, ADR-0009).
 #
-# Loopback by default. Public exposure is the ALB's job, decided per
-# environment, never a default of this file.
+# Staging and local development add docker-compose.console.yml, which brings
+# the UnifyAPI console (AGPL fork) and Redis. The two deployables share
+# nothing but HTTP (ADR-0002). The instance selects the files with
+# COMPOSE_FILE in its .env; so does .env.example locally.
+#
+# Two files rather than a compose profile: whether compose enforces a
+# `${CONSOLE_IMAGE:?}` guard on a service in an inactive profile has varied
+# between compose releases, and either answer is wrong for one environment
+# (production failing on a console it never runs, or staging booting a
+# console with no image). Separate files keep every guard meaningful.
+#
+# Images are pinned by digest. Loopback by default; public exposure is the
+# ALB's job, decided per environment, never a default of this file.
 
 services:
-  console:
-    # Pinned tag published by unifyapi-console's fork-image.yml. Keep in step
-    # with the UnifyAPI production pin unless testing a console change.
-    image: ${CONSOLE_IMAGE:?set CONSOLE_IMAGE}
-    restart: unless-stopped
-    command: --log-dir /app/logs
-    ports:
-      - "${CONSOLE_BIND:-127.0.0.1}:3000:3000"
-    volumes:
-      - ${DATA_DIR:-./data}/console:/data
-      - ${DATA_DIR:-./data}/console-logs:/app/logs
-    environment:
-      SQL_DSN: postgresql://unify:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/console
-      REDIS_CONN_STRING: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD}@redis:6379
-      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET}
-      # Secure cookies need the exact HTTPS origin list; locally over plain
-      # HTTP both stay unset so the console's OriginGuard is off.
-      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
-      SESSION_COOKIE_TRUSTED_URL: ${SESSION_COOKIE_TRUSTED_URL:-}
-      # Dark until the console ships the bridge routes; then the same value as
-      # compute-api's COMPUTE_BRIDGE_SECRET. Never the production value.
-      COMPUTE_BRIDGE_SECRET: ${COMPUTE_BRIDGE_SECRET:-}
-      NODE_NAME: unify-compute-${ENVIRONMENT:-local}
-      TZ: UTC
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_started
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:3000/api/status | grep -q '\"success\":true' || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 40s
-
   compute-api:
     image: ${COMPUTE_API_IMAGE:?set COMPUTE_API_IMAGE}
     restart: unless-stopped
@@ -53,39 +26,53 @@ services:
       - "${COMPUTE_API_BIND:-127.0.0.1}:8080:8080"
     environment:
       LISTEN_ADDR: 0.0.0.0:8080
-      # Inside the compose network the console is reachable by service name.
-      CONSOLE_URL: http://console:3000
-      # Clouds this deployment may launch into (ADR-0006). Staging is AWS only.
+      # The console service name where one runs alongside (staging, local).
+      # `-`, not `:-`: an explicitly empty CONSOLE_URL (production while the
+      # bridge is dark) must stay empty, not become the local console.
+      CONSOLE_URL: ${CONSOLE_URL-http://console:3000}
+      # Clouds this deployment may launch into (ADR-0006).
       UPSTREAMS: ${UPSTREAMS:-aws}
+      # Empty means the bridge is dark. Production keeps it empty until the
+      # console bridge is released on app.unifyapi.ai.
       COMPUTE_BRIDGE_SECRET: ${COMPUTE_BRIDGE_SECRET:-}
-      DATABASE_URL: postgresql://unify:${POSTGRES_PASSWORD}@postgres:5432/compute
+      DATABASE_URL: postgresql://unify:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/compute
     depends_on:
       postgres:
         condition: service_healthy
-    # distroless has no shell or wget; the ALB health check covers staging and
-    # `make smoke` covers everything else.
+    # distroless has no shell or wget; the ALB health check covers the hosted
+    # environments and `make smoke` covers everything else.
+
+  site:
+    # Built and published by this repository (deploy/site). Static, listens on
+    # 8080 inside the container; published on 8081 so it does not collide
+    # with compute-api.
+    image: ${SITE_IMAGE:?set SITE_IMAGE}
+    restart: unless-stopped
+    ports:
+      - "${SITE_BIND:-127.0.0.1}:8081:8080"
+    # Assumes the image ships a busybox-style wget. The ALB's /healthz check
+    # is the authoritative one; this only makes `docker ps` honest.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     restart: unless-stopped
     environment:
       POSTGRES_USER: unify
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: console
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: compute
     volumes:
       - ${DATA_DIR:-./data}/postgres:/var/lib/postgresql/data
-      # Creates the second database for compute-api on first boot only.
-      - ./postgres-init.sql:/docker-entrypoint-initdb.d/10-compute.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U unify -d console"]
+      test: ["CMD-SHELL", "pg_isready -U unify -d compute"]
       interval: 10s
       timeout: 5s
       retries: 10
-
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}"]
 
   # SkyPilot API server. Off by default (compose profile) until compute-api has
   # a backend to drive it. The image and tag must be verified against the

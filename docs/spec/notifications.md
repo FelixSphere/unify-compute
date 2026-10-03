@@ -1,6 +1,6 @@
-# Notifications: UnifyAI Compute customer email for job outcomes
+# Notifications: Unify Compute customer email for job outcomes
 
-- **Status:** Spec, nothing built. UnifyAI Compute sends no mail today. No code in this
+- **Status:** Spec, nothing built. Unify Compute sends no mail today. No code in this
   repository builds, renders or sends email, and this document does not add
   any.
 - Depends on: [`job-api.md`](job-api.md) (job states, `error.code`, the
@@ -18,11 +18,11 @@
 | Piece | State |
 |---|---|
 | Layout (`docs/spec/email/base.html`) | Copied from the kit. Not wired to anything. |
-| Logo PNGs (`public/email/`) | Served by the marketing site at `https://compute.unifyai.us/email/…` once this branch is released. On the local production build (`wrangler dev`) the kit's `@2x` file names answer `307` to the `%402x` spelling, which then returns `200`. Image proxies normally follow that redirect, but check the live URLs once before the first send. |
-| Customer email addresses | **Compute does not have them.** The UnifyAI API console owns accounts and contact details (ADR-0001). |
+| Logo PNGs (`public/email/`) | Served by the marketing site at `https://compute.unifyai.us/email/…` once this branch is released. The `site` container (`deploy/site/`) answers `200` to both the literal `@2x` and the `%402x` spelling, with no redirect; `deploy/site/smoke.sh` asserts both. The old Workers build redirected `@2x` with a `307`. Check the live URLs once before the first send. |
+| Customer email addresses | **Compute does not have them.** The Unify API console owns accounts and contact details (ADR-0001). |
 | Delivery path | **Proposed:** a new console bridge verb, `notify`. Not built on either side. See [Delivery](#delivery-proposed). |
 | Job web page for the CTA to open | **Decided by the operator, 2026-10-01:** `https://compute.unifyai.us/jobs/{job_id}`. **The page does not exist yet, and none of these emails is sent until it does.** |
-| Sender name and address | **Decided by the operator, 2026-10-01:** `UnifyAI Compute <no-reply@compute.unifyai.us>`. No mail domain is set up yet; it is set up when sending is built. |
+| Sender name and address | **Decided by the operator, 2026-10-01:** `Unify Compute <no-reply@compute.unifyai.us>`. No mail domain is set up yet; it is set up when sending is built. |
 
 ## Messages
 
@@ -58,10 +58,10 @@ These values are the same in every message.
 |---|---|
 | `{{lang}}` / `{{dir}}` | `en` / `ltr` (compute has no other locale) |
 | `{{asset_base}}` | `https://compute.unifyai.us/email` |
-| `{{product_name}}` | `UnifyAI Compute`, the full product name (user decision, 2026-10-01). Used in the footer line. |
+| `{{product_name}}` | `Unify Compute`, the full product name (user decision, 2026-10-01). Used in the footer line. |
 | `{{product_short}}` | `Compute`, the header descriptor after the UnifyAI lockup. |
 | `{{product_url}}` / `{{product_domain}}` | `https://compute.unifyai.us` / `compute.unifyai.us` |
-| `{{footer_reason}}` | "You're receiving this because a job you submitted with your UnifyAI API key changed state." |
+| `{{footer_reason}}` | "You're receiving this because a job you submitted with your Unify API key changed state." |
 | Focal element | Option (a), the CTA button: amber `#F5A623` with **ink `#0E0E0E` text**, exactly as in `base.html`. Never white on amber. Amber appears only on this button. |
 | `{{cta_url}}` | `https://compute.unifyai.us/jobs/{job_id}` (decided by the operator, 2026-10-01). The page does not exist yet, so nothing is sent until it does. The raw link under the button is the same URL. |
 
@@ -92,27 +92,27 @@ not carry.
 
 | Part | Content |
 |---|---|
-| Subject | `UnifyAI Compute: job {job id} finished` |
+| Subject | `Unify Compute: job {job id} finished` |
 | Preheader | `Ran {gpu_seconds} GPU-seconds on {gpu}. Outputs are ready to download.` |
 | Eyebrow | `JOB FINISHED` |
 | Headline | `Your job finished.` |
 | Intro | `{job id} exited successfully. Its outputs are kept until you delete them, and storage is charged daily while they exist.` |
 | CTA label | `View job` |
 | Detail rows | Job, GPU, GPU-seconds, Cost (shared rows above). `Status` row: `succeeded`, with the success dot `#1E9E63` beside the word. Status colour is used only for the status word, as the kit says. |
-| Safety line | `You're getting this because a job you submitted finished. Cost is the GPU charge only; storage and egress for its outputs are billed daily from your UnifyAI API balance. If you don't recognise this job, revoke the key that submitted it in the UnifyAI API console.` |
+| Safety line | `You're getting this because a job you submitted finished. Cost is the GPU charge only; storage and egress for its outputs are billed daily from your Unify API balance. If you don't recognise this job, revoke the key that submitted it in the Unify API console.` |
 
 ### 2. Job failed
 
 | Part | Content |
 |---|---|
-| Subject | `UnifyAI Compute: job {job id} failed` |
+| Subject | `Unify Compute: job {job id} failed` |
 | Preheader | One sentence with the `error.message` from the Job. If the job never reached `UP`, add: `No GPU time was charged.` |
 | Eyebrow | `JOB FAILED` |
 | Headline | `Your job failed.` |
 | Intro | B7, non-zero exit after `UP`: `{job id} exited with an error after {gpu_seconds} GPU-seconds. Logs are kept for 7 days.` B8, before `UP`: `{job id} could not start, so no GPU time was charged and its hold was released in full.` |
 | CTA label | `View job and logs` |
 | Detail rows | Job, GPU, GPU-seconds, Cost (B8 shows `0` and `USD 0.0000`). `Status`: `failed`, with the danger dot `#D92D20`. `Reason`: the Job's `error.code` as returned, e.g. `capacity_exhausted` (`metering.md` B8). The email prints the code and does not translate it. |
-| Safety line | `You're getting this because a job you submitted failed. Logs are retained 7 days after the job ends. If you don't recognise this job, revoke the key that submitted it in the UnifyAI API console.` |
+| Safety line | `You're getting this because a job you submitted failed. Logs are retained 7 days after the job ends. If you don't recognise this job, revoke the key that submitted it in the Unify API console.` |
 
 ### 3. Billing stopped the job (hold or settlement failed)
 
@@ -121,17 +121,17 @@ that compute itself stopped (`job-api.md`; `metering.md` H4 and H5).
 
 | Part | `balance_exhausted` (H4, B12) | `billing_unavailable` (H5, B13) |
 |---|---|---|
-| Subject | `UnifyAI Compute: job stopped, balance exhausted` | `UnifyAI Compute: job stopped, billing unavailable` |
-| Preheader | `Your UnifyAI API balance could not cover more GPU time for {job id}.` | `We couldn't reach billing for {job id}, so we stopped it before it overspent its hold.` |
+| Subject | `Unify Compute: job stopped, balance exhausted` | `Unify Compute: job stopped, billing unavailable` |
+| Preheader | `Your Unify API balance could not cover more GPU time for {job id}.` | `We couldn't reach billing for {job id}, so we stopped it before it overspent its hold.` |
 | Eyebrow | `JOB STOPPED` | `JOB STOPPED` |
 | Headline | `Your job was stopped: balance exhausted.` | `Your job was stopped: billing unavailable.` |
 | Intro | `The hold for {job id} could not be extended, so we stopped it before it ran past what your balance covers. You are charged only for the GPU-seconds it ran.` | `Billing could not be reached for long enough that {job id}'s hold was about to run out, so we stopped it. You are charged only for the GPU-seconds it ran. This was an outage on our side, not a problem with your balance.` |
 | CTA label | `View job` | `View job` |
 | Detail rows | Job, GPU, GPU-seconds, Cost. `Status`: `cancelled`, with the warning dot `#E0A100`. `Reason`: `balance_exhausted`. | Same, with `Reason`: `billing_unavailable`. Cost is what the ledger accrued. The final settle is retried until the console answers (B13), so the email must not say "charged". It says `Cost (pending settlement)`. |
-| Safety line | `You're getting this because a job you submitted was stopped for billing. Top up your UnifyAI API balance before resubmitting. If you don't recognise this job, revoke the key that submitted it in the UnifyAI API console.` | `You're getting this because a job you submitted was stopped for billing. Nothing is needed from you. Resubmit when you're ready. If you don't recognise this job, revoke the key that submitted it in the UnifyAI API console.` |
+| Safety line | `You're getting this because a job you submitted was stopped for billing. Top up your Unify API balance before resubmitting. If you don't recognise this job, revoke the key that submitted it in the Unify API console.` | `You're getting this because a job you submitted was stopped for billing. Nothing is needed from you. Resubmit when you're ready. If you don't recognise this job, revoke the key that submitted it in the Unify API console.` |
 
 The focal element stays the job link in both variants. The top-up action lives
-in the UnifyAI API console. A second button would put amber on the page twice, so
+in the Unify API console. A second button would put amber on the page twice, so
 the safety line names the action as text instead.
 
 ## Delivery (proposed)

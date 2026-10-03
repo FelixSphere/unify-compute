@@ -11,7 +11,7 @@ import './globals.css';
 
 const HUBSPOT_PORTAL_ID = '46127314';
 
-const title = 'UnifyAI Compute — On-demand inference & GPU compute';
+const title = 'Unify Compute — On-demand inference & GPU compute';
 const description =
   'Compute beyond chat. On-demand GPU compute for batch processing, embeddings, document pipelines, and fine-tuning, with consumption-based billing.';
 // Browsers keep favicons long after the file changes, so every icon swap
@@ -23,11 +23,11 @@ export const metadata: Metadata = {
   metadataBase: new URL('https://compute.unifyai.us'),
   icons: {
     icon: [
-      { url: '/favicon.ico?v=3', sizes: '16x16 32x32', type: 'image/x-icon' },
-      { url: '/icon-v3.svg', type: 'image/svg+xml' },
-      { url: '/favicon-32-v3.png', sizes: '32x32', type: 'image/png' },
+      { url: '/favicon.ico?v=4', sizes: 'any', type: 'image/x-icon' },
+      { url: '/icon-v4.svg', type: 'image/svg+xml' },
+      { url: '/favicon-32-v4.png', sizes: '32x32', type: 'image/png' },
     ],
-    shortcut: '/favicon.ico?v=3',
+    shortcut: '/favicon.ico?v=4',
     apple: [{ url: '/apple-touch-icon.png?v=3', sizes: '180x180', type: 'image/png' }],
   },
   manifest: '/manifest-v3.webmanifest',

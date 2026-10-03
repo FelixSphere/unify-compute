@@ -5,6 +5,10 @@
 // 2026-10-01 (PR #11): extend_id on extend, the error-code table carried in
 // `message`, a bodiless 404 when the bridge is disabled, 403 with data.status
 // for suspended tenants and disabled users, and a dedicated rate limiter.
+// From the 2026-10-02 revision it implements 413 payload_too_large (checked
+// before the signature) and internal_error on a forced 500. It does NOT yet
+// refuse a settle without sku as 400 invalid_request: it answers 409
+// sku_mismatch, which an existing test pins and only the operator may change.
 //
 // Nothing here is derived from FelixSphere/unifyapi-console (AGPL-3.0). Where
 // the spec is silent, the behaviour chosen is documented on the method or
@@ -65,8 +69,11 @@ const (
 	CodeRateLimited              = "rate_limited"
 	CodeSKUMismatch              = "sku_mismatch"
 	CodeCumulativeQuotaRegressed = "cumulative_quota_regressed"
+	CodePayloadTooLarge          = console.CodePayloadTooLarge
+	CodeInternalError            = console.CodeInternalError
 
-	// codeInjected is the fake's own, for responses a Fault forces.
+	// codeInjected is the fake's own, for responses a Fault forces. A forced
+	// 500 says internal_error instead, as the real console does.
 	codeInjected = "injected_failure"
 )
 
@@ -512,7 +519,7 @@ func (s *Server) takeFault(route string, afterApply bool) (Fault, bool) {
 func (s *Server) route(name string, apply func(r *http.Request, body []byte) response) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		call := Call{Route: name, Method: r.Method, Path: r.URL.Path}
-		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		body, err := io.ReadAll(io.LimitReader(r.Body, console.MaxRequestBody+1))
 		call.Body = body
 		if err != nil {
 			call.Status = http.StatusBadRequest
@@ -559,6 +566,15 @@ func (s *Server) route(name string, apply func(r *http.Request, body []byte) res
 			return
 		}
 
+		// Size before signature, as the console orders it (spec revision
+		// 2026-10-02), so an oversized body is never reported as a bad secret.
+		if len(body) > console.MaxRequestBody {
+			call.Status = http.StatusRequestEntityTooLarge
+			s.record(call)
+			writeEnvelope(w, fail(http.StatusRequestEntityTooLarge, CodePayloadTooLarge))
+			return
+		}
+
 		if err := VerifySignature(s.secret, r.Method, r.URL.Path, r.Header.Get(console.HeaderTimestamp), r.Header.Get(console.HeaderSignature), body, s.Now()); err != nil {
 			msg := CodeInvalidSignature
 			if errors.Is(err, ErrBadTimestamp) {
@@ -588,6 +604,10 @@ func (s *Server) route(name string, apply func(r *http.Request, body []byte) res
 func injected(w http.ResponseWriter, f Fault) {
 	if f.Status == 0 {
 		drop(w)
+		return
+	}
+	if f.Status == http.StatusInternalServerError {
+		writeEnvelope(w, fail(f.Status, CodeInternalError))
 		return
 	}
 	writeEnvelope(w, fail(f.Status, codeInjected))
