@@ -53,6 +53,34 @@ grep -q '<title>Privacy Policy — Unify Compute</title>' "$tmp/body" \
   || { echo "FAIL /privacy: title missing"; fail=1; }
 check /privacy/ 308 "Location: /privacy"
 
+check /start 200 "Content-Type: text/html" "Cache-Control: no-cache" "${common[@]}"
+grep -q '<title>Get started — Unify Compute</title>' "$tmp/body" \
+  || { echo "FAIL /start: title missing"; fail=1; }
+check /start/ 308 "Location: /start"
+
+# Log in / Sign up point at placeholders until Compute's own account pages
+# exist (app/links.ts): the early-access section of /start. They must not
+# point at the Unify API console, whose accounts Compute no longer uses.
+links_ok=1
+for page in / /start /privacy; do
+  curl -s "$base$page" > "$tmp/links"
+  for href in '/start#early-access' '/start'; do
+    grep -q "href=\"$href\"" "$tmp/links" \
+      || { echo "FAIL $page: no link to $href"; fail=1; links_ok=0; }
+  done
+  if grep -q 'app\.unifyapi\.ai' "$tmp/links"; then
+    echo "FAIL $page: links to the Unify API console"; fail=1; links_ok=0
+  fi
+done
+curl -s "$base/start" > "$tmp/links"
+for href in 'mailto:contactus@felixsphere.com?subject=Unify%20Compute%20early%20access' 'https://api.compute.unifyai.us/compute/v1/openapi.json'; do
+  grep -qF "href=\"$href\"" "$tmp/links" \
+    || { echo "FAIL /start: no link to $href"; fail=1; links_ok=0; }
+done
+grep -q 'id="early-access"' "$tmp/links" \
+  || { echo "FAIL /start: no #early-access section for the placeholder links"; fail=1; links_ok=0; }
+[ "$links_ok" = 1 ] && echo "ok   sign-up, log-in and quick-start links"
+
 check /does-not-exist 404 "Content-Type: text/html" "Cache-Control: no-cache" "${common[@]}"
 grep -q 'This page could not be found' "$tmp/body" \
   || { echo "FAIL 404: not the export's 404 page"; fail=1; }
@@ -82,7 +110,7 @@ check /brand 404
 # into 404s and every link click into a full page load. The payload must come
 # from the same build as the HTML, or the router discards it.
 privacy_version=$(curl -s "$base/privacy" | grep -oE 'deploymentVersion\\?":\\?"[0-9a-f-]+' | grep -oE '[0-9a-f-]{36}' | head -1)
-for page in /privacy /; do
+for page in /privacy /start /; do
   payload=$page.txt; [ "$page" = / ] && payload=/index.txt
   CURL_ARGS="-H RSC:1" check "$payload" 200 \
     "Content-Type: text/plain" "Cache-Control: no-cache" "${common[@]}"
