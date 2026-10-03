@@ -63,8 +63,14 @@ account. Two consequences:
   #34), data volume `vol-02c8bcba84c4b91a4`, ALB
   `unify-compute-production-1999053028.us-east-1.elb.amazonaws.com`
   (deletion protection on), daily DLM snapshots. Serves `compute.unifyai.us`,
-  `site.compute.unifyai.us` and `api.compute.unifyai.us`. compute-api is dark:
-  no bridge secret and no `CONSOLE_URL`. No console runs there.
+  `site.compute.unifyai.us` and `api.compute.unifyai.us`. compute-api runs the
+  wired build. **Console bridge on since 2026-10-03**:
+  `CONSOLE_URL=https://app.unifyapi.ai` and the production bridge secret (set
+  over SSM under the ops lock; backup in
+  `/data/backups/20261003T040909Z-manual-console-bridge/`). Keys from
+  app.unifyapi.ai are verified; a made-up key is `401 invalid_key`. No console, no SkyPilot
+  (`gpu_workers_enabled = false`). The artifacts bucket exists (2026-10-03),
+  but the host's `.env` has no artifacts lines yet.
 - **Release pipeline:** `.github/workflows/release.yml`, dispatch only.
   GitHub environments `staging` and `production` exist, both main-only
   (required reviewers refused on this plan). `mode=status` on staging has run
@@ -74,47 +80,48 @@ account. Two consequences:
   compute-api to staging (37083281875) and production (37083501562).
   Records are in `deploy/releases/`. Both hosts now have a `PREVIOUS_RELEASE`
   (site `cd7077d3…`, still in ECR), so `mode=rollback` works on both.
+  `gpu-ready` (2026-10-03) released compute-api `9dfc652a…` and site
+  `6981df35…` (e5ce490) to staging (37093005905) and production (37093737717).
+  Both hosts run that pair, and `mode=rollback` works on both.
   `DNS_CUTOVER=done`, and production's `PUBLIC_ORIGIN` is
   `https://compute.unifyai.us`.
-- **IMDS lockdown:** defined (ADR-0005, amendment of 2026-10-03;
-  `scripts/imds-lockdown.sh`), applied to **neither** host. Both run IMDS hop
-  limit 2 with no firewall unit, so every container on them can take the
-  instance role. Until a host is locked down, `release.yml` refuses to
-  release or roll back there (`host.sh`). The steps are in
-  `docs/staging.md`, "IMDS lockdown". Per host, staging first: the lockdown
-  over `scripts/ssm-run.sh` (`IMDS_LOCKDOWN_DONE all`), then
-  `scripts/release/check-imds.sh` (`CHECK_IMDS_OK`), then the Terraform
-  apply that sets hop limit 1, then `check-imds.sh` again. Update this line
-  when each host is done.
-- **Staging and production have diverged, on purpose, since 2026-10-03.**
-  `wave2-jobs` released compute-api `cfbbbdd9…` (`667b381`) to **staging
-  only** (run 37091108250, record
-  `deploy/releases/2026-10-03-staging-wave2-jobs.md`). Production still runs
-  `ec4bd964…` (`a8562dd`). The hold is a product decision referred to the
-  operator, not a failed gate: the job API is wired but the console billing
-  bridge 404s, so every keyed job route stops at key verification. When
-  production goes, it takes **those same digests**, not a rebuild of a later
-  `main`. Until then staging is ahead, and the next ordinary release must not
-  mistake staging's state for production's. Since #44 the production release
-  is gated twice over: the operator's answer **and** the IMDS lockdown above,
-  which `release.yml` now requires on the target host. A staging rollback is
-  refused for the same reason, so the way back from `cfbbbdd9…` today is a
-  forward release of `ec4bd964…`, not `mode=rollback`.
+- **IMDS lockdown:** applied to both hosts on 2026-10-03 (staging, then
+  production): firewall unit, credentials timer, `docker-compose.imds.yml`,
+  hop limit 1 by Terraform. `check-imds.sh` gave `CHECK_IMDS_OK` before and after
+  each apply. `release.yml` refuses a host where the rule is missing; if
+  that ever happens, treat it as an incident (see "Before you ship
+  anything").
 - **Two crash-loop paths now live in the compute-api image**, both at boot
   and both `os.Exit(1)`: `sku.Parse` rejecting `config/skus.json`, and
   `store.Migrate` failing. `a8562dd` and earlier never opened the database
   despite being handed `DATABASE_URL`, so any release from that baseline
   migrates for the first time. Staging's was create-from-empty (0 tables
   before, 10 after); production's will be too.
-- **#38 artifacts and #39 GPU workers are in the binary but dark.** No
-  Terraform applied: no artifacts bucket or writer role, no SkyPilot API
-  server, no GPU worker stack. `scripts/release/host.sh` only rewrites the
-  image pins, so a release can never turn them on. Doing so is a Terraform
-  apply plus an explicit instance `-replace` (staging first), because
-  `ignore_changes = [user_data, user_data_base64]` keeps it inert otherwise.
+- **Staging's GPU path is live up to the quota (2026-10-03).** Terraform
+  applied (workers VPC 10.73/16, launch role, reaper, artifacts buckets);
+  t4g.medium. SkyPilot runs on the host (`SKYPILOT_SETUP_DONE all`). The
+  host's `.env` carries ADR-0005's artifacts lines and the trial console
+  `e3cef17`, added over SSM under the ops lock as ADR-0005 "Apply" 3
+  allows. Previous files are in
+  `/data/backups/20261003T031225Z-manual-adr0005-env/`. A rebuild would
+  render the same values from user-data. A job with the test key
+  (`/unify-compute-staging/test_api_key`) is accepted and held, then fails
+  `capacity_exhausted` (AWS `VcpuLimitExceeded`, quota 0). Open: SkyPilot
+  attempted `CreateSecurityGroup` and was refused (by design); check which
+  group the first real worker gets. The GPU budget is not applied: there is no alert
+  email, and the stack refuses a null one. The operator set it to USD 50/month,
+  not 300. Since #50 that is the stack's default, and a Budgets action
+  denies RunInstances/StartInstances to the launch role at 100% (ADR-0010,
+  "Start small"); apply it after staging and before any launch. The
+  operator handles the quota case (4 vCPU now, not 8); agents do not
+  request quota.
 - **Console:** production `app.unifyapi.ai` belongs to the UnifyAPI CI/CD agent.
-  Staging runs its own console container from the same pinned image
-  (`CONSOLE_IMAGE` in `deploy/compose/.env.example`), with a separate database.
+  Staging runs its own console container, the UnifyAPI CI/CD trial build
+  `e3cef17…@sha256:c48c638b…` (#47; bridge routes on, `compute_*` tables),
+  with a separate database. It was initialised on 2026-10-03 (root and test
+  user `compute-e2e` with $100; passwords and key in staging SSM, see the
+  gpu-ready record). Its `users.quota` row and its API disagreed for the test
+  user; that has been reported to UnifyAPI.
   Never point staging compute at the production console.
 - **State:** Terraform state for staging lives in S3 with native locking
   (`deploy/aws/envs/staging/backend.tf`), key `unify-compute/staging/terraform.tfstate`.

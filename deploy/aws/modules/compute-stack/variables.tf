@@ -71,9 +71,11 @@ variable "bridge_enabled" {
   description = <<-EOT
     Whether user-data reads /<name>/bridge_secret into COMPUTE_BRIDGE_SECRET.
     False keeps compute-api's console bridge dark no matter what parameters
-    exist. In production this stays false until the
-    console bridge is released on app.unifyapi.ai; turning it on is a reviewed
-    change here, not a parameter someone creates.
+    exist. Production turned it on on 2026-10-03, once the console bridge was
+    live on app.unifyapi.ai; it is a reviewed change here, not a parameter
+    someone creates. user_data is ignored after first boot, so this reaches a
+    running host only through a rebuild; the live host gets the same lines over
+    SSM (docs/staging.md, "Production console bridge").
   EOT
   type        = bool
 }
