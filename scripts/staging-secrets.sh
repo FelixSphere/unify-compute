@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
-# Creates this stack's SSM SecureString parameters, idempotently.
+# Creates an environment's SSM SecureString parameters, idempotently.
 #
-#   scripts/staging-secrets.sh [--prefix /unify-compute-staging] [--force]
+#   scripts/staging-secrets.sh [--env staging|production] [--prefix /<name>] [--force]
+#
+# --env picks the prefix and the parameter set: staging runs its own console
+# and needs four; production runs no console and no Redis and keeps the
+# bridge dark (bridge_enabled = false), so it needs only postgres_password.
+# Creating a production bridge_secret here would be a secret nothing reads,
+# waiting to be mistaken for the real one.
 #
 # Why this is a script and not four `aws ssm put-parameter` lines in a runbook:
 #
@@ -20,23 +26,31 @@
 # So: hex. No "/", no "+", no "=", no shell metacharacters, still 256 bits.
 set -euo pipefail
 
-PREFIX="/unify-compute-staging"
+ENV_NAME="staging"
+PREFIX=""
 FORCE=0
 REGION="${AWS_REGION:-us-east-1}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --env)    ENV_NAME="$2"; shift 2 ;;
     --prefix) PREFIX="$2"; shift 2 ;;
     --force)  FORCE=1; shift ;;
     --region) REGION="$2"; shift 2 ;;
-    -h|--help) sed -n '2,4p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 
-# Names must match locals.ssm_* in deploy/aws/staging/instance.tf, which are
-# derived from var.name. The IAM read policy is scoped to the same prefix.
-KEYS="postgres_password redis_password session_secret bridge_secret"
+# Names must match locals.ssm_* in deploy/aws/modules/compute-stack/instance.tf,
+# which are derived from the stack's name (unify-compute-<env>). The IAM read
+# policy is scoped to the same prefix.
+case "$ENV_NAME" in
+  staging)    KEYS="postgres_password redis_password session_secret bridge_secret" ;;
+  production) KEYS="postgres_password" ;;
+  *) echo "unknown --env: $ENV_NAME (staging or production)" >&2; exit 2 ;;
+esac
+PREFIX="${PREFIX:-/unify-compute-$ENV_NAME}"
 
 echo "account: $(aws sts get-caller-identity --query Account --output text)  region: $REGION  prefix: $PREFIX"
 echo

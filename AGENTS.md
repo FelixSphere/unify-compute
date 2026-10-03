@@ -23,7 +23,7 @@ This repository holds three things, and they have different rules:
 
 | Path | What it is | Rules |
 |---|---|---|
-| `app/`, `components/`, `public/` | Marketing site at **compute.unifyai.us** (vinext, hosted on OpenAI Sites via `.openai/hosting.json`) | Site conventions below |
+| `app/`, `components/`, `public/` | Marketing site at **compute.unifyai.us** (vinext static export, served by the `deploy/site/` container on AWS production since 2026-10-02; `.openai/hosting.json` stays as the DNS rollback target) | Site conventions below |
 | `compute-api/` | The compute service: authenticated job API in front of SkyPilot, billed through UnifyAPI | Go, stdlib-only so far, permissive licences only |
 | `deploy/`, `docs/` | Compose profile, AWS staging stack, ADRs and specs | Terraform validated in CI, never applied by CI |
 
@@ -48,14 +48,29 @@ This repository holds three things, and they have different rules:
 
 Current status (say what exists rather than describing targets as shipped):
 
-- The marketing site is live. Nothing else is deployed yet.
+- The marketing site is live at https://compute.unifyai.us on AWS
+  production. Staging and production both run (see below).
 - `compute-api/` is a skeleton: health, SKU catalogue, and the job API routes
   with the contract from `docs/spec/job-api.md`. Job submission returns
   `501 not_implemented` until the SkyPilot backend and the console bridge land.
 - The console bridge in `docs/spec/console-billing-bridge.md` is a spec. The
   console fork does not implement it yet.
-- The staging Terraform under `deploy/aws/staging/` validates in CI and has
-  **not been applied**. No DNS record for `staging.compute.unifyai.us` exists.
+- The AWS Terraform — one module (`deploy/aws/modules/compute-stack/`) with
+  staging and production callers under `deploy/aws/envs/`, plus GitHub OIDC
+  deploy roles in `deploy/aws/shared/github-oidc/` and the runtime image
+  registry (ECR) in `deploy/aws/shared/ecr/`. Moving the site and
+  everything else onto it is
+  [ADR-0009](docs/adr/0009-host-everything-on-aws.md), **Proposed**.
+  Applied on 2026-10-02: `shared/ecr`, `shared/github-oidc`, staging (VPC
+  10.72/16, instance `i-06125c23285803d7a`) and production (VPC 10.71/16,
+  instance `i-07dd2f6d313a0dafd`). Both run compute-api and the site at
+  compute-api `ec4bd964…` (a8562dd) and site `7b9bb659…` (ea56779, v4 tab
+  icons). Records are in `deploy/releases/`. Staging also runs its own console. Production's
+  compute-api is dark: no bridge secret and no `CONSOLE_URL`, and job
+  submission returns 501 there as everywhere. `compute.unifyai.us` was cut over
+  from OpenAI Sites to production's ALB on 2026-10-02 (Route53 change
+  `C07235422LT740FCOOAEW`). The Sites project and its two TXT records remain
+  as the rollback path.
 
 ## Licence boundary — the expensive mistake
 
@@ -131,7 +146,7 @@ significant ones. Adopted 16 Sep 2026, after twelve consecutive console releases
 went straight to production unverified.
 
 For unify-compute the rule is not yet load-bearing: the staging stack under
-`deploy/aws/staging/` is **defined and CI-validated but has never been applied**,
+`deploy/aws/envs/staging/` is **defined and CI-validated but has never been applied**,
 and nothing is in production either. When that changes, staging comes first —
 do not let the first production deployment also be the first time the stack runs.
 

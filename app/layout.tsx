@@ -23,11 +23,11 @@ export const metadata: Metadata = {
   metadataBase: new URL('https://compute.unifyai.us'),
   icons: {
     icon: [
-      { url: '/favicon.ico?v=3', sizes: '16x16 32x32', type: 'image/x-icon' },
-      { url: '/icon-v3.svg', type: 'image/svg+xml' },
-      { url: '/favicon-32-v3.png', sizes: '32x32', type: 'image/png' },
+      { url: '/favicon.ico?v=4', sizes: 'any', type: 'image/x-icon' },
+      { url: '/icon-v4.svg', type: 'image/svg+xml' },
+      { url: '/favicon-32-v4.png', sizes: '32x32', type: 'image/png' },
     ],
-    shortcut: '/favicon.ico?v=3',
+    shortcut: '/favicon.ico?v=4',
     apple: [{ url: '/apple-touch-icon.png?v=3', sizes: '180x180', type: 'image/png' }],
   },
   manifest: '/manifest-v3.webmanifest',

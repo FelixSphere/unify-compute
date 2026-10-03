@@ -52,4 +52,4 @@ printf '  encryption   %s\n' "$(aws s3api get-bucket-encryption --bucket "$BUCKE
 printf '  public block %s\n' "$(aws s3api get-public-access-block --bucket "$BUCKET" \
   --query 'PublicAccessBlockConfiguration.BlockPublicPolicy' --output text)"
 echo
-echo "next: terraform -chdir=deploy/aws/staging init"
+echo "next: terraform -chdir=deploy/aws/envs/<staging|production> init  (or deploy/aws/shared/github-oidc)"

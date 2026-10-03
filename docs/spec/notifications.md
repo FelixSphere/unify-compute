@@ -18,7 +18,7 @@
 | Piece | State |
 |---|---|
 | Layout (`docs/spec/email/base.html`) | Copied from the kit. Not wired to anything. |
-| Logo PNGs (`public/email/`) | Served by the marketing site at `https://compute.unifyai.us/email/…` once this branch is released. On the local production build (`wrangler dev`) the kit's `@2x` file names answer `307` to the `%402x` spelling, which then returns `200`. Image proxies normally follow that redirect, but check the live URLs once before the first send. |
+| Logo PNGs (`public/email/`) | Served by the marketing site at `https://compute.unifyai.us/email/…` once this branch is released. The `site` container (`deploy/site/`) answers `200` to both the literal `@2x` and the `%402x` spelling, with no redirect; `deploy/site/smoke.sh` asserts both. The old Workers build redirected `@2x` with a `307`. Check the live URLs once before the first send. |
 | Customer email addresses | **Compute does not have them.** The Unify API console owns accounts and contact details (ADR-0001). |
 | Delivery path | **Proposed:** a new console bridge verb, `notify`. Not built on either side. See [Delivery](#delivery-proposed). |
 | Job web page for the CTA to open | **Decided by the operator, 2026-10-01:** `https://compute.unifyai.us/jobs/{job_id}`. **The page does not exist yet, and none of these emails is sent until it does.** |

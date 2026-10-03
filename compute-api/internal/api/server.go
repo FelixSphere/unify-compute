@@ -5,6 +5,7 @@ package api
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -39,7 +40,7 @@ type Server struct {
 	Events EventSource
 	Owner  func(ctx context.Context, key string) (string, error)
 
-	mux *http.ServeMux
+	mux *router
 }
 
 type EventSource interface {
@@ -50,9 +51,38 @@ type EventSource interface {
 // refused; any other error means the key could not be checked at all.
 var ErrKeyRejected = errors.New("api: key rejected")
 
+// router is an http.ServeMux that remembers what was registered on it, so a
+// test can hold the route table against the OpenAPI document. Registering
+// through s.mux is the only way to add a route, which is what makes the
+// check complete.
+type router struct {
+	*http.ServeMux
+	patterns []string
+}
+
+func newRouter() *router { return &router{ServeMux: http.NewServeMux()} }
+
+func (r *router) Handle(pattern string, h http.Handler) {
+	r.patterns = append(r.patterns, pattern)
+	r.ServeMux.Handle(pattern, h)
+}
+
+func (r *router) HandleFunc(pattern string, h func(http.ResponseWriter, *http.Request)) {
+	r.Handle(pattern, http.HandlerFunc(h))
+}
+
+// openAPIDoc is the customer-facing contract. This file is canonical; the copy
+// in docs/spec/openapi.json is kept byte-identical by a test. It lives here
+// because go:embed cannot reach outside the module, and the image is built
+// from compute-api/ alone.
+//
+//go:embed openapi.json
+var openAPIDoc []byte
+
 func New(build string, cat *sku.Catalogue, reg *upstream.Registry, log *slog.Logger) *Server {
-	s := &Server{Build: build, Catalogue: cat, Upstreams: reg, Log: log, mux: http.NewServeMux()}
+	s := &Server{Build: build, Catalogue: cat, Upstreams: reg, Log: log, mux: newRouter()}
 	s.mux.HandleFunc("GET /healthz", s.health)
+	s.mux.HandleFunc("GET /compute/v1/openapi.json", s.openAPI)
 	s.mux.HandleFunc("GET /compute/v1/skus", s.listSKUs)
 	s.mux.HandleFunc("GET /compute/v1/upstreams", s.listUpstreams)
 	s.mux.Handle("POST /compute/v1/jobs", s.auth(http.HandlerFunc(s.submitJob)))
@@ -105,6 +135,13 @@ func invalid(w http.ResponseWriter, code, param, msg string) {
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "service": "compute-api", "build": s.Build})
+}
+
+// openAPI is public: clients and the CLI generate from it before they hold
+// a key.
+func (s *Server) openAPI(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(openAPIDoc)
 }
 
 func (s *Server) listSKUs(w http.ResponseWriter, _ *http.Request) {
