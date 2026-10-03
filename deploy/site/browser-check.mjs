@@ -325,12 +325,26 @@ const back = async () => {
 const apiCalls = [];
 const requests = [];
 let stubs = {};
+const checkoutVisits = [];
+let checkoutReturn = '';
 listeners.add((msg) => {
   if (msg.sessionId !== sessionId) return;
   if (msg.method === 'Network.requestWillBeSent') {
     requests.push({ url: msg.params.request.url, headers: msg.params.request.headers, document: msg.params.documentURL });
   } else if (msg.method === 'Fetch.requestPaused') {
     const { requestId, request } = msg.params;
+    // The top-up's redirect to Stripe Checkout never reaches Stripe: the
+    // "payment page" answers at once by sending the browser back the way
+    // Stripe's success_url (or cancel_url) would.
+    if (new URL(request.url).hostname === 'checkout.stripe.com') {
+      checkoutVisits.push(request.url);
+      send(
+        'Fetch.fulfillRequest',
+        { requestId, responseCode: 302, responseHeaders: [{ name: 'Location', value: checkoutReturn }], body: '' },
+        sessionId,
+      ).catch((e) => fail(`stub for Stripe Checkout: ${e.message}`));
+      return;
+    }
     const path = new URL(request.url).pathname.replace(/^\/dashboard\/v1/, '');
     let body;
     try {
@@ -474,8 +488,14 @@ const entry = (e, job) => ({
   ...e,
 });
 
+const TOPUP_ID = 'tu_01J8Q6ZK3R7Y9W2X4V6T8S0A2C';
+const TOPUP_OLD = { id: 'tu_01J8Q6ZK3R7Y9W2X4V6T8S0A0T', object: 'compute.topup', amount_usd: '15.00', status: 'credited', created_at: 1791000000, paid_at: 1791000030, receipt_url: 'https://pay.stripe.com/receipts/payment/abc', refunded_usd: '0.00' };
+const TOPUP_NEW = { id: TOPUP_ID, object: 'compute.topup', amount_usd: '20.00', status: 'open', created_at: 1791001000, paid_at: null, receipt_url: null, refunded_usd: '0.00' };
+const topupList = (data, enabled = true) => okBody({ object: 'list', data, has_more: false, topups_enabled: enabled });
+
 let keysList = [KEY];
 const baseStubs = () => ({
+  'GET /topups': topupList([TOPUP_OLD]),
   'GET /me': okBody(ME),
   'POST /logout': { status: 204 },
   'GET /balance': okBody({ object: 'compute.balance', currency: 'USD', available_usd: '12.5000', held_usd: '2.5400', limits: { topup_min_usd: '10.00', topup_max_usd: '100.00', balance_max_usd: '200.00', topups_per_day: 3 } }),
@@ -776,18 +796,85 @@ async function dashboardChecks() {
     'billing: each entry names its job; an operator credit shows no reference',
     'billing: history rows or references wrong',
   );
+  await waitFor(`!document.querySelector('#topup-open').hidden`, 'billing: "Add credit" once top-ups are enabled');
   check(
-    (await evaluate(`document.querySelector('.focal a.primary')?.getAttribute('href')`))?.startsWith('mailto:contactus@felixsphere.com'),
-    'billing: the one primary is "Contact us" (top-ups not built)',
-    'billing: no contact primary',
+    (await isShown('#topup-open')) && !(await isShown('#contact-primary')) && !(await isShown('#topup-off')) && !(await isShown('#topup')),
+    'billing: the focal primary is "Add credit"; the contact card is gone while top-ups work',
+    'billing: focal action or cards wrong with top-ups enabled',
+  );
+  check(
+    (await evaluate(`[...document.querySelectorAll('#topups tbody tr')].map((tr) => [...tr.cells].map((c) => c.textContent).slice(1, 4).join('|')).join()`)) ===
+      '15.00|Added|View receipt' &&
+      (await evaluate(`document.querySelector('#topups a')?.getAttribute('href')`)) === TOPUP_OLD.receipt_url,
+    'billing: top-ups listed with status and Stripe receipt link',
+    `billing: top-up rows: ${await evaluate(`document.querySelector('#topups')?.textContent`)}`,
   );
   await onePrimary('/billing');
   await shot('billing-desktop');
 
+  // --- Top-up: amount, Stripe Checkout (a full redirect), back, credited.
+  await click('#topup-open');
+  check(
+    (await isShown('#topup')) && !(await isShown('#topup-open')) && (await evaluate(`document.activeElement?.id`)) === 'amount_usd',
+    'top-up: "Add credit" opens the form, focuses the amount and steps aside for the form\'s primary',
+    'top-up: form did not open or focus the amount',
+  );
+  await onePrimary('/billing form');
+  await setValue('#amount_usd', '5');
+  await click('#topup-form button[type=submit]');
+  await fieldErrorShown('amount_usd', 'Enter an amount from USD 10.00 to 100.00.', 'top-up: below the minimum, checked in the page');
+  stubs['POST /topups'] = err('topup_limit_exceeded', 'That would take your balance over USD 200.00, the most an account can hold. You can add up to USD 15.00 now.', 'amount_usd', 403, 'permission_error');
+  await setValue('#amount_usd', '50');
+  await click('#topup-form button[type=submit]');
+  await fieldErrorShown('amount_usd', 'That would take your balance over USD 200.00, the most an account can hold. You can add up to USD 15.00 now.', 'top-up: topup_limit_exceeded under the amount');
+  let polls = 0;
+  stubs['POST /topups'] = okBody({ id: TOPUP_ID, object: 'compute.topup', status: 'open', checkout_url: 'https://checkout.stripe.com/c/pay/cs_test_b1' }, 201);
+  stubs[`GET /topups/${TOPUP_ID}`] = () => okBody(++polls < 2 ? TOPUP_NEW : { ...TOPUP_NEW, status: 'credited', paid_at: 1791001020 });
+  checkoutReturn = `${appOrigin}/billing?topup=${TOPUP_ID}&checkout=success`;
+  const topupFrom = apiCalls.length;
+  await setValue('#amount_usd', '20');
+  await click('#topup-form button[type=submit]');
+  await waitFor(`document.querySelector('#topup-status')?.textContent === 'USD 20.00 added to your balance.'`, 'top-up: credited after the return from Checkout', 15_000);
+  const created = apiCalls.slice(topupFrom).find((c) => c.method === 'POST' && c.path === '/topups');
+  check(
+    created?.body?.amount_usd === '20.00' && checkoutVisits.at(-1) === 'https://checkout.stripe.com/c/pay/cs_test_b1' && polls >= 2,
+    'top-up: POST /topups { amount_usd: "20.00" }, a full redirect to Checkout, then polled until credited',
+    `top-up: body ${js(created?.body)}, checkout ${checkoutVisits.at(-1)}, polls ${polls}`,
+  );
+  csrfChecked('top-up', topupFrom);
+  check((await evaluate('location.pathname + location.search')) === '/billing', 'top-up: the return URL is cleaned to /billing', `top-up: left at ${await evaluate('location.href')}`);
+  await shot('billing-topup-credited');
+
+  // Back from a cancelled Checkout: nothing charged, nothing polled.
+  const backFrom = apiCalls.length;
+  await appLoad(`/billing?topup=${TOPUP_ID}&checkout=cancelled`);
+  await waitFor(`document.querySelector('#topup-status')?.textContent === 'Payment cancelled. Nothing was charged.'`, 'top-up: cancelled return');
+  check(
+    !apiCalls.slice(backFrom).some((c) => c.path === `/topups/${TOPUP_ID}`),
+    'top-up: a cancelled return says nothing was charged and polls nothing',
+    'top-up: a cancelled return polled the top-up',
+  );
+  delete stubs[`GET /topups/${TOPUP_ID}`];
+  delete stubs['POST /topups'];
+
+  // A deployment without Stripe keys: the contact route stays.
+  stubs['GET /topups'] = topupList([], false);
+  await appLoad('/billing');
+  await waitFor(`document.querySelector('#history')?.textContent.includes('Charge')`, 'balance history without top-ups');
+  check(
+    (await evaluate(`document.querySelector('.focal a.primary')?.getAttribute('href')`))?.startsWith('mailto:contactus@felixsphere.com') &&
+      (await isShown('#topup-off')) && !(await isShown('#topup-open')) && !(await isShown('#topups-section')),
+    'billing without top-ups: the one primary is "Contact us"',
+    'billing without top-ups: no contact primary',
+  );
+  await onePrimary('/billing without top-ups');
+  stubs = baseStubs();
+
   // A compute-api older than A7d answers 404 not_found: placeholders.
-  for (const route of ['GET /balance', 'GET /transactions', 'GET /usage', 'GET /keys', 'GET /jobs']) delete stubs[route];
+  for (const route of ['GET /balance', 'GET /transactions', 'GET /usage', 'GET /keys', 'GET /jobs', 'GET /topups']) delete stubs[route];
   for (const [path, sel, want] of [
     ['/billing', '#history', 'Your balance history will appear here'],
+    ['/billing', '#topup-off', 'Card top-ups are coming'],
     ['/usage', '#usage-breakdown', 'Monthly usage will appear here'],
     ['/keys', '#keys-list', 'Your API keys will be listed here'],
     ['/jobs', '#jobs-list', 'Your jobs will be listed here'],
@@ -887,7 +974,12 @@ async function dashboardChecks() {
 
 async function appChecks() {
   await page('Network.enable');
-  await page('Fetch.enable', { patterns: [{ urlPattern: '*/dashboard/v1/*', requestStage: 'Request' }] });
+  await page('Fetch.enable', {
+    patterns: [
+      { urlPattern: '*/dashboard/v1/*', requestStage: 'Request' },
+      { urlPattern: 'https://checkout.stripe.com/*', requestStage: 'Request' },
+    ],
+  });
 
   // --- Sign up
   await appLoad('/signup');
@@ -1184,7 +1276,9 @@ async function appChecks() {
       requests
         .filter((r) => r.document?.startsWith(appOrigin))
         .map((r) => r.url)
-        .filter((u) => !u.startsWith(appOrigin) && !u.startsWith('data:')),
+        // The top-up's redirect to Stripe Checkout, answered by the stub
+        // above; it is the one cross-origin navigation the app makes.
+        .filter((u) => !u.startsWith(appOrigin) && !u.startsWith('data:') && !u.startsWith('https://checkout.stripe.com/')),
     ),
   ];
   const appRequests = requests.filter((r) => r.document?.startsWith(appOrigin)).length;

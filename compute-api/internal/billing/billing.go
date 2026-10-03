@@ -628,6 +628,27 @@ func (l *Local) AdjustTx(ctx context.Context, tx pgx.Tx, adj Adjustment) (Balanc
 	return Balance{Available: a.available, Held: a.held}, nil
 }
 
+// CreditTopupTx adds a paid top-up to available within the caller's
+// transaction, so the Stripe webhook commits the top-up's state, its
+// stripe_events row, the entry and the audit row together. The entry's
+// idempotency key is topup:<id>, so the same top-up can never be credited
+// twice even if the caller's own check were bypassed. Neither the account's
+// status nor its balance cap refuses it: the money has already been taken.
+func (l *Local) CreditTopupTx(ctx context.Context, tx pgx.Tx, accountID int64, quota int64, topupID string) (Balance, error) {
+	if quota <= 0 {
+		return Balance{}, errors.New("billing: top-up of zero or less")
+	}
+	a, err := lockAccount(ctx, tx, accountID)
+	if err != nil {
+		return Balance{}, err
+	}
+	if err := l.move(ctx, tx, a, entry{kind: "topup", available: quota, refType: "topup", refID: topupID,
+		idemp: "topup:" + topupID}); err != nil {
+		return Balance{}, err
+	}
+	return Balance{Available: a.available, Held: a.held}, nil
+}
+
 // Mismatch is an account whose balance columns differ from the sum of its
 // entries' deltas.
 type Mismatch struct {

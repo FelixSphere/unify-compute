@@ -59,7 +59,18 @@ made_up() {
   local name="$1" body="$2" dark_status="$3" dark_code="$4" got
   got="$(code -X POST -H 'Authorization: Bearer sk-smoke-test-key' -H 'Content-Type: application/json' -d "$body" "$BASE_URL/compute/v1/jobs")"
   case "$got" in
-    401) check "$name (bridge live) -> 401" 401 "$got"; body_has "made-up key is refused" '"code":"invalid_key"' ;;
+    401)
+      check "$name -> 401" 401 "$got"
+      if grep -q '"code":"missing_key"' "$tmp"; then
+        # ACCOUNTS_BACKEND=local (ADR-0011): only uck_ keys are looked up, so
+        # an sk- shape is refused before any read. Prove the lookup refuses an
+        # unknown key of the right shape too.
+        got="$(code -X POST -H 'Authorization: Bearer uck_smoketestsmoketestsmoketestsmoketest0000' -H 'Content-Type: application/json' -d "$body" "$BASE_URL/compute/v1/jobs")"
+        check "$name, made-up uck_ key (local accounts) -> 401" 401 "$got"
+        body_has "made-up uck_ key is refused" '"code":"invalid_key"'
+      else
+        body_has "made-up key is refused" '"code":"invalid_key"'
+      fi ;;
     503) check "$name (bridge dark) -> 503" 503 "$got"; body_has "key cannot be verified" '"code":"console_unavailable"' ;;
     *)   check "$name (dark build) -> $dark_status" "$dark_status" "$got"; body_has "dark build answers $dark_code" "\"code\":\"$dark_code\"" ;;
   esac

@@ -17,11 +17,33 @@
           <p class="metric" id="balance-available" aria-live="polite">—</p>
           <p class="sub" id="balance-sub">Loading your balance…</p>
         </div>
-        <a class="primary" href="mailto:contactus@felixsphere.com?subject=Unify%20Compute%20credit">Contact us</a>
+        <a class="primary" id="contact-primary" href="mailto:contactus@felixsphere.com?subject=Unify%20Compute%20credit">Contact us</a>
+        <button class="primary" type="button" id="topup-open" hidden>Add credit</button>
       </section>
-      <section class="card" aria-labelledby="topup-title">
-        <h2 id="topup-title">Adding credit</h2>
+      <p class="status-line" id="topup-status" role="status" tabindex="-1"></p>
+      <section class="card" id="topup-off" aria-labelledby="topup-off-title">
+        <h2 id="topup-off-title">Adding credit</h2>
         <p class="muted">Card top-ups are coming. Until then, contact us and we'll add credit to your balance by hand.</p>
+      </section>
+      <section class="card narrow" id="topup" aria-labelledby="topup-title" hidden>
+        <h2 id="topup-title" tabindex="-1">Add credit</h2>
+        <p class="muted">You pay by card on Stripe's payment page and come back here. The credit appears once Stripe confirms the payment, usually within seconds. Cards are not saved.</p>
+        <form id="topup-form" novalidate>
+          <div class="field">
+            <label for="amount_usd">Amount (USD)</label>
+            <input id="amount_usd" name="amount_usd" type="text" inputmode="decimal" autocomplete="off" required aria-describedby="amount_usd-hint amount_usd-error" />
+            <p class="hint" id="amount_usd-hint">USD 10.00 to 100.00 per top-up.</p>
+            <p class="field-error" id="amount_usd-error" hidden></p>
+          </div>
+          <div class="actions">
+            <button class="primary" type="submit">Continue to payment</button>
+            <button class="ghost" type="button" id="topup-cancel">Cancel</button>
+          </div>
+        </form>
+      </section>
+      <section class="section" id="topups-section" aria-labelledby="topups-title" hidden>
+        <h2 id="topups-title">Card top-ups</h2>
+        <div id="topups" aria-live="polite"></div>
       </section>
       <section class="section" aria-labelledby="history-title">
         <h2 id="history-title">Balance history</h2>
