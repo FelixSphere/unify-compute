@@ -323,7 +323,7 @@ let stubs = {};
 listeners.add((msg) => {
   if (msg.sessionId !== sessionId) return;
   if (msg.method === 'Network.requestWillBeSent') {
-    requests.push({ url: msg.params.request.url, headers: msg.params.request.headers });
+    requests.push({ url: msg.params.request.url, headers: msg.params.request.headers, document: msg.params.documentURL });
   } else if (msg.method === 'Fetch.requestPaused') {
     const { requestId, request } = msg.params;
     const path = new URL(request.url).pathname.replace(/^\/dashboard\/v1/, '');
@@ -333,8 +333,13 @@ listeners.add((msg) => {
     } catch {
       body = request.postData;
     }
-    apiCalls.push({ method: request.method, path, url: request.url, headers: request.headers, body });
-    const stub = stubs[`${request.method} ${path}`] ?? {
+    const call = { method: request.method, path, url: request.url, headers: request.headers, body };
+    apiCalls.push(call);
+    // A stub may be a function of the call, for answers that change (a
+    // reauth, then the retried request). `text` answers text/plain.
+    let stub = stubs[`${request.method} ${path}`];
+    if (typeof stub === 'function') stub = stub(call);
+    stub ??= {
       status: 404,
       body: { error: { type: 'not_found', code: 'not_found', message: 'Not found.' } },
     };
@@ -343,8 +348,11 @@ listeners.add((msg) => {
       {
         requestId,
         responseCode: stub.status,
-        responseHeaders: [{ name: 'Content-Type', value: 'application/json' }, ...(stub.headers ?? [])],
-        body: Buffer.from(JSON.stringify(stub.body ?? {})).toString('base64'),
+        responseHeaders: [
+          { name: 'Content-Type', value: stub.text === undefined ? 'application/json' : 'text/plain; charset=utf-8' },
+          ...(stub.headers ?? []),
+        ],
+        body: Buffer.from(stub.text ?? JSON.stringify(stub.body ?? {})).toString('base64'),
       },
       sessionId,
     ).catch((e) => fail(`stub for ${path}: ${e.message}`));
@@ -413,9 +421,436 @@ const noHorizontalScroll = async (path) => {
   await appLoad(path);
   const [sw, iw] = await evaluate('[document.documentElement.scrollWidth, window.innerWidth]');
   check(sw <= iw, `${path} at 375px: no horizontal scroll`, `${path} at 375px scrolls sideways (${sw} > ${iw})`);
-  await shot(`${path === '/' ? 'home' : path.slice(1)}-375`);
+  await shot(`${path === '/' ? 'home' : path.slice(1).replaceAll('/', '-')}-375`);
   await page('Emulation.clearDeviceMetricsOverride');
 };
+
+// The signed-in pages (dashboard/, plan task A7c), against stubs in the shapes
+// of docs/spec/accounts.md's session routes. compute-api serves only /me,
+// /logout, /password and /reauth of those today; the rest are stubbed here
+// exactly as the spec names them, and each page is also checked with the
+// route missing (404 not_found), which is what production answers until the
+// route is built.
+const CSRF = 'csrf-dash-7';
+const ME = {
+  user: { email: 'jane.doe@example.com', created_at: 1791000000 },
+  account: { id: 42, status: 'active', compute_enabled: false },
+  csrf_token: CSRF,
+};
+const JOB_ID = 'job_01J8Q6ZK3R7Y9W2X4V6T8S0A1B';
+const RUNNING = {
+  id: JOB_ID,
+  object: 'compute.job',
+  status: 'running',
+  sku: 'a10g-24gb-x1',
+  created_at: 1791000100,
+  started_at: 1791000142,
+  finished_at: null,
+  spec: { image: 'ghcr.io/acme/embed:1.4', command: ['python', 'run.py'], max_runtime_seconds: 7200 },
+  usage: { gpu_seconds: 1830, estimated_cost_usd: '2.5400', settled_cost_usd: '0.8600', hold_usd: '2.5400' },
+  error: null,
+  placement: { cloud: 'aws', region: 'us-east-1', instance_type: 'g5.xlarge' },
+  metadata: { pipeline: 'nightly-embed' },
+};
+const DONE = { ...RUNNING, id: 'job_01J8Q6ZK3R7Y9W2X4V6T8S0A0Z', status: 'succeeded', finished_at: 1791003000, usage: { ...RUNNING.usage, hold_usd: '0.0000' } };
+const CANCELLED = { ...RUNNING, status: 'cancelled', finished_at: 1791002000, usage: { ...RUNNING.usage, hold_usd: '0.0000' } };
+const KEY = { id: 7, name: 'nightly pipeline', display: 'uck_AbCd1234', scopes: ['jobs', 'read'], created_at: 1791000000, expires_at: null, last_used_at: 1791000500, revoked_at: null };
+const SECRET = 'uck_0123456789abcdefghijABCDEFGHIJ0123456789';
+const NEW_KEY = { id: 8, name: 'ci', display: 'uck_01234567', scopes: ['jobs', 'read'], created_at: 1791001000, expires_at: null, last_used_at: null, revoked_at: null };
+const ARTIFACT_URL = 'https://unify-compute-production-artifacts.s3.us-east-1.amazonaws.com/jobs/x/results.jsonl?X-Amz-Signature=abc';
+const okBody = (body, status = 200) => ({ status, body });
+const notFound = { status: 404, body: { error: { type: 'not_found', code: 'not_found', message: 'Not found.' } } };
+const sessionGone = err('session_required', 'Log in to continue.', null, 401, 'authentication_error');
+
+let keysList = [KEY];
+const baseStubs = () => ({
+  'GET /me': okBody(ME),
+  'POST /logout': { status: 204 },
+  'GET /balance': okBody({ available_usd: '12.5000', held_usd: '2.5400', limits: { topup_min_usd: '10.00', topup_max_usd: '100.00', balance_max_usd: '200.00', topups_per_day: 3 } }),
+  'GET /jobs': okBody({ object: 'list', data: [RUNNING, DONE], has_more: false }),
+  [`GET /jobs/${JOB_ID}`]: okBody(RUNNING),
+  [`GET /jobs/${JOB_ID}/events`]: okBody({
+    object: 'list',
+    data: [
+      { id: 'evt_1', object: 'compute.event', job_id: JOB_ID, type: 'job.queued', created_at: 1791000100, data: { sku: 'a10g-24gb-x1' } },
+      { id: 'evt_2', object: 'compute.event', job_id: JOB_ID, type: 'job.placed', created_at: 1791000140, data: { placement: RUNNING.placement } },
+    ],
+    has_more: false,
+  }),
+  [`GET /jobs/${JOB_ID}/logs`]: { status: 200, text: 'loading model\nstep 2 of 9' },
+  [`GET /jobs/${JOB_ID}/artifacts`]: okBody({
+    object: 'list',
+    data: [{ object: 'compute.artifact', path: '/mnt/out/results.jsonl', size: 18234, sha256: '9f86d081884c7d659a2feaa0c55ad015', url: ARTIFACT_URL, expires_at: 1791003600 }],
+    complete: true,
+    truncated: false,
+  }),
+  'GET /keys': () => okBody(keysList),
+  'GET /transactions': okBody({
+    data: [
+      { id: 'be_2', kind: 'settle', amount_usd: '-0.8600', available_after_usd: '12.5000', ref: JOB_ID, created_at: 1791000400, detail: {} },
+      { id: 'be_1', kind: 'admin_credit', amount_usd: '15.0000', available_after_usd: '15.0000', ref: 'ae_01J8', created_at: 1791000000, detail: {} },
+    ],
+    has_more: false,
+  }),
+  'GET /usage': okBody({ gpu_usd: '3.4000', storage_usd: '0.0000', egress_usd: '0.0000', total_usd: '3.4000', by_sku: [{ sku: 'a10g-24gb-x1', gpu_seconds: 10200, usd: '3.4000' }] }),
+});
+
+const visibleCount = (sel) =>
+  evaluate(`[...document.querySelectorAll(${js(sel)})].filter((el) => !el.closest('[hidden]') && el.getClientRects().length > 0).length`);
+const onePrimary = async (label) => {
+  const n = await visibleCount('.primary');
+  check(n <= 1, `${label}: at most one primary button (${n})`, `${label}: ${n} primary buttons in view`);
+};
+const pressKey = async (key, code, keyCode) => {
+  for (const type of ['keyDown', 'keyUp'])
+    await page('Input.dispatchKeyEvent', { type, key, code, windowsVirtualKeyCode: keyCode, ...(type === 'keyDown' && key === 'Enter' ? { text: '\r' } : {}) });
+};
+// Every state-changing call carries the CSRF token, and the token came from a
+// GET /me made just before it.
+const csrfChecked = (label, from) => {
+  const calls = apiCalls.slice(from);
+  const mutating = calls.filter((c) => c.method !== 'GET');
+  const bad = mutating.filter((c) => {
+    const i = calls.indexOf(c);
+    const prior = calls.slice(0, i).reverse().find((p) => p.method === 'GET' && p.path === '/me');
+    return c.headers['X-CSRF-Token'] !== CSRF || !prior;
+  });
+  check(
+    mutating.length > 0 && bad.length === 0,
+    `${label}: ${mutating.map((c) => `${c.method} ${c.path}`).join(', ')} sent X-CSRF-Token from a fresh GET /me`,
+    `${label}: CSRF missing or not re-fetched on ${bad.map((c) => `${c.method} ${c.path}`).join(', ') || '(no mutating call seen)'}`,
+  );
+};
+
+async function dashboardChecks() {
+  await page('Emulation.clearDeviceMetricsOverride');
+  stubs = baseStubs();
+
+  // --- Overview: the shell, the focal balance, compute access, recent jobs.
+  await appLoad('/');
+  await waitFor(`document.querySelector('#balance-available')?.textContent === '12.5000'`, 'overview balance');
+  const shellBox = await evaluate(`(() => {
+    const r = (s) => document.querySelector(s).getBoundingClientRect();
+    const cur = document.querySelector('.app-nav a[aria-current="page"]');
+    return { header: r('.app-header').height, nav: r('.app-nav').width, cur: cur?.getAttribute('href'), curBg: getComputedStyle(cur).backgroundColor,
+      avatar: r('#account-button').width, initials: document.querySelector('#account-initials').textContent,
+      metric: getComputedStyle(document.querySelector('.metric')).fontSize, metricFont: getComputedStyle(document.querySelector('.metric')).fontFamily };
+  })()`);
+  check(
+    shellBox.header === 64 && shellBox.nav === 216 && shellBox.cur === '/' && shellBox.curBg === 'rgb(14, 14, 14)' && shellBox.avatar === 36 && shellBox.initials === 'JD',
+    'app shell: 64px header, 216px sidebar, current item in ink, 36px account button with initials',
+    `app shell: ${JSON.stringify(shellBox)}`,
+  );
+  check(
+    shellBox.metric === '64px' && shellBox.metricFont.includes('Space Grotesk'),
+    'focal number in Space Grotesk 64px',
+    `focal number is ${shellBox.metric} ${shellBox.metricFont}`,
+  );
+  check(
+    (await text('#balance-sub')).includes('2.5400'),
+    'overview shows the held amount under the balance',
+    `overview balance sub-line: ${await text('#balance-sub')}`,
+  );
+  check(
+    (await text('#access-word')) === 'Awaiting enablement' &&
+      (await evaluate(`document.querySelector('#access-text a')?.getAttribute('href')`))?.startsWith('mailto:contactus@felixsphere.com') &&
+      (await evaluate(`getComputedStyle(document.querySelector('#access-dot')).width`)) === '8px',
+    'compute access: dot + "Awaiting enablement" + mailto contact',
+    `compute access: "${await text('#access-word')}"`,
+  );
+  await waitFor(`!!document.querySelector('#recent-jobs a[href="/jobs/${JOB_ID}"]')`, 'recent jobs to link to the job page');
+  check(
+    (await evaluate(`getComputedStyle(document.querySelector('#recent-jobs th')).fontFamily`)).includes('IBM Plex Mono') &&
+      (await evaluate(`getComputedStyle(document.querySelector('#recent-jobs td .mono')).fontFamily`)).includes('IBM Plex Mono'),
+    'tables: mono headers, mono IDs',
+    'tables: headers or IDs are not mono',
+  );
+  await onePrimary('/');
+  // The policy is enforced on the signed-in pages too.
+  const inline = await evaluate(`new Promise((resolve) => {
+    let violated = false;
+    document.addEventListener('securitypolicyviolation', () => { violated = true; }, { once: true });
+    const s = document.createElement('script');
+    s.textContent = 'window.__dashInline = true';
+    document.head.appendChild(s);
+    setTimeout(() => resolve({ ran: window.__dashInline === true, violated }), 200);
+  })`);
+  check(!inline.ran && inline.violated, 'overview: CSP blocks inline script', `overview: inline script ran=${inline.ran} violation=${inline.violated}`);
+  await shot('overview-desktop');
+
+  // Account menu by keyboard: opens, Escape closes and returns focus.
+  await evaluate(`document.querySelector('#account-button').focus()`);
+  await pressKey('Enter', 'Enter', 13);
+  const opened = await isShown('#account-panel');
+  await pressKey('Escape', 'Escape', 27);
+  check(
+    opened && !(await isShown('#account-panel')) && (await evaluate(`document.activeElement?.id`)) === 'account-button',
+    'account menu opens from the keyboard; Escape closes it and returns focus',
+    `account menu: opened=${opened}, still shown=${await isShown('#account-panel')}`,
+  );
+
+  stubs['GET /me'] = okBody({ ...ME, account: { ...ME.account, compute_enabled: true } });
+  await appLoad('/');
+  await waitFor(`document.querySelector('#access-word')?.textContent === 'Enabled'`, 'compute access "Enabled"');
+  ok('compute access shows "Enabled" when compute_enabled');
+  stubs = baseStubs();
+
+  // --- API keys: create (reauth first), the key shown once, revoke.
+  await appLoad('/keys');
+  await waitFor(`document.querySelector('#keys-list')?.textContent.includes('uck_AbCd1234')`, 'keys list');
+  check((await text('#keys-count')) === '1', 'keys: focal count of active keys', `keys count: ${await text('#keys-count')}`);
+  await onePrimary('/keys');
+  await click('#create-open');
+  check(
+    (await isShown('#create')) && !(await isShown('#create-open')) && (await evaluate(`document.activeElement?.id`)) === 'key-name',
+    'create form opens, takes focus, and replaces the header primary',
+    'create form did not open cleanly',
+  );
+  await onePrimary('/keys create');
+  let keyPosts = 0;
+  const createFrom = apiCalls.length;
+  stubs['POST /keys'] = () =>
+    ++keyPosts === 1
+      ? err('reauth_required', 'Enter your password again to continue.', null, 401, 'authentication_error')
+      : ((keysList = [NEW_KEY, KEY]), okBody({ ...NEW_KEY, secret: SECRET }, 201));
+  stubs['POST /reauth'] = { status: 204 };
+  await click('#create-form button[type=submit]');
+  await fieldErrorShown('key-name', 'Give the key a name.', 'key without a name');
+  await setValue('#key-name', 'ci');
+  await click('#create-form button[type=submit]');
+  await waitFor(`document.querySelector('#reauth-dialog')?.open === true`, 'reauth dialog on reauth_required');
+  check((await evaluate(`document.activeElement?.id`)) === 'reauth_password', 'reauth dialog focuses the password', 'reauth dialog did not focus the password');
+  await shot('keys-reauth');
+  await setValue('#reauth_password', 'my current passphrase');
+  await click('#reauth-form button[type=submit]');
+  await waitFor(`!document.querySelector('#reveal').hidden`, 'the new key to be revealed');
+  check((await text('#reveal-secret')) === SECRET, 'new key shown in full after reauth', `revealed: ${await text('#reveal-secret')}`);
+  const reauthCall = apiCalls.slice(createFrom).find((c) => c.path === '/reauth');
+  const keyCalls = apiCalls.slice(createFrom).filter((c) => c.method === 'POST' && c.path === '/keys');
+  check(
+    reauthCall?.body?.password === 'my current passphrase' && keyCalls.length === 2 && keyCalls[1].body.name === 'ci' && js(keyCalls[1].body.scopes) === js(['jobs', 'read']),
+    'reauth_required → POST /reauth { password } → POST /keys retried { name, scopes }',
+    `reauth flow calls: ${js(apiCalls.slice(createFrom).map((c) => `${c.method} ${c.path} ${js(c.body)}`))}`,
+  );
+  csrfChecked('create key', createFrom);
+  check(
+    (await text('#reveal-warning')).includes('only time') && (await evaluate(`document.querySelector('#reveal-title') === document.activeElement`)),
+    'reveal: one-time warning, focus on its heading',
+    'reveal: warning or focus missing',
+  );
+  await waitFor(`document.querySelector('#keys-list')?.textContent.includes('uck_01234567')`, 'list to show the new key');
+  check(!(await text('#keys-list')).includes(SECRET), 'the list shows the key prefix, never the secret', 'the secret appears in the keys list');
+  await onePrimary('/keys reveal');
+  await send('Browser.grantPermissions', { origin: appOrigin, permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'] }).catch(() => {});
+  await click('#reveal-copy');
+  await waitFor(`document.querySelector('#reveal-status').textContent.length > 0`, 'copy confirmation');
+  ok(`copy button announces: "${await text('#reveal-status')}"`);
+  await shot('keys-reveal');
+  await click('#reveal-done');
+  check(
+    !(await evaluate(`document.body.textContent.includes(${js(SECRET)})`)) && !(await isShown('#reveal')),
+    'after "I\'ve saved it" the secret is gone from the page',
+    'the secret is still in the page after "I\'ve saved it"',
+  );
+  await appLoad('/keys');
+  await waitFor(`document.querySelector('#keys-list')?.textContent.includes('uck_01234567')`, 'keys list after reload');
+  check(!(await evaluate(`document.documentElement.outerHTML.includes(${js(SECRET)})`)), 'the key is not shown again after a reload', 'the key reappeared after a reload');
+
+  const revokeFrom = apiCalls.length;
+  stubs['DELETE /keys/7'] = () => ((keysList = [NEW_KEY, { ...KEY, revoked_at: 1791002000 }]), { status: 204 });
+  await click('button[data-revoke="7"]');
+  await waitFor(`document.querySelector('#revoke-dialog')?.open === true`, 'revoke dialog');
+  check((await text('#revoke-display')) === 'uck_AbCd1234', 'revoke dialog names the key', `revoke dialog names "${await text('#revoke-display')}"`);
+  await shot('keys-revoke');
+  await click('#revoke-confirm');
+  await waitFor(`document.querySelector('#revoke-dialog').open === false && [...document.querySelectorAll('#keys-list tr')].some((tr) => tr.textContent.includes('uck_AbCd1234') && tr.textContent.includes('Revoked'))`, 'revoked key to read Revoked');
+  check(!(await evaluate(`!!document.querySelector('button[data-revoke="7"]')`)), 'revoked key has no Revoke action', 'revoked key still offers Revoke');
+  check(apiCalls.slice(revokeFrom).some((c) => c.method === 'DELETE' && c.path === '/keys/7'), 'revoke sends DELETE /keys/7', 'revoke did not send DELETE /keys/7');
+  csrfChecked('revoke key', revokeFrom);
+  keysList = [KEY];
+
+  // --- Jobs: list, filter, detail with usage, events, logs, artifacts, cancel.
+  await appLoad('/jobs');
+  await waitFor(`document.querySelectorAll('#jobs-list tbody tr').length === 2`, 'jobs list');
+  check((await text('#jobs-running')) === '2', 'jobs: focal count of running jobs', `jobs running: ${await text('#jobs-running')}`);
+  await click('#filters .chip[data-status="running"]');
+  await waitFor(`document.querySelector('#filters .chip[data-status="running"]').getAttribute('aria-pressed') === 'true'`, 'status chip pressed');
+  const listCall = apiCalls.filter((c) => c.path === '/jobs').at(-1);
+  check(new URL(listCall.url).searchParams.getAll('status').join() === 'running', 'status chip filters GET /jobs?status=running', `jobs filter url: ${listCall.url}`);
+  check(
+    (await evaluate(`getComputedStyle(document.querySelector('#filters .chip[aria-pressed="true"]')).backgroundColor`)) === 'rgb(14, 14, 14)',
+    'selected chip is an ink fill',
+    'selected chip is not ink',
+  );
+  await shot('jobs-desktop');
+
+  await appLoad(`/jobs/${JOB_ID}`);
+  await waitFor(`!document.querySelector('#job').hidden`, 'job detail');
+  check(
+    (await text('#job-settled')) === '0.8600' && (await text('#job-sub')).includes('Running') && (await text('#job-usage')).includes('2.5400') && (await text('#job-details')).includes('a10g-24gb-x1'),
+    'job detail: charged so far, status, hold and SKU',
+    `job detail: ${await text('#job-settled')} / ${await text('#job-sub')}`,
+  );
+  await waitFor(`document.querySelector('#job-events')?.textContent.includes('job.placed')`, 'job events');
+  await waitFor(`document.querySelector('#job-logs pre')?.textContent.includes('step 2 of 9')`, 'job logs');
+  await waitFor(`!!document.querySelector('#job-artifacts a[download]')`, 'artifact link');
+  check(
+    (await evaluate(`document.querySelector('#job-artifacts a[download]').href`)) === ARTIFACT_URL &&
+      (await evaluate(`document.querySelector('#job-artifacts a[download]').rel`)).includes('noreferrer'),
+    'artifacts: download link to the presigned URL, no referrer',
+    'artifacts: download link wrong',
+  );
+  await shot('job-desktop');
+  const cancelFrom = apiCalls.length;
+  stubs[`POST /jobs/${JOB_ID}/cancel`] = okBody(CANCELLED, 202);
+  await click('#job-cancel');
+  await waitFor(`document.querySelector('#cancel-dialog')?.open === true`, 'cancel dialog');
+  await click('#cancel-confirm');
+  await waitFor(`document.querySelector('#job-sub').textContent.includes('Cancelled')`, 'job to read Cancelled');
+  check(
+    !(await isShown('#job-cancel')) && (await text('#job-status-line')).startsWith('Cancel requested'),
+    'cancel: POST accepted, job shows Cancelled, no second cancel offered',
+    'cancel: job page did not update',
+  );
+  csrfChecked('cancel job', cancelFrom);
+
+  // Artifacts have no dashboard route in the spec yet: say where they are.
+  delete stubs[`GET /jobs/${JOB_ID}/artifacts`];
+  stubs[`GET /jobs/${JOB_ID}`] = okBody(RUNNING);
+  await appLoad(`/jobs/${JOB_ID}`);
+  await waitFor(`document.querySelector('#job-artifacts')?.textContent.includes('/compute/v1/jobs/${JOB_ID}/artifacts')`, 'artifacts placeholder naming the job API route');
+  ok('artifacts without a dashboard route point at the job API');
+  stubs[`GET /jobs/job_missing`] = notFound;
+  await appLoad('/jobs/job_missing');
+  await formErrorShown("We couldn't find that job in your account.", 'unknown job');
+
+  // --- Usage and Billing.
+  stubs = baseStubs();
+  await appLoad('/usage');
+  await waitFor(`document.querySelector('#usage-total')?.textContent === '3.4000'`, 'usage total');
+  const now = new Date();
+  const month = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+  check(new URL(apiCalls.filter((c) => c.path === '/usage').at(-1).url).searchParams.get('month') === month, `usage asks for ${month}`, 'usage month parameter wrong');
+  check(await evaluate(`document.querySelector('#month-next').disabled`), 'usage: no next month past the current one', 'usage: next month enabled for the future');
+  await click('#month-prev');
+  await waitFor(`!document.querySelector('#month-next').disabled`, 'previous month');
+  await shot('usage-desktop');
+
+  await appLoad('/billing');
+  await waitFor(`document.querySelector('#history')?.textContent.includes('Charge')`, 'balance history');
+  check(
+    (await text('#balance-available')) === '12.5000' && (await evaluate(`!!document.querySelector('#history a[href="/jobs/${JOB_ID}"]')`)),
+    'billing: balance, history with job links',
+    'billing: balance or history wrong',
+  );
+  check(
+    (await evaluate(`document.querySelector('.focal a.primary')?.getAttribute('href')`))?.startsWith('mailto:contactus@felixsphere.com'),
+    'billing: the one primary is "Contact us" (top-ups not built)',
+    'billing: no contact primary',
+  );
+  await onePrimary('/billing');
+  await shot('billing-desktop');
+
+  // Routes compute-api does not serve yet answer 404 not_found: placeholders.
+  for (const route of ['GET /balance', 'GET /transactions', 'GET /usage', 'GET /keys', 'GET /jobs']) delete stubs[route];
+  for (const [path, sel, want] of [
+    ['/billing', '#history', 'Your balance history will appear here'],
+    ['/usage', '#usage-breakdown', 'Monthly usage will appear here'],
+    ['/keys', '#keys-list', 'Your API keys will be listed here'],
+    ['/jobs', '#jobs-list', 'Your jobs will be listed here'],
+    ['/', '#balance-sub', 'Your balance will show here'],
+  ]) {
+    await appLoad(path);
+    await waitFor(`document.querySelector(${js(sel)})?.textContent.includes(${js(want)})`, `${path} placeholder for a route not built yet`);
+  }
+  ok('every section has a placeholder while its route is not built');
+
+  // --- Account: change password, log out.
+  stubs = baseStubs();
+  await appLoad('/account');
+  await waitFor(`document.querySelector('#me-email')?.textContent === 'jane.doe@example.com'`, 'account email');
+  await setValue('#current_password', 'wrong current one');
+  await setValue('#password', 'a new long passphrase');
+  await setValue('#password_confirm', 'a new long passphrase!');
+  await click('#form button[type=submit]');
+  await fieldErrorShown('password_confirm', "Passwords don't match.", 'account: confirm mismatch');
+  await setValue('#password_confirm', 'a new long passphrase');
+  stubs['POST /password'] = err('invalid_credentials', 'Your current password is not correct.', 'current_password', 401, 'authentication_error');
+  await click('#form button[type=submit]');
+  await fieldErrorShown('current_password', 'Your current password is not correct.', 'account: wrong current password');
+  check((await evaluate('location.pathname')) === '/account', 'a wrong current password (401) does not log you out', 'a 401 invalid_credentials redirected');
+  const pwFrom = apiCalls.length;
+  stubs['POST /password'] = { status: 204 };
+  await setValue('#current_password', 'right current one');
+  await click('#form button[type=submit]');
+  await waitFor(`document.querySelector('#password-status').textContent.startsWith('Password changed')`, 'password changed');
+  const pw = apiCalls.slice(pwFrom).find((c) => c.path === '/password');
+  check(
+    pw?.body?.current_password === 'right current one' && pw.body.password === 'a new long passphrase' && pw.body.password_confirm === 'a new long passphrase',
+    'POST /password { current_password, password, password_confirm }',
+    `POST /password body: ${js(pw?.body)}`,
+  );
+  csrfChecked('change password', pwFrom);
+  await onePrimary('/account');
+  await shot('account-desktop');
+  const outFrom = apiCalls.length;
+  await click('#logout-main');
+  await waitFor(`location.pathname === '/login'`, 'log out from /account');
+  csrfChecked('log out', outFrom);
+
+  // --- 401 session_required anywhere goes to /login.
+  stubs = { ...baseStubs(), 'GET /transactions': sessionGone };
+  await appLoad('/billing');
+  await waitFor(`location.pathname === '/login'`, 'a 401 from a data route to redirect to /login');
+  stubs = { ...baseStubs(), 'GET /me': sessionGone };
+  await appLoad(`/jobs/${JOB_ID}`);
+  await waitFor(`location.pathname === '/login'`, 'a 401 from /me on a job page to redirect to /login');
+  stubs = { ...baseStubs(), 'POST /keys': sessionGone };
+  await appLoad('/keys');
+  await waitFor(`document.querySelector('#keys-list')?.textContent.includes('uck_AbCd1234')`, 'keys list');
+  await click('#create-open');
+  await setValue('#key-name', 'late');
+  await click('#create-form button[type=submit]');
+  await waitFor(`location.pathname === '/login'`, 'a 401 session_required on POST to redirect to /login');
+  ok('401 session_required on GET /me, a data route or a POST goes to /login');
+
+  // --- Phone width: no sideways scroll, and the menu under the header.
+  stubs = baseStubs();
+  for (const path of ['/', '/keys', '/jobs', `/jobs/${JOB_ID}`, '/usage', '/billing', '/account']) {
+    await noHorizontalScroll(path);
+  }
+  await page('Emulation.setDeviceMetricsOverride', { width: 375, height: 812, deviceScaleFactor: 2, mobile: true });
+  await appLoad('/keys');
+  await waitFor(`document.querySelector('#keys-list')?.textContent.includes('uck_AbCd1234')`, 'keys at 375');
+  const closed = await evaluate(`(() => {
+    const b = document.querySelector('#menu-button').getBoundingClientRect();
+    return { w: b.width, h: b.height, nav: document.querySelector('#app-nav').getClientRects().length, mark: document.querySelector('.app-header .mark').getClientRects().length, brand: document.querySelector('.app-header .brand').getClientRects().length, header: document.querySelector('.app-header').getBoundingClientRect().height };
+  })()`);
+  check(
+    closed.w === 44 && closed.h === 44 && closed.nav === 0 && closed.mark > 0 && closed.brand === 0 && closed.header === 64,
+    '375: 64px header, mark alone, 44px menu button, sidebar collapsed',
+    `375 shell: ${js(closed)}`,
+  );
+  await click('#menu-button');
+  const open = await evaluate(`(() => {
+    const n = document.querySelector('#app-nav').getBoundingClientRect();
+    const a = document.querySelector('#app-nav a[aria-current="page"]');
+    return { top: n.top, width: n.width, row: a.getBoundingClientRect().height, href: a.getAttribute('href'), bg: getComputedStyle(a).backgroundColor, expanded: document.querySelector('#menu-button').getAttribute('aria-expanded') };
+  })()`);
+  check(
+    open.top === 64 && open.width === 375 && open.row === 48 && open.href === '/keys' && open.bg === 'rgb(14, 14, 14)' && open.expanded === 'true',
+    '375: menu opens as a full-width panel under the header, 48px rows, current item in ink',
+    `375 menu: ${js(open)}`,
+  );
+  await shot('keys-375-menu');
+  await pressKey('Escape', 'Escape', 27);
+  check(
+    (await evaluate(`document.querySelector('#app-nav').getClientRects().length`)) === 0 && (await evaluate(`document.activeElement?.id`)) === 'menu-button',
+    '375: Escape closes the menu and returns focus to its button',
+    '375: Escape did not close the menu',
+  );
+  await page('Emulation.clearDeviceMetricsOverride');
+}
 
 async function appChecks() {
   await page('Network.enable');
@@ -583,7 +1018,7 @@ async function appChecks() {
   };
   await click('button[type=submit]');
   await waitFor(`location.pathname === '/' && document.querySelector('#account-email')?.textContent === 'person@example.com'`, 'verify to sign in and land on /');
-  ok('verified and landed on the signed-in placeholder');
+  ok('verified and landed on the overview');
   await shot('home-desktop');
   await click('#logout');
   await waitFor(`location.pathname === '/login' && document.readyState === 'complete'`, 'log out to reach /login');
@@ -697,8 +1132,20 @@ async function appChecks() {
   await appLoad('/does-not-exist');
   check((await text('h1')) === 'Page not found', `${APP_HOST} 404 page`, `${APP_HOST} 404 page not rendered`);
 
-  const foreign = [...new Set(requests.map((r) => r.url).filter((u) => !u.startsWith(appOrigin) && !u.startsWith('data:')))];
-  check(foreign.length === 0, `${APP_HOST}: no third-party requests`, `${APP_HOST} requested: ${foreign.join(', ')}`);
+  await dashboardChecks();
+
+  // Only what the app host's own documents asked for: the marketing pages
+  // checked before this can still be finishing lazy chunk loads.
+  const foreign = [
+    ...new Set(
+      requests
+        .filter((r) => r.document?.startsWith(appOrigin))
+        .map((r) => r.url)
+        .filter((u) => !u.startsWith(appOrigin) && !u.startsWith('data:')),
+    ),
+  ];
+  const appRequests = requests.filter((r) => r.document?.startsWith(appOrigin)).length;
+  check(appRequests > 0 && foreign.length === 0, `${APP_HOST}: no third-party requests (${appRequests} seen)`, `${APP_HOST} requested: ${foreign.join(', ')}`);
   await page('Fetch.disable');
 }
 
