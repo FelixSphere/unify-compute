@@ -19,7 +19,7 @@ first, always.
 |---|---|---|
 | `staging.compute.unifyai.us` | compute-api (`/compute/v1/*`, `/healthz`) | ALB host rule → port 8080 |
 | `site.staging.compute.unifyai.us` | marketing site container (`/healthz`) | ALB host rule → port 8081 |
-| `console.staging.compute.unifyai.us` | staging UnifyAPI console (SPA, `/api`, `/v1`) | ALB host rule → port 3000 |
+| `console.staging.compute.unifyai.us` | staging Unify API console (SPA, `/api`, `/v1`) | ALB host rule → port 3000 |
 
 All three are children of `compute.unifyai.us`, which stays a CNAME to OpenAI
 Sites for the marketing page until the production cutover in ADR-0009. One
@@ -257,7 +257,7 @@ the environment's `API_ORIGIN` and the site at its `PUBLIC_ORIGIN`:
 `/healthz` 200 naming compute-api **and the build the provenance step found**;
 `/compute/v1/skus` 200 JSON with at least one priced SKU;
 `/compute/v1/jobs` without a key 401 with compute-api's `missing_key`;
-`/` 200 with `<title>Unify Compute`; `/privacy` 200; `/icon-v3.svg` 200 with
+`/` 200 with `<title>Unify Compute`; `/privacy` 200; `/icon-v4.svg` 200 with
 `Cache-Control: max-age` of at least an hour (the Caddyfile's value). Smoke failing does **not** roll back
 automatically, because by then the host has passed its own checks and the
 fault may be in front of it. The summary prints the rollback command.

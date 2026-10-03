@@ -93,7 +93,7 @@
 	# plus favicon.ico and apple-touch-icon.png, which clients fetch by fixed
 	# path and the HTML busts with ?v=3. An hour bounds how stale a missed
 	# bump can be.
-	@public path /favicon.ico /favicon-32-v3.png /icon-v3.svg /apple-touch-icon.png /manifest-v3.webmanifest /og-image-v3.png /icons/* /brand/* /email/*
+	@public path /favicon.ico /favicon-32-v4.png /icon-v4.svg /apple-touch-icon.png /manifest-v3.webmanifest /og-image-v3.png /icons/* /brand/* /email/*
 	header @public Cache-Control "public, max-age=3600"
 
 	handle {
