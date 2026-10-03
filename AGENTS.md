@@ -85,11 +85,16 @@ Current status (say what exists rather than describing targets as shipped):
   [ADR-0009](docs/adr/0009-host-everything-on-aws.md), **Proposed**.
   Applied on 2026-10-02: `shared/ecr`, `shared/github-oidc`, staging (VPC
   10.72/16, instance `i-06125c23285803d7a`) and production (VPC 10.71/16,
-  instance `i-07dd2f6d313a0dafd`). Both run compute-api `9dfc652a…` and site `6981df35…`
-  (built from e5ce490, 2026-10-03; records in `deploy/releases/`). That is the
-  wired job API. Staging also runs its own console (UnifyAPI trial build
-  `e3cef17`, with the bridge on), SkyPilot, and artifact storage; a real key
-  there gets a job accepted and held. Production's compute-api has
+  instance `i-07dd2f6d313a0dafd`). Both run compute-api `40e08796…` and site `48aa37ff…`
+  (built from 3871bb5, 2026-10-03; records in `deploy/releases/`). **Staging
+  runs Compute's own accounts** (ADR-0011, `ACCOUNTS_BACKEND=local`): sign-up
+  on `app.staging.compute.unifyai.us`, `uck_` keys, the local biller. Its job
+  API refuses `sk-` keys. **Production stays on Unify API accounts**
+  (`console`): keyed routes use the bridge, and `uck_` keys are refused.
+  `app.compute.unifyai.us` exists and is not linked from the site; its
+  `/dashboard/v1` is 404 there. Staging also runs SkyPilot and artifact storage. Its console container
+  (UnifyAPI trial build `e3cef17`) still runs, but compute-api no longer
+  calls it. Production's compute-api has
   `CONSOLE_URL=https://app.unifyapi.ai` and the production bridge secret
   (2026-10-03), and no SkyPilot. Both hosts are IMDS-locked (hop limit 1). `compute.unifyai.us` was cut over
   from OpenAI Sites to production's ALB on 2026-10-02 (Route53 change
