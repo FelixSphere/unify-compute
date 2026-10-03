@@ -1,0 +1,1090 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Unify Compute dashboard API",
+    "version": "v1-draft",
+    "description": "The /dashboard/v1 routes the dashboard pages call (ADR-0011, docs/spec/accounts.md). Served by compute-api only with ACCOUNTS_BACKEND=local and only on the app host (Host = APP_ORIGIN's host, else 404); with the console backend none of it exists. Not part of the job API contract (compute-api/internal/api/openapi.json): no API key is accepted here and no cookie there. Every non-GET needs Origin = APP_ORIGIN; session routes need the __Host-uc_session cookie and, for non-GET, X-CSRF-Token. compute-api/internal/dashboard tests hold this document's operations against the registered routes. Keys, balance, jobs and top-ups (A5, A7c, B1) are not here yet.",
+    "license": {
+      "name": "Proprietary",
+      "identifier": "LicenseRef-Proprietary"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://app.staging.compute.unifyai.us",
+      "description": "Staging. Not applied yet."
+    },
+    {
+      "url": "https://app.compute.unifyai.us",
+      "description": "Production. Not live; production runs the console backend."
+    }
+  ],
+  "paths": {
+    "/dashboard/v1/config": {
+      "get": {
+        "operationId": "getConfig",
+        "summary": "What the signed-out pages need",
+        "description": "turnstile_site_key is null while Turnstile is off (ADR-0011 D5).",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Config.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "turnstile_site_key": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "min_password_length": {
+                      "type": "integer"
+                    },
+                    "topup": {
+                      "type": "object",
+                      "properties": {
+                        "min_usd": {
+                          "type": "string"
+                        },
+                        "max_usd": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "required": [
+                    "turnstile_site_key",
+                    "min_password_length",
+                    "topup"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: Host is not the app host. The whole prefix is 404 on any other host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/signup": {
+      "post": {
+        "operationId": "signup",
+        "summary": "Create an account and email a code",
+        "description": "Always 202 for a well-formed request. A new address gets a 6-digit code; a registered one gets the 'someone tried to sign up' email instead, so the answer never says which. Throttled 5 per IP per hour, counted after validation.",
+        "security": [],
+        "responses": {
+          "202": {
+            "description": "Accepted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "const": "verification_sent"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "malformed_body, bot_check_failed, invalid_email, password_mismatch, weak_password.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "csrf_failed: Origin is not APP_ORIGIN (every non-GET), or X-CSRF-Token does not match the session (session routes).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: Host is not the app host. The whole prefix is 404 on any other host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: a throttle refused the attempt. Always with Retry-After (seconds).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "email_unavailable: SES refused the code; the signup was rolled back and the address is free.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string"
+                  },
+                  "password_confirm": {
+                    "type": "string"
+                  },
+                  "website": {
+                    "type": "string",
+                    "description": "Honeypot. Hidden from people; must be absent or empty, else 400 bot_check_failed (ADR-0011 D5: no Turnstile)."
+                  }
+                },
+                "required": [
+                  "email",
+                  "password",
+                  "password_confirm"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/verify": {
+      "post": {
+        "operationId": "verify",
+        "summary": "Enter the code; activates and logs in",
+        "description": "Any wrong, expired, exhausted (5 wrong) or superseded code, or an unknown address, is the same invalid_code. Wrong codes count 20 per IP per hour.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Logged in. The cookie is set; keep csrf_token for X-CSRF-Token.",
+            "headers": {
+              "Set-Cookie": {
+                "description": "__Host-uc_session=<token>; Path=/; Max-Age=604800; HttpOnly; Secure; SameSite=Lax",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "malformed_body, invalid_code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "csrf_failed: Origin is not APP_ORIGIN (every non-GET), or X-CSRF-Token does not match the session (session routes).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: Host is not the app host. The whole prefix is 404 on any other host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: a throttle refused the attempt. Always with Retry-After (seconds).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  },
+                  "code": {
+                    "type": "string",
+                    "description": "6 digits; spaces are ignored."
+                  }
+                },
+                "required": [
+                  "email",
+                  "code"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/verify/resend": {
+      "post": {
+        "operationId": "resendCode",
+        "summary": "Email a new code",
+        "description": "Always 202; a code is sent only to a pending user, after the response. 1 a minute and 5 an hour per address, 20 an hour per IP.",
+        "security": [],
+        "responses": {
+          "202": {
+            "description": "Accepted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "const": "verification_sent"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "malformed_body, bot_check_failed, invalid_email.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "csrf_failed: Origin is not APP_ORIGIN (every non-GET), or X-CSRF-Token does not match the session (session routes).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: Host is not the app host. The whole prefix is 404 on any other host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: a throttle refused the attempt. Always with Retry-After (seconds).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  },
+                  "website": {
+                    "type": "string",
+                    "description": "Honeypot. Hidden from people; must be absent or empty, else 400 bot_check_failed (ADR-0011 D5: no Turnstile)."
+                  }
+                },
+                "required": [
+                  "email"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/login": {
+      "post": {
+        "operationId": "login",
+        "summary": "Log in; rotates any existing session",
+        "description": "Unknown address and wrong password are the same 401 at the same cost. email_unverified and account_disabled only after the correct password. 20 attempts per IP (every attempt) and 50 failures per address per 10 minutes.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Logged in. The cookie is set; keep csrf_token for X-CSRF-Token.",
+            "headers": {
+              "Set-Cookie": {
+                "description": "__Host-uc_session=<token>; Path=/; Max-Age=604800; HttpOnly; Secure; SameSite=Lax",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "malformed_body, bot_check_failed, invalid_email.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "email_unverified, account_disabled; or csrf_failed (foreign Origin).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: Host is not the app host. The whole prefix is 404 on any other host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: a throttle refused the attempt. Always with Retry-After (seconds).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string"
+                  },
+                  "website": {
+                    "type": "string",
+                    "description": "Honeypot. Hidden from people; must be absent or empty, else 400 bot_check_failed (ADR-0011 D5: no Turnstile)."
+                  }
+                },
+                "required": [
+                  "email",
+                  "password"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/password/forgot": {
+      "post": {
+        "operationId": "forgotPassword",
+        "summary": "Email a reset link",
+        "description": "Always 202; the link (token in the URL fragment, 1 h, single use) goes to an active or pending user, after the response. 5 per IP and 5 per address per hour.",
+        "security": [],
+        "responses": {
+          "202": {
+            "description": "Accepted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "const": "reset_requested"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "malformed_body, bot_check_failed, invalid_email.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "csrf_failed: Origin is not APP_ORIGIN (every non-GET), or X-CSRF-Token does not match the session (session routes).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: Host is not the app host. The whole prefix is 404 on any other host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: a throttle refused the attempt. Always with Retry-After (seconds).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  },
+                  "website": {
+                    "type": "string",
+                    "description": "Honeypot. Hidden from people; must be absent or empty, else 400 bot_check_failed (ADR-0011 D5: no Turnstile)."
+                  }
+                },
+                "required": [
+                  "email"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/password/reset": {
+      "post": {
+        "operationId": "resetPassword",
+        "summary": "Set a new password from a reset link",
+        "description": "Ends every session of the user (and clears this browser's cookie); does not log in. Verifies a pending address.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Password set.",
+            "headers": {
+              "Set-Cookie": {
+                "description": "__Host-uc_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax (cleared)",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "const": "password_reset"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "malformed_body, password_mismatch, invalid_token, weak_password.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "csrf_failed: Origin is not APP_ORIGIN (every non-GET), or X-CSRF-Token does not match the session (session routes).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: Host is not the app host. The whole prefix is 404 on any other host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string"
+                  },
+                  "password_confirm": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "token",
+                  "password",
+                  "password_confirm"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/me": {
+      "get": {
+        "operationId": "me",
+        "summary": "The signed-in user",
+        "description": "Also returns the session's csrf_token, so a reloaded page can recover it.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "session_required: no cookie, or the session is expired (12 h idle, 7 d absolute) or ended. A stale cookie is cleared.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: Host is not the app host. The whole prefix is 404 on any other host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/logout": {
+      "post": {
+        "operationId": "logout",
+        "summary": "End this session",
+        "description": "Needs X-CSRF-Token.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Ended; cookie cleared.",
+            "headers": {
+              "Set-Cookie": {
+                "description": "__Host-uc_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax (cleared)",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "session_required: no cookie, or the session is expired (12 h idle, 7 d absolute) or ended. A stale cookie is cleared.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "csrf_failed: Origin is not APP_ORIGIN (every non-GET), or X-CSRF-Token does not match the session (session routes).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: Host is not the app host. The whole prefix is 404 on any other host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/password": {
+      "post": {
+        "operationId": "changePassword",
+        "summary": "Change the password",
+        "description": "current_password is the recent-password check (ADR-0011 §8) and counts as a reauth. Every other session of the user ends; this one stays. Wrong current passwords share login's 50-per-address limit.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Changed."
+          },
+          "400": {
+            "description": "malformed_body, password_mismatch, weak_password.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_credentials (param current_password), or session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "csrf_failed: Origin is not APP_ORIGIN (every non-GET), or X-CSRF-Token does not match the session (session routes).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: Host is not the app host. The whole prefix is 404 on any other host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: a throttle refused the attempt. Always with Retry-After (seconds).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "current_password": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string"
+                  },
+                  "password_confirm": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "current_password",
+                  "password",
+                  "password_confirm"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/reauth": {
+      "post": {
+        "operationId": "reauth",
+        "summary": "Re-enter the password",
+        "description": "Sets the session's reauth time, which key creation needs within 10 minutes (A5).",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Recorded."
+          },
+          "400": {
+            "description": "malformed_body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_credentials (param password), or session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "csrf_failed: Origin is not APP_ORIGIN (every non-GET), or X-CSRF-Token does not match the session (session routes).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: Host is not the app host. The whole prefix is 404 on any other host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: a throttle refused the attempt. Always with Retry-After (seconds).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "password": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "password"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "session": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Host-uc_session",
+        "description": "Host-only, Secure, HttpOnly, SameSite=Lax. Idle 12 h, absolute 7 d. Non-GET requests also send X-CSRF-Token with the csrf_token from login, verify or /me."
+      }
+    },
+    "schemas": {
+      "Session": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string"
+              },
+              "created_at": {
+                "type": "integer",
+                "description": "Unix seconds"
+              }
+            },
+            "required": [
+              "email",
+              "created_at"
+            ]
+          },
+          "account": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "integer"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "active",
+                  "suspended",
+                  "closed"
+                ]
+              },
+              "compute_enabled": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "status",
+              "compute_enabled"
+            ]
+          },
+          "csrf_token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "user",
+          "account",
+          "csrf_token"
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string",
+                "description": "A sentence for a person."
+              },
+              "param": {
+                "type": "string",
+                "description": "The field to show the message under; absent for the form-level box."
+              }
+            },
+            "required": [
+              "type",
+              "code",
+              "message"
+            ]
+          }
+        },
+        "required": [
+          "error"
+        ]
+      }
+    }
+  }
+}

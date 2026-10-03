@@ -160,7 +160,10 @@ type holdRequest struct {
 	ExpiresAt int64  `json:"expires_at"`
 }
 
-func (s *Server) hold(_ *http.Request, body []byte) response {
+func (s *Server) hold(r *http.Request, body []byte) response {
+	if b := s.currentBook(); b != nil {
+		return bookHold(b, r, body)
+	}
 	var in holdRequest
 	if !decode(body, &in) || in.HoldID == "" || in.Quota <= 0 {
 		return fail(http.StatusBadRequest, CodeInvalidRequest)
@@ -222,6 +225,9 @@ func (s *Server) lookupActive(id string) (*Hold, *response) {
 }
 
 func (s *Server) settle(r *http.Request, body []byte) response {
+	if b := s.currentBook(); b != nil {
+		return bookSettle(b, r, body)
+	}
 	holdID := r.PathValue("hold_id")
 	var in struct {
 		EventID         string `json:"event_id"`
@@ -284,6 +290,9 @@ func (s *Server) settle(r *http.Request, body []byte) response {
 }
 
 func (s *Server) extend(r *http.Request, body []byte) response {
+	if b := s.currentBook(); b != nil {
+		return bookExtend(b, r, body)
+	}
 	holdID := r.PathValue("hold_id")
 	var in struct {
 		ExtendID        string `json:"extend_id"`
@@ -320,6 +329,9 @@ func (s *Server) extend(r *http.Request, body []byte) response {
 }
 
 func (s *Server) release(r *http.Request, _ []byte) response {
+	if b := s.currentBook(); b != nil {
+		return bookRelease(b, r)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sweep()
