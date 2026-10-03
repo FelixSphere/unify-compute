@@ -364,7 +364,7 @@ const setValue = (sel, value) =>
 const blur = (sel) => evaluate(`(() => { const el = document.querySelector(${js(sel)}); el.focus(); el.blur(); })()`);
 const click = (sel) => evaluate(`document.querySelector(${js(sel)}).click()`);
 const text = (sel) => evaluate(`document.querySelector(${js(sel)})?.textContent ?? null`);
-const visible = (sel) =>
+const isShown = (sel) =>
   evaluate(`(() => { const el = document.querySelector(${js(sel)}); return !!el && !el.closest('[hidden]') && el.getClientRects().length > 0; })()`);
 const DANGER = 'rgb(217, 45, 32)';
 const err = (code, message, param, status = 400, type = 'invalid_request') => ({
@@ -509,7 +509,7 @@ async function appChecks() {
   await shot('signup-mismatch');
   await setValue('#password_confirm', 'correct horse battery');
   check(
-    !(await visible('#password_confirm-error')),
+    !(await isShown('#password_confirm-error')),
     'mismatch error clears when the passwords agree',
     'mismatch error stayed after the passwords agreed',
   );
@@ -542,7 +542,7 @@ async function appChecks() {
 
   // --- Verify: the address came along in sessionStorage, not in the URL.
   await waitFor(`document.querySelector('#lead strong')?.textContent === 'person@example.com'`, '/verify to name the address');
-  check(!(await visible('#email')), '/verify hides the email field when the address is known', '/verify shows the email field although the address is known');
+  check(!(await isShown('#email')), '/verify hides the email field when the address is known', '/verify shows the email field although the address is known');
   check(
     (await evaluate(`getComputedStyle(document.querySelector('#code')).fontFamily`)).includes('IBM Plex Mono'),
     '/verify code field in IBM Plex Mono',
