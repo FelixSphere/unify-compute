@@ -1,6 +1,11 @@
 output "urls" {
   description = "Every hostname this stack routes, by app."
-  value       = { for k, a in local.apps : k => "https://${a.domain}" }
+  value       = merge({ for k, a in local.apps : k => "https://${a.domain}" }, { app = "https://${var.app_domain}" })
+}
+
+output "app_origin" {
+  description = "The customer app (Log in, Sign up, dashboard): pages from the site container, /dashboard/v1/* from compute-api."
+  value       = "https://${var.app_domain}"
 }
 
 output "api_origin" {

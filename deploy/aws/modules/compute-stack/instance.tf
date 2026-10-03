@@ -18,10 +18,13 @@ locals {
 
   # Host ports. compute-api and the site both listen on 8080 inside their
   # containers; the site is published on 8081 so the two do not collide.
+  # The app host is a site alias: the same container serves it from its own
+  # Caddy host block (deploy/site/Caddyfile), so it needs no target group of
+  # its own. Its API paths are the separate rule in alb.tf.
   apps = merge(
     {
       api  = { port = 8080, health = "/healthz", domain = var.api_domain, priority = 10, aliases = [] }
-      site = { port = 8081, health = "/healthz", domain = var.site_domain, priority = 20, aliases = var.site_aliases }
+      site = { port = 8081, health = "/healthz", domain = var.site_domain, priority = 20, aliases = concat(var.site_aliases, [var.app_domain]) }
     },
     local.console_enabled ? {
       console = { port = 3000, health = "/api/status", domain = var.console_domain, priority = 30, aliases = [] }

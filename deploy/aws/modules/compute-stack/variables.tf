@@ -56,6 +56,17 @@ variable "site_aliases" {
   default     = []
 }
 
+variable "app_domain" {
+  description = <<-EOT
+    Public hostname for the customer app: Log in, Sign up and the dashboard
+    (ADR-0011 section 5). Served by the site container's app host block, except
+    /dashboard/v1/*, which the ALB sends to compute-api so the pages and their
+    API are one origin with a host-only cookie. Always managed here: it is a
+    new name in both environments and touches no existing record.
+  EOT
+  type        = string
+}
+
 variable "console_domain" {
   description = "Public hostname for a console that runs on this instance. Null means no console container, no Redis, and no console routes — production, whose console is app.unifyapi.ai and belongs to the UnifyAPI release owner."
   type        = string

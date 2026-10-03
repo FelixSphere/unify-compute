@@ -32,6 +32,13 @@ module "stack" {
   # compute.unifyai.us moves, and is still reachable on AWS after a rollback.
   site_aliases = ["site.compute.unifyai.us"]
 
+  # The customer app (ADR-0011). Managed from the first apply, unlike
+  # site_domain: no record of this name exists anywhere today, so creating it
+  # changes nothing that serves traffic. It answers with a placeholder until
+  # the app pages ship, and the marketing site does not link to it until the
+  # CI/CD agent says it is live.
+  app_domain = "app.compute.unifyai.us"
+
   console_url    = "https://app.unifyapi.ai"
   bridge_enabled = true
 
