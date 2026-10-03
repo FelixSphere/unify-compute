@@ -79,6 +79,17 @@ for page in / /start /privacy; do
   if grep -q 'compute\.unifyai\.us/terms' "$tmp/links"; then
     echo "FAIL $page: links to compute.unifyai.us/terms, which does not exist"; fail=1; links_ok=0
   fi
+  # UI-STANDARD 2026-10-03: FelixSphere LLC is the legal entity, named on the
+  # legal page only; the Malaysian company line is gone everywhere.
+  if grep -qE 'Petaling Jaya|Lebuh Bandar Utama' "$tmp/links"; then
+    echo "FAIL $page: still carries the old Malaysian address"; fail=1; links_ok=0
+  fi
+  if [ "$page" = /privacy ]; then
+    grep -qF 'Operated by FelixSphere LLC · 6 Karen Ct, CA 94010, United States' "$tmp/links" \
+      || { echo "FAIL $page: footer has no \"Operated by FelixSphere LLC\" line"; fail=1; links_ok=0; }
+  elif grep -qF 'Operated by FelixSphere LLC' "$tmp/links"; then
+    echo "FAIL $page: footer names the legal entity; only legal pages do"; fail=1; links_ok=0
+  fi
 done
 curl -s "$base/start" > "$tmp/links"
 for href in 'mailto:contactus@felixsphere.com?subject=Unify%20Compute%20early%20access' 'https://api.compute.unifyai.us/compute/v1/openapi.json'; do

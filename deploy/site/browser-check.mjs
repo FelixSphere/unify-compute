@@ -222,6 +222,11 @@ const TERMS_URL = 'https://felixsphere.com/legal/terms';
 const termsLinks = (selector) =>
   evaluate(`[...document.querySelectorAll(${JSON.stringify(selector)})].filter((a) => /terms/i.test(a.textContent)).map((a) => a.textContent.trim() + '|' + a.getAttribute('href') + '|' + (a.target || ''))`);
 const deadTerms = `document.querySelectorAll('a[href*="compute.unifyai.us/terms"]').length`;
+// UI-STANDARD 2026-10-03: page footers carry the brand only; the legal page
+// adds the legal entity. The Malaysian company line is gone.
+const BRAND_LINE = `© ${new Date().getFullYear()} UnifyAI`;
+const ENTITY_LINE = 'Operated by FelixSphere LLC · 6 Karen Ct, CA 94010, United States';
+const COMPANY_LINE = `document.querySelector('footer .copyright')?.innerText.trim() ?? null`;
 
 // A marker on window survives a client-side navigation and is gone after a
 // document load, which is how a broken router that falls back to full page
@@ -1318,6 +1323,8 @@ try {
       `/ footer Terms links: ${JSON.stringify(footerTerms)}`,
     );
     check((await evaluate(deadTerms)) === 0, '/ has no compute.unifyai.us/terms link', '/ still links to compute.unifyai.us/terms');
+    const line = await evaluate(COMPANY_LINE);
+    check(line === BRAND_LINE, `/ footer reads "${BRAND_LINE}"`, `/ footer company line: ${JSON.stringify(line)}`);
   }
   await clickAndExpectSoftNav(FOOTER_LINK, 'footer "Privacy"');
   await back();
@@ -1442,6 +1449,11 @@ try {
     '/privacy full page load',
     '/privacy full page load did not render the policy',
   );
+  {
+    const line = await evaluate(COMPANY_LINE);
+    const want = `${BRAND_LINE}\n${ENTITY_LINE}`;
+    check(line === want, '/privacy footer names FelixSphere LLC under the brand line', `/privacy footer company line: ${JSON.stringify(line)}`);
+  }
 
   await load('/does-not-exist');
   check(
