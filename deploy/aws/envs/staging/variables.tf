@@ -32,7 +32,7 @@ variable "site_image" {
 variable "console_image" {
   description = "Console fork image. Same release as UnifyAPI production unless testing a console change; tag kept for readability, digest is what is pulled."
   type        = string
-  default     = "ghcr.io/felixsphere/unifyapi-console:unifyapi-v0.1.52@sha256:c22a1bfed2da54f33dc9b5dcb498fd18fd9949248284f2022e410e43df9ece87"
+  default     = "ghcr.io/felixsphere/unifyapi-console:e3cef17d71061ac534758cb220960bb265748cd3@sha256:c48c638be295a61909532d101b98635903f232bfb106c305c12ef7b6f84ed3ab"
 }
 
 variable "ami_id" {
