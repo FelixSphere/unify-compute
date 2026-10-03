@@ -23,6 +23,21 @@ type SKUUsage struct {
 // makes two owners' submits wait for each other.
 const admissionLockClass = 0x71756f74 // "quot"
 
+// platformLockClass/platformLockKey name the one advisory lock every
+// platform-limited submit takes before its owner's lock. It is a different
+// class from admissionLockClass, so no owner's hashtext can collide with it.
+const (
+	platformLockClass = 0x706c6174 // "plat"
+	platformLockKey   = 0
+)
+
+const platformUsageSQL = `
+	SELECT sku, count(*)::int, (count(*) FILTER (WHERE status = 'queued'))::int
+	FROM jobs
+	WHERE status IN ('queued', 'provisioning', 'running')
+	GROUP BY sku
+	ORDER BY sku`
+
 const activeUsageSQL = `
 	SELECT sku, count(*)::int, (count(*) FILTER (WHERE status = 'queued'))::int
 	FROM jobs
@@ -42,7 +57,10 @@ type querier interface {
 }
 
 func activeUsage(ctx context.Context, q querier, owner string) ([]SKUUsage, error) {
-	rows, err := q.Query(ctx, activeUsageSQL, owner)
+	return collectUsage(q.Query(ctx, activeUsageSQL, owner))
+}
+
+func collectUsage(rows pgx.Rows, err error) ([]SKUUsage, error) {
 	if err != nil {
 		return nil, err
 	}
@@ -73,6 +91,43 @@ type AdmitFunc func(ctx context.Context, usage []SKUUsage) error
 // admit runs while the lock and a pooled connection are held, so it must be
 // bounded in time; the console client's timeout is that bound.
 func (s *Store) CreateAdmitted(ctx context.Context, nj NewJob, idem *Idempotency, admit AdmitFunc) (job Job, created bool, err error) {
+	return s.createAdmitted(ctx, nj, idem, false, func(ctx context.Context, tx pgx.Tx) error {
+		usage, err := activeUsage(ctx, tx, nj.Owner)
+		if err != nil {
+			return fmt.Errorf("store: active usage: %w", err)
+		}
+		return admit(ctx, usage)
+	})
+}
+
+// PlatformAdmitFunc is AdmitFunc with the usage of every owner as well.
+type PlatformAdmitFunc func(ctx context.Context, owner, platform []SKUUsage) error
+
+// CreateAdmittedPlatform is CreateAdmitted for a deployment with
+// platform-wide limits. Before the owner's lock it takes one advisory lock
+// shared by every such submit, so the platform-wide usage admit sees cannot
+// change until this transaction ends: two owners cannot both take the
+// platform's last slot. The price is that all submits are serialised across
+// the console hold, which at one active job platform-wide is no limit at all.
+//
+// Lock order is always platform, then owner. CreateAdmitted takes only the
+// owner's, and never waits on the platform lock while holding it, so the two
+// can run side by side without deadlock.
+func (s *Store) CreateAdmittedPlatform(ctx context.Context, nj NewJob, idem *Idempotency, admit PlatformAdmitFunc) (job Job, created bool, err error) {
+	return s.createAdmitted(ctx, nj, idem, true, func(ctx context.Context, tx pgx.Tx) error {
+		usage, err := activeUsage(ctx, tx, nj.Owner)
+		if err != nil {
+			return fmt.Errorf("store: active usage: %w", err)
+		}
+		platform, err := collectUsage(tx.Query(ctx, platformUsageSQL))
+		if err != nil {
+			return fmt.Errorf("store: platform usage: %w", err)
+		}
+		return admit(ctx, usage, platform)
+	})
+}
+
+func (s *Store) createAdmitted(ctx context.Context, nj NewJob, idem *Idempotency, platform bool, admit func(context.Context, pgx.Tx) error) (job Job, created bool, err error) {
 	if idem != nil && (len(idem.Key) == 0 || len([]rune(idem.Key)) > 255) {
 		return Job{}, false, ErrInvalidIdempotencyKey
 	}
@@ -82,6 +137,11 @@ func (s *Store) CreateAdmitted(ctx context.Context, nj NewJob, idem *Idempotency
 	}
 	defer tx.Rollback(ctx)
 
+	if platform {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1::int4, $2::int4)`, platformLockClass, platformLockKey); err != nil {
+			return Job{}, false, fmt.Errorf("store: platform admission lock: %w", err)
+		}
+	}
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1::int4, hashtext($2))`, admissionLockClass, nj.Owner); err != nil {
 		return Job{}, false, fmt.Errorf("store: admission lock: %w", err)
 	}
@@ -101,11 +161,7 @@ func (s *Store) CreateAdmitted(ctx context.Context, nj NewJob, idem *Idempotency
 		}
 	}
 
-	usage, err := activeUsage(ctx, tx, nj.Owner)
-	if err != nil {
-		return Job{}, false, fmt.Errorf("store: active usage: %w", err)
-	}
-	if err := admit(ctx, usage); err != nil {
+	if err := admit(ctx, tx); err != nil {
 		return Job{}, false, err
 	}
 

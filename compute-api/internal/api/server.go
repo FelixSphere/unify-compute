@@ -32,9 +32,10 @@ import (
 	"github.com/FelixSphere/unify-compute/compute-api/internal/upstream"
 )
 
-// MaxRuntimeSeconds is the platform ceiling on a job's max_runtime_seconds:
-// 24 hours. It bounds the hold a single submit can place.
-const MaxRuntimeSeconds int64 = 24 * 60 * 60
+// MaxRuntimeSeconds is the most max_runtime_seconds the API contract allows:
+// 24 hours. A deployment's own ceiling, RuntimeCeilingSeconds, may be lower
+// and is what a submit is held to.
+const MaxRuntimeSeconds int64 = quota.ContractMaxRuntimeSeconds
 
 const maxBody = 1 << 20
 
@@ -65,6 +66,11 @@ type Server struct {
 	JobService *jobs.Service
 	// Now times cancel acceptance; nil is time.Now.
 	Now func() time.Time
+
+	// RuntimeCeilingSeconds is this deployment's ceiling on
+	// max_runtime_seconds (upstreams.md R9), from config/platform.json. Zero
+	// is the contract's MaxRuntimeSeconds.
+	RuntimeCeilingSeconds int64
 
 	mux *router
 
@@ -361,11 +367,18 @@ func (s *Server) resolveSubmit(w http.ResponseWriter, r *http.Request) (submissi
 	case rt <= 0:
 		invalid(w, "missing_max_runtime", "spec.max_runtime_seconds", "spec.max_runtime_seconds must be a positive integer")
 		return submission{}, false
-	case int64(rt) > MaxRuntimeSeconds:
-		invalid(w, "runtime_over_ceiling", "spec.max_runtime_seconds", fmt.Sprintf("max_runtime_seconds %d exceeds the platform ceiling of %d", rt, MaxRuntimeSeconds))
+	case int64(rt) > s.runtimeCeiling():
+		invalid(w, "runtime_over_ceiling", "spec.max_runtime_seconds", fmt.Sprintf("max_runtime_seconds %d exceeds the platform ceiling of %d", rt, s.runtimeCeiling()))
 		return submission{}, false
 	}
 	return submission{raw: body, item: item, providers: providers, spec: spec, metadata: raw.Metadata}, true
+}
+
+func (s *Server) runtimeCeiling() int64 {
+	if s.RuntimeCeilingSeconds > 0 {
+		return min(s.RuntimeCeilingSeconds, MaxRuntimeSeconds)
+	}
+	return MaxRuntimeSeconds
 }
 
 // clampRuntime keeps an absurd runtime above the ceiling instead of letting

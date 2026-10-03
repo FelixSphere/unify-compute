@@ -164,7 +164,7 @@
           "jobs"
         ],
         "summary": "Submit a job",
-        "description": "Validated before anything is held or persisted, in this order: body parses (`malformed_body`); if `template` is set, it is offered (`unknown_template`) and available (`template_unavailable`), every field sent is overridable (`field_not_overridable`), env keys are identifiers (`invalid_env`) and inputs bind each declared mount once (`missing_input`, `unknown_input_mount`, `duplicate_input_mount`), and the resolved spec continues through the same checks as a hand-written one: `sku` present (`missing_sku`), offered (`unknown_sku`) and sold (`sku_unavailable`), `spec.max_runtime_seconds` positive (`missing_max_runtime`) and at most 86400 (`runtime_over_ceiling`); then, in a build with a job store, the spec must be launchable as given (`metadata` at most 16 pairs, `missing_image`, `missing_command`, `invalid_env`, `reserved_env`, `invalid_input_source`, `invalid_mount`, and `501 outputs_unsupported` when the deployment has no artifact storage); every entry of `providers` offered by the SKU (`provider_not_offered`) and at least one candidate enabled in this deployment, with a SkyPilot API server to launch on (`503 upstream_unavailable`). Then, in one transaction per owner: the account's quotas (`403 quota_exceeded`) and the hold on the Unify API balance, `rate × min(max_runtime_seconds, 7200)` (`402 insufficient_balance`; `503 console_unavailable` if the console cannot answer). Only then is the job persisted `queued`, `job.queued` recorded and the job handed to SkyPilot. A refused hold persists nothing. The dark build answers a request that passes the first group of checks with `501 not_implemented`.",
+        "description": "Validated before anything is held or persisted, in this order: body parses (`malformed_body`); if `template` is set, it is offered (`unknown_template`) and available (`template_unavailable`), every field sent is overridable (`field_not_overridable`), env keys are identifiers (`invalid_env`) and inputs bind each declared mount once (`missing_input`, `unknown_input_mount`, `duplicate_input_mount`), and the resolved spec continues through the same checks as a hand-written one: `sku` present (`missing_sku`), offered (`unknown_sku`) and sold (`sku_unavailable`), `spec.max_runtime_seconds` positive (`missing_max_runtime`) and at most the deployment's ceiling, 14400 while the platform starts small and never more than 86400 (`runtime_over_ceiling`); then, in a build with a job store, the spec must be launchable as given (`metadata` at most 16 pairs, `missing_image`, `missing_command`, `invalid_env`, `reserved_env`, `invalid_input_source`, `invalid_mount`, and `501 outputs_unsupported` when the deployment has no artifact storage); every entry of `providers` offered by the SKU (`provider_not_offered`) and at least one candidate enabled in this deployment, with a SkyPilot API server to launch on (`503 upstream_unavailable`). Then, in one transaction per owner: the account's quotas (`403 quota_exceeded`) and the hold on the Unify API balance, `rate × min(max_runtime_seconds, 7200)` (`402 insufficient_balance`; `503 console_unavailable` if the console cannot answer). Only then is the job persisted `queued`, `job.queued` recorded and the job handed to SkyPilot. A refused hold persists nothing. The dark build answers a request that passes the first group of checks with `501 not_implemented`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/IdempotencyKey"
@@ -1574,7 +1574,7 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 86400,
-            "description": "Platform ceiling is 24 hours. Required unless `template` supplies it."
+            "description": "The contract never allows more than 24 hours; a deployment's ceiling may be lower and is 4 hours (14400) on every deployment today. Above it is `400 runtime_over_ceiling`. Required unless `template` supplies it."
           }
         }
       },
@@ -2043,14 +2043,16 @@
           "requested",
           "headroom"
         ],
-        "description": "One account quota a submit would exceed (docs/spec/quotas.md).",
+        "description": "One limit a submit would exceed (docs/spec/quotas.md): an account quota, or a `platform_` limit shared by every account, which counts all accounts' active jobs and has no `tier`.",
         "properties": {
           "limit": {
             "type": "string",
             "enum": [
               "max_active_jobs",
               "max_queued_jobs",
-              "max_gpus"
+              "max_gpus",
+              "platform_max_active_jobs",
+              "platform_max_gpus"
             ]
           },
           "tier": {

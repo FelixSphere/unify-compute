@@ -1,0 +1,6 @@
+{
+  "note": "Platform-wide limits across every account, and the ceiling on max_runtime_seconds (ADR-0010, 'Start small', 2026-10-03). Reviewed like a price change: together with the AWS GPU quota and the budget action these bound how much GPU spend can be in flight at once. The GPU reaper's maximum age (deploy/aws/modules/gpu-workers) is max_runtime_seconds plus a margin, read from this file. Raise only with the AWS quota and the budget, in one reviewed change.",
+  "max_active_jobs": 1,
+  "max_gpus": 1,
+  "max_runtime_seconds": 14400
+}

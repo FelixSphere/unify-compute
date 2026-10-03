@@ -45,9 +45,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Platform-wide limits and the runtime ceiling (ADR-0010, "Start
+	// small"). Required: a deployment without them would have no cap on
+	// GPU spend in flight beyond the per-owner quotas.
+	platform, err := quota.LoadPlatform(env("PLATFORM_FILE", "config/platform.json"))
+	if err != nil {
+		log.Error("load platform limits", "err", err)
+		os.Exit(1)
+	}
+
 	// Templates are checked against the catalogue they sell from, so a
 	// template naming a SKU that was removed fails the deploy, not a submit.
-	templates, err := template.Load(env("TEMPLATE_FILE", "config/templates.json"), cat, api.MaxRuntimeSeconds)
+	templates, err := template.Load(env("TEMPLATE_FILE", "config/templates.json"), cat, platform.MaxRuntimeSeconds)
 	if err != nil {
 		log.Error("load templates", "err", err)
 		os.Exit(1)
@@ -87,6 +96,7 @@ func main() {
 
 	handler := api.New(Build, cat, upstreams, log)
 	handler.Templates = templates
+	handler.RuntimeCeilingSeconds = platform.MaxRuntimeSeconds
 
 	// Artifact storage (ADR-0005). Built at boot so a bad configuration
 	// fails the deploy rather than the first upload. The token secret is the
@@ -153,7 +163,7 @@ func main() {
 		// both do (backend.md, "Restart").
 		cfg := jobs.Config{
 			Store: st, Console: bridge, SkyPilot: sky, Catalogue: cat, Log: log, Elect: true,
-			Quota: &quota.Enforcer{Config: quotas, Catalogue: cat, Usage: st},
+			Quota: &quota.Enforcer{Config: quotas, Catalogue: cat, Usage: st, Platform: platform},
 		}
 		if art != nil {
 			cfg.Outputs = art
@@ -162,7 +172,9 @@ func main() {
 		verifier := &api.Verifier{Console: bridge, Log: log}
 		handler.Verifier, handler.JobService = verifier, svc
 		handler.Owner, handler.Events, handler.Jobs = verifier.Owner, st, st
-		log.Info("job store open", "quotas_enforced", true, "overrides", len(quotas.Owners))
+		log.Info("job store open", "quotas_enforced", true, "overrides", len(quotas.Owners),
+			"platform_max_active_jobs", platform.MaxActiveJobs, "platform_max_gpus", platform.MaxGPUs,
+			"max_runtime_seconds", platform.MaxRuntimeSeconds)
 		// Before serving: a process that gets the lock now takes up every
 		// job an earlier process left live, from the ledger and SkyPilot.
 		// One that does not serves reads and submits and keeps trying.

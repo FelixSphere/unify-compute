@@ -195,15 +195,19 @@ func (s *Service) Submit(ctx context.Context, sub Submission) (job store.Job, cr
 		}
 		return err
 	}
-	admit := func(ctx context.Context, _ []store.SKUUsage) error { return place(ctx) }
-	if s.quota != nil {
-		admit = s.quota.Admit(sub.Owner, sub.SKU, place)
-	}
 	tokenID := int64(sub.TokenID)
-	job, created, err = s.Store.CreateAdmitted(ctx, store.NewJob{
+	nj := store.NewJob{
 		ID: id, Owner: sub.Owner, TokenID: &tokenID, SKU: sub.SKU.ID, Spec: spec, Metadata: sub.Metadata,
 		Candidates: candidates, Events: []store.NewEvent{*queued},
-	}, sub.Idempotency, admit)
+	}
+	switch {
+	case s.quota != nil && s.quota.Platform != nil:
+		job, created, err = s.Store.CreateAdmittedPlatform(ctx, nj, sub.Idempotency, s.quota.AdmitPlatform(sub.Owner, sub.SKU, place))
+	case s.quota != nil:
+		job, created, err = s.Store.CreateAdmitted(ctx, nj, sub.Idempotency, s.quota.Admit(sub.Owner, sub.SKU, place))
+	default:
+		job, created, err = s.Store.CreateAdmitted(ctx, nj, sub.Idempotency, func(ctx context.Context, _ []store.SKUUsage) error { return place(ctx) })
+	}
 	if err != nil {
 		var refused *ledger.InsufficientBalanceError
 		if touched && !errors.As(err, &refused) {

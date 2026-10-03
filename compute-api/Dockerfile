@@ -17,6 +17,7 @@ COPY --from=build /out/compute-api /app/compute-api
 COPY config/skus.json /app/config/skus.json
 COPY config/quotas.json /app/config/quotas.json
 COPY config/templates.json /app/config/templates.json
+COPY config/platform.json /app/config/platform.json
 ENV LISTEN_ADDR=0.0.0.0:8080
 EXPOSE 8080
 USER nonroot
