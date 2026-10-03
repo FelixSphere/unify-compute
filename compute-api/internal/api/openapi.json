@@ -506,6 +506,97 @@
           }
         }
       }
+    },
+    "/compute/v1/jobs/{id}/events": {
+      "get": {
+        "operationId": "listJobEvents",
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Job events",
+        "description": "The job's event log (docs/spec/events.md), oldest first, owner-scoped like `GET /compute/v1/jobs/{id}`. Pass the last id seen as `after` to receive only newer events. Currently returns `501 not_implemented`: the route is wired, but the binary has no job store or key-to-owner resolver until the console bridge lands.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/JobID"
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "description": "Id of an event of this job; only later events are returned. An id that is not an event of this job is `400 invalid_cursor`.",
+            "schema": {
+              "type": "string",
+              "pattern": "^evt_[0-9A-HJKMNP-TV-Z]{26}$"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size. Outside 1-100 or not an integer is `400 invalid_limit`.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of events. *Planned:* not returned by the current build.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_cursor` (`param` is `after`) or `invalid_limit` (`param` is `limit`). *Planned:* not returned by the current build.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "description": "`internal_error`: the event log could not be read. *Planned:* not returned by the current build.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "501": {
+            "$ref": "#/components/responses/NotImplemented"
+          },
+          "503": {
+            "description": "`console_unavailable`: the key could not be verified; retry shortly. *Planned:* not returned by the current build.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1218,6 +1309,71 @@
               "type": "object",
               "description": "One file with a signed download URL valid for 1 hour. Fields not yet specified."
             }
+          }
+        }
+      },
+      "Event": {
+        "type": "object",
+        "required": [
+          "id",
+          "object",
+          "job_id",
+          "type",
+          "created_at",
+          "data"
+        ],
+        "description": "One entry of a job's append-only event log. Also the body of a webhook delivery.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_[0-9A-HJKMNP-TV-Z]{26}$",
+            "description": "`evt_` + ULID. The deduplication key: a webhook delivered twice carries the same id."
+          },
+          "object": {
+            "type": "string",
+            "const": "compute.event"
+          },
+          "job_id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "description": "One of `job.queued`, `job.provisioning`, `job.placed`, `job.running`, `job.failover`, `job.preempted`, `job.succeeded`, `job.failed`, `job.cancelled`, `billing.hold_extended`, `billing.balance_exhausted`. Clients must tolerate types not listed here."
+          },
+          "created_at": {
+            "type": "integer",
+            "description": "Unix seconds. Several events can share a second; list order is append order."
+          },
+          "data": {
+            "type": "object",
+            "description": "Type-specific payload; `{}` when the type carries nothing. See docs/spec/events.md."
+          }
+        }
+      },
+      "EventList": {
+        "type": "object",
+        "required": [
+          "object",
+          "data",
+          "has_more"
+        ],
+        "properties": {
+          "object": {
+            "type": "string",
+            "const": "list"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Event"
+            }
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "next": {
+            "type": "string",
+            "description": "Id of the last event returned, present whenever `data` is non-empty, so a poller can always resume from it."
           }
         }
       }

@@ -15,8 +15,13 @@ const crockford = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 // tie-break.
 func NewJobID(now time.Time) string { return NewID("job_", now) }
 
-// NewID is NewJobID with another prefix, for the other ids compute-api sends
-// the console (hold_, ue_, ext_) and that must never collide.
+// NewEventID and NewWebhookID use the same encoding as job ids, so every id
+// the API hands out has one shape and one sort rule.
+func NewEventID(now time.Time) string   { return NewID("evt_", now) }
+func NewWebhookID(now time.Time) string { return NewID("wh_", now) }
+
+// NewID is NewJobID with another prefix: the ids above, and the ones
+// compute-api sends the console (hold_, ue_, ext_), which must never collide.
 func NewID(prefix string, now time.Time) string {
 	var b [16]byte
 	binary.BigEndian.PutUint64(b[:8], uint64(now.UnixMilli())<<16)
