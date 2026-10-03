@@ -22,7 +22,7 @@ export default function Home() {
           <h1>Big workloads.<br/>Zero reservations.</h1>
           <p className="hero-description">On-demand inference and GPU compute for everything beyond chat.</p>
           <p className="hero-detail">Batch processing. Embeddings. Document pipelines. Fine-tuning. Built around the work you run, with consumption-based billing.</p>
-          <div className="hero-actions"><a className="button primary" href="#workloads">Explore the workloads <ArrowRight size={18}/></a><a className="text-link" href="#how-it-works">Meet UnifyAI Compute <ArrowUpRight size={17}/></a></div>
+          <div className="hero-actions"><a className="button primary" href="#workloads">Explore the workloads <ArrowRight size={18}/></a><a className="text-link" href="#how-it-works">Meet Unify Compute <ArrowUpRight size={17}/></a></div>
           <div className="hero-note"><Zap size={14}/> In development · A new compute platform from UnifyAI</div>
         </div>
         <div className="compute-panel" aria-label="Conceptual workload execution diagram">
@@ -42,7 +42,7 @@ export default function Home() {
       <section className="process-section" id="how-it-works"><div className="wrap section"><div className="section-heading"><div><p className="eyebrow">02 / THE COMPUTE MODEL</p><h2>From workload to output.<br/>Without the capacity planning.</h2></div><span className="subtle-label">DESIGNED TO KEEP YOU BUILDING</span></div><div className="steps"><article><span className="step-number">01</span><h3>Define the work</h3><p>Choose a model or bring your own job. Specify the data and resources it needs.</p></article><article><span className="step-number">02</span><h3>Run on demand</h3><p>The platform is designed to provision GPU compute for the task and release it when finished.</p></article><article><span className="step-number">03</span><h3>Keep the output</h3><p>Take the results into your application. Track consumption across your jobs.</p></article></div></div></section>
 
       <section className="consumption wrap section" id="consumption"><div><p className="eyebrow">03 / CONSUMPTION, NOT COMMITMENT</p><h2>Your work has a runtime.<br/><span>Your bill should, too.</span></h2><p>Our billing model is built around consumption, so you can match compute spend to actual workloads instead of reserving capacity ahead of time.</p><div className="pricing-note">Rates and availability will be announced at launch.</div></div><div className="billing-card"><div className="billing-title"><Zap size={18}/> THE PRINCIPLE</div><p>Run the job.<br/>Use the compute.<br/><span>Pay for the usage.</span></p><div className="billing-bottom"><span>Consumption-based</span><ArrowUpRight size={22}/></div></div></section>
-      <footer className="wrap"><a href="#top" className="brand" aria-label="UnifyAI Compute home"><BrandLockup decorative/></a><span>Compute beyond chat.</span><Link href="/privacy" className="footer-privacy">Privacy</Link><CompanyLine/></footer>
+      <footer className="wrap"><a href="#top" className="brand" aria-label="Unify Compute home"><BrandLockup decorative/></a><span>Compute beyond chat.</span><Link href="/privacy" className="footer-privacy">Privacy</Link><CompanyLine/></footer>
     </main>
   );
 }

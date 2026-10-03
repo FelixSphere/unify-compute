@@ -59,7 +59,16 @@ check "compute host does not serve console /api/status" 404 "$(code "$BASE_URL/a
 if [ -n "$CONSOLE_URL" ]; then
   check "console GET /api/status" 200 "$(code "$CONSOLE_URL/api/status")"
   body_has "console reports success" '"success":true'
-  check "console host does not serve /compute/v1/skus" 404 "$(code "$CONSOLE_URL/compute/v1/skus")"
+  # Not a status check: the console is an SPA and answers 200 with its own
+  # index.html for any path it does not know (seen on staging 2026-10-02).
+  # What must not happen is compute-api answering there.
+  code "$CONSOLE_URL/compute/v1/skus" >/dev/null
+  if grep -q -e '"price_usd_per_hour"' -e '"service":"compute-api"' "$tmp"; then
+    printf 'FAIL %-46s %s\n' "console host does not serve compute-api" "$(head -c 200 "$tmp")"
+    fail=1
+  else
+    printf 'ok   %-46s\n' "console host does not serve compute-api"
+  fi
 fi
 
 exit "$fail"

@@ -4,7 +4,7 @@ import { BrandLockup, CompanyLine } from '../brand';
 import { SiteHeader } from '../site-header';
 
 export const metadata: Metadata = {
-  title: 'Privacy Policy — UnifyAI Compute',
+  title: 'Privacy Policy — Unify Compute',
   description:
     'How UnifyAI collects, uses, and protects your information, and the cookies this site uses.',
 };
@@ -149,7 +149,7 @@ export default function PrivacyPolicy() {
 
         <p>
           <strong> Website </strong>
-          refers to UnifyAI Compute, accessible from https://compute.unifyai.us
+          refers to Unify Compute, accessible from https://compute.unifyai.us
         </p>
 
         <p>
@@ -824,7 +824,7 @@ export default function PrivacyPolicy() {
         <p>By phone number: 408.462.2806</p>
       </article>
       <footer className="wrap">
-        <Link href="/" className="brand" aria-label="UnifyAI Compute home">
+        <Link href="/" className="brand" aria-label="Unify Compute home">
           <BrandLockup decorative />
         </Link>
         <span>Compute beyond chat.</span>
