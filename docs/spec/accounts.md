@@ -1,10 +1,17 @@
 # Accounts, keys, balance and top-ups
 
-- **Status:** Spec, nothing built. Decided by
-  [ADR-0011](../adr/0011-compute-owns-accounts-and-billing.md) (**Proposed**).
+- **Status:** Spec, partly built. Decided by
+  [ADR-0011](../adr/0011-compute-owns-accounts-and-billing.md) (**Accepted**).
   Until the cutover in that ADR, compute-api authenticates through the console
-  bridge ([`console-billing-bridge.md`](console-billing-bridge.md)) and none of
-  the routes, tables or emails below exist.
+  bridge ([`console-billing-bridge.md`](console-billing-bridge.md)). On `main`
+  but not deployed anywhere: the account tables and `internal/accounts` (A1),
+  the mailer (A2), the public and session auth routes of the dashboard API
+  (`internal/dashboard`, A4), and `balance_entries`, the local biller
+  (`internal/billing`, migration `0006_billing.sql`) and the admin CLI's
+  `account`, `balance` and `audit` verbs (A6). All of it is behind
+  `ACCOUNTS_BACKEND=local`, which no environment sets. Keys and top-ups do
+  not exist yet; `ACCOUNTS_BACKEND=local` therefore leaves keyed job routes
+  answering `503 console_unavailable` until A5.
 - Task breakdown: [`plan-own-accounts.md`](../plan-own-accounts.md).
 - Depends on: [`job-api.md`](job-api.md) (error envelope, job routes),
   [`metering.md`](metering.md) (holds H1–H7, settlement R1–R6, the quota unit),
@@ -139,15 +146,41 @@ ledger sees identical behaviour:
 
 - `billing_holds`: `hold_id PK`, `account_id`, `key_id`, `job_id` (null for
   R5 charges), `sku` (or `storage`/`egress`), `quota`, `settled_quota`,
-  `status` (`open`, `released`, `expired`), `expires_at`, `request` (`jsonb`,
-  the original body for idempotency comparison), timestamps.
-- `billing_settlements`: `event_id PK`, `hold_id`, `quota_delta`,
-  `gpu_seconds`, `final`.
+  `released_quota` (what went back when it closed, reported again by every
+  repeated release), `status` (`open`, `settled` when a final settle closed
+  it, `released`, `expired`), `expires_at` (null never expires),
+  `request` and `response` (`jsonb`, the original body and answer, for
+  idempotency), `created_at`, `closed_at`.
+- `billing_settlements`: `event_id PK`, `seq`, `hold_id`, `quota_delta`,
+  `gpu_seconds`, `final`, `response`. One row per accepted settle, including
+  one that moved nothing, so a replayed `event_id` answers what it answered.
 - `billing_extensions`: `extend_id PK`, `hold_id`, `additional_quota`.
 
-Each verb writes its rows and its `balance_entries` row in one transaction.
-Expiry is swept hourly: past `expires_at`, the remainder is released and the
-hold answers `409 hold_expired` afterwards, as the console's sweeper did.
+`internal/billing.Local` implements the bridge's four verbs with the console
+types, and answers each refusal with a `*console.Error` carrying the bridge's
+status and code, so the ledger (which depends on a `ledger.Biller` interface,
+not on the console client) cannot tell the two apart. `ACCOUNTS_BACKEND`
+chooses which one `main` wires. The bridge's user id is the account id; there
+is no per-key spending limit (open point 3), so `key_id` is recorded, not
+checked.
+
+Each verb writes its rows and its `balance_entries` row in one transaction,
+under `SELECT … FOR UPDATE` on the account row and then the hold row. Every
+verb first expires the touched account's holds past `expires_at` (strictly
+after, in whole seconds, as the console does), releasing their remainder,
+and that expiry commits even when the verb then refuses. An hourly sweep
+covers accounts nothing touches. Afterwards the hold answers
+`409 hold_expired`. One difference from the console remains: the console
+swept every hold before every request, so a call naming an unknown hold also
+expired other accounts' holds; locally that waits for the account's next
+call or the sweep. No answer differs.
+
+Tests: the ledger's harness tests and the restart tests run a second time
+with the local biller behind every console fake (`consoletest.SetBookFactory`,
+`billingtest.UseLocalBooks`), test files unchanged,
+and the fake's hold contract runs against the fake, the local biller and the
+local biller over HTTP, plus a randomised sequence compared step by step
+with the fake (`internal/billing`).
 
 The existing `holds` table (the ledger's own view of a hold) is unchanged.
 After the cutover its `user_id` holds the account id and `token_id` the key id.
@@ -280,7 +313,7 @@ named by `param`, or in the form-level box when `param` is absent
 | 400 | `invalid_request` | `invalid_email` | Not an address (≤ 254 chars, one `@`, a dotted domain). Unify Data's `bad_email`, renamed to our `invalid_*` style |
 | 400 | `invalid_request` | `weak_password` | Under 12 or over 128 chars, equal to the email or its local part, or fewer than 5 distinct characters |
 | 400 | `invalid_request` | `password_mismatch` | `password` ≠ `password_confirm` (the page checks first; the server checks too) |
-| 400 | `invalid_request` | `bot_check_failed` | Turnstile token missing, invalid, expired or reused; or the honeypot field filled |
+| 400 | `invalid_request` | `bot_check_failed` | The honeypot field (`website`) filled. While Turnstile is off (ADR-0011 D5) that is the only cause; with Turnstile, also a missing, invalid, expired or reused token |
 | 400 | `invalid_request` | `invalid_code` | Verification code wrong, expired, exhausted or superseded (one code for all four) |
 | 400 | `invalid_request` | `invalid_token` | Reset link invalid, used or expired |
 | 400 | `invalid_request` | `invalid_scope` | Key scopes empty or unknown |
@@ -312,19 +345,41 @@ stays as a job `error.code` for a database failure during settlement.
 
 All bodies JSON. Unauthenticated routes need no CSRF header but do need a
 same-origin `Origin`. Every route that sends email or creates something is
-throttled (limits in ADR-0011, section 8).
+throttled (limits in ADR-0011, section 8). The built routes are documented,
+with every status and error code, in
+[`dashboard-openapi.json`](dashboard-openapi.json), which a test holds against
+the registered routes. A malformed body is `400 malformed_body`, as in the job
+API.
+
+While Turnstile is off (ADR-0011 D5) there is no `turnstile_token`; a page may
+still send it and it is ignored. The honeypot `website` is accepted on signup,
+resend, login and forgot-password. Throttles, as built:
+
+| Rule | Limit | Counts |
+|---|---|---|
+| Login per IP | 20 / 10 min | every attempt, success included: the limit bounds the argon2id work one client can cause, and a success costs the same hash |
+| Login per address | 50 / 10 min | failures only (wrong password), keyed on the normalised email whether or not it is registered, so a `429` is no oracle. Wrong current passwords on `POST /password` and `/reauth` count here too |
+| Signup per IP | 5 / h | well-formed requests (validation errors do not count) |
+| Verify per IP | 20 / h | wrong codes only |
+| Resend per address | 1 / min and 5 / h | every accepted request, unknown addresses included |
+| Resend per IP | 20 / h | every request |
+| Forgot per IP, per address | 5 / h each | every request, unknown addresses included |
+
+The client IP is the **last** `X-Forwarded-For` entry (the ALB appends it),
+never the first. Resend and forgot-password look the address up and send
+after the response, so neither the status nor the time depends on it.
 
 ### Public
 
 | Route | Body | Success | Notes |
 |---|---|---|---|
-| `GET /config` | — | `200 { turnstile_site_key, min_password_length: 12, topup: { min_usd, max_usd } }` | What the signed-out pages need |
-| `POST /signup` | `{ email, password, password_confirm, turnstile_token, website }` | `202 { status: "verification_sent" }` | Always `202` for a well-formed request. A new address gets a code; a registered one gets "someone tried to sign up". `website` is the honeypot |
+| `GET /config` | — | `200 { turnstile_site_key, min_password_length: 12, topup: { min_usd, max_usd } }` | What the signed-out pages need. `turnstile_site_key` is `null` while Turnstile is off |
+| `POST /signup` | `{ email, password, password_confirm, website }` | `202 { status: "verification_sent" }` | Always `202` for a well-formed request. A new address gets a code; a registered one gets "someone tried to sign up". `website` is the honeypot |
 | `POST /verify` | `{ email, code }` | `200 { user, account, csrf_token }` + `Set-Cookie` | Activates and logs in |
-| `POST /verify/resend` | `{ email, turnstile_token }` | `202` | Always `202`; sends only to a `pending` user; at most 1 a minute and 5 an hour per address |
-| `POST /login` | `{ email, password, turnstile_token }` | `200 { user, account, csrf_token }` + `Set-Cookie` | Rotates any existing session |
-| `POST /password/forgot` | `{ email, turnstile_token }` | `202` | Always `202` |
-| `POST /password/reset` | `{ token, password, password_confirm }` | `200` | Ends every session; does not log in |
+| `POST /verify/resend` | `{ email, website }` | `202 { status: "verification_sent" }` | Always `202`; sends only to a `pending` user; at most 1 a minute and 5 an hour per address |
+| `POST /login` | `{ email, password, website }` | `200 { user, account, csrf_token }` + `Set-Cookie` | Rotates any existing session |
+| `POST /password/forgot` | `{ email, website }` | `202 { status: "reset_requested" }` | Always `202` |
+| `POST /password/reset` | `{ token, password, password_confirm }` | `200 { status: "password_reset" }`, cookie cleared | Ends every session; does not log in |
 
 ### Session (cookie `__Host-uc_session` + `X-CSRF-Token`)
 
@@ -332,7 +387,7 @@ throttled (limits in ADR-0011, section 8).
 |---|---|---|
 | `GET /me` | — | `{ user: { email, created_at }, account: { id, status, compute_enabled }, csrf_token }` |
 | `POST /logout` | — | `204`, cookie cleared |
-| `POST /password` | `{ current_password, password, password_confirm }` | `204`; other sessions ended |
+| `POST /password` | `{ current_password, password, password_confirm }` | `204`; other sessions ended. `current_password` is the recent-password check and counts as a reauth; wrong is `401 invalid_credentials` with `param: current_password` |
 | `POST /reauth` | `{ password }` | `204`; sets `reauth_at` |
 | `GET /balance` | — | `{ available_usd, held_usd, limits: { topup_min_usd, topup_max_usd, balance_max_usd, topups_per_day } }` |
 | `GET /transactions?after=&limit=` | — | Cursor list of balance entries, newest first: `{ id, kind, amount_usd, available_after_usd, ref, created_at, detail }` |
@@ -404,7 +459,16 @@ admin audit [--account <id>]                                  # checks the balan
 ```
 
 `balance credit` is how the first vertical slice funds an account before
-Stripe exists.
+Stripe exists. It refuses an account with no verified user, because
+`PurgeUnverified` would delete it with its balance. The balance entry's
+`ref_id` and idempotency key name the audit event (`admin:ae_…`).
+`enable-compute` emails the account's verified users ("Compute enabled")
+after the change commits; a failed email is reported and does not undo it.
+
+Built (A6): `account show|enable-compute|disable-compute|suspend|reinstate`,
+`balance show|credit|debit`, `audit`. Not yet: `account limits` (with top-ups,
+B1) and `topup refund` (B2). Suspending does not stop running jobs yet (B2).
+The CLI never migrates; the service does at boot.
 
 ## Emails
 

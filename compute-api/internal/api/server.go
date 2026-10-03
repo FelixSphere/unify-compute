@@ -81,7 +81,17 @@ type Server struct {
 	// answer 501 until both they and Owner are set.
 	Jobs      JobReader
 	Artifacts ArtifactStore
+
+	// Dashboard serves /dashboard/v1 (internal/dashboard), set only with
+	// ACCOUNTS_BACKEND=local. It checks the app host itself. It sits beside
+	// the mux rather than in it: those routes belong to the app host and
+	// its own contract (docs/spec/dashboard-openapi.json), not to the job
+	// API this mux and openapi.json describe. Nil leaves /dashboard/v1 to
+	// the mux, which answers 404 as it always has.
+	Dashboard http.Handler
 }
+
+const dashboardPrefix = "/dashboard/v1"
 
 // Per-key budgets from docs/spec/job-api.md, "Rate limits".
 const (
@@ -152,7 +162,11 @@ func New(build string, cat *sku.Catalogue, reg *upstream.Registry, log *slog.Log
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	rec := &recorder{ResponseWriter: w, status: http.StatusOK}
-	s.mux.ServeHTTP(rec, r)
+	if s.Dashboard != nil && (r.URL.Path == dashboardPrefix || strings.HasPrefix(r.URL.Path, dashboardPrefix+"/")) {
+		s.Dashboard.ServeHTTP(rec, r)
+	} else {
+		s.mux.ServeHTTP(rec, r)
+	}
 	s.Log.Info("request", "method", r.Method, "path", r.URL.Path, "status", rec.status, "ms", time.Since(start).Milliseconds())
 }
 
