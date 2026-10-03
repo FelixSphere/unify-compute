@@ -7,7 +7,10 @@
 # Staging and local development add docker-compose.console.yml, which brings
 # the UnifyAPI console (AGPL fork) and Redis. The two deployables share
 # nothing but HTTP (ADR-0002). Hosts with GPU workers also add
-# docker-compose.skypilot.yml, the SkyPilot API server (ADR-0010). The
+# docker-compose.skypilot.yml, the SkyPilot API server (ADR-0010). Every
+# hosted environment adds docker-compose.imds.yml, which hands compute-api
+# the instance role as a file because no container may reach IMDS there
+# (ADR-0005); it is written by scripts/imds-lockdown.sh, not kept here. The
 # instance selects the files with COMPOSE_FILE in its .env; so does
 # .env.example locally.
 #

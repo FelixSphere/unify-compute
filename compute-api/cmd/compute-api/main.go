@@ -99,6 +99,10 @@ func main() {
 	if bucket != "" && tokenSecret != "" {
 		region := env("AWS_REGION", "us-east-1")
 		var creds awsv4.CredentialSource = &awsv4.IMDS{}
+		if path := os.Getenv("INSTANCE_ROLE_CREDENTIALS_FILE"); path != "" {
+			creds = &awsv4.File{Path: path}
+			log.Info("aws credentials from file", "path", path)
+		}
 		if c, ok := awsv4.FromEnv(); ok {
 			creds = c
 		}

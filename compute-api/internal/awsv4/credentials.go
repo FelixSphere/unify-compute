@@ -37,10 +37,9 @@ func FromEnv() (Static, bool) {
 // available at least five minutes before the old ones expire, so a refresh
 // at that point always finds the new set.
 //
-// compute-api runs in a container, one network hop beyond the instance, so
-// the instance's http_put_response_hop_limit must be at least 2
-// (deploy/aws/modules/compute-stack/instance.tf); with 1 the token PUT
-// times out.
+// From a container this needs an http_put_response_hop_limit of at least 2.
+// The hosted environments run with 1 and drop container traffic to IMDS
+// (ADR-0005, amendment of 2026-10-03), so compute-api uses File there.
 type IMDS struct {
 	Endpoint string // default http://169.254.169.254
 	Client   *http.Client
@@ -118,15 +117,70 @@ func (m *IMDS) fetch(ctx context.Context) (Credentials, error) {
 	if err != nil {
 		return Credentials{}, err
 	}
+	c, err := parseIMDSCredentials(body)
+	if err != nil {
+		return Credentials{}, fmt.Errorf("imds credentials: %w", err)
+	}
+	return c, nil
+}
+
+// parseIMDSCredentials reads the body of IMDS's
+// /latest/meta-data/iam/security-credentials/<role>.
+func parseIMDSCredentials(body []byte) (Credentials, error) {
 	var r struct {
 		Code, AccessKeyId, SecretAccessKey, Token string
 		Expiration                                time.Time
 	}
 	if err := json.Unmarshal(body, &r); err != nil {
-		return Credentials{}, fmt.Errorf("imds credentials: %w", err)
+		return Credentials{}, err
 	}
 	if r.Code != "Success" || r.AccessKeyId == "" {
-		return Credentials{}, fmt.Errorf("imds credentials: code %q", r.Code)
+		return Credentials{}, fmt.Errorf("code %q", r.Code)
 	}
 	return Credentials{AccessKeyID: r.AccessKeyId, SecretAccessKey: r.SecretAccessKey, SessionToken: r.Token, Expires: r.Expiration}, nil
+}
+
+// File reads the instance role's credentials from a file the host writes:
+// IMDS's own answer, copied there by a host timer every two minutes
+// (scripts/imds-lockdown.sh). On the hosted environments no container can
+// reach IMDS (ADR-0005, amendment of 2026-10-03), compute-api included, so
+// this is how compute-api gets the role there.
+//
+// The file is re-read once the credentials it held are within five minutes
+// of expiring. EC2 offers rotated credentials at least five minutes before
+// the old ones expire, and the timer runs well inside that, so the re-read
+// finds the new set; until it does, the old set is returned while it is
+// still valid.
+type File struct {
+	Path string
+	Now  func() time.Time
+
+	mu     sync.Mutex
+	cached Credentials
+}
+
+func (f *File) Credentials(context.Context) (Credentials, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	now := time.Now
+	if f.Now != nil {
+		now = f.Now
+	}
+	if f.cached.AccessKeyID != "" && now().Add(imdsRefreshBefore).Before(f.cached.Expires) {
+		return f.cached, nil
+	}
+	body, err := os.ReadFile(f.Path)
+	if err == nil {
+		var c Credentials
+		if c, err = parseIMDSCredentials(body); err == nil {
+			f.cached = c
+		}
+	}
+	if f.cached.AccessKeyID != "" && now().Before(f.cached.Expires) {
+		return f.cached, nil
+	}
+	if err != nil {
+		return Credentials{}, fmt.Errorf("credentials file %s: %w", f.Path, err)
+	}
+	return Credentials{}, fmt.Errorf("credentials file %s: expired at %s; is the host's refresh timer running?", f.Path, f.cached.Expires.Format(time.RFC3339))
 }

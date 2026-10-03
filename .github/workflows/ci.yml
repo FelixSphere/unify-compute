@@ -175,6 +175,149 @@ jobs:
       - name: Container builds
         run: docker build --build-arg BUILD=${{ github.sha }} -t compute-api:ci .
 
+  # The IMDS lockdown (scripts/imds-lockdown.sh, ADR-0005 amendment of
+  # 2026-10-03), run for real: the runner is a VM with systemd, Docker and
+  # iptables-nft, like the hosts. A fake IMDS answers at 169.254.169.254 from
+  # its own network namespace, so container traffic to it is routed through
+  # the host exactly as on EC2. What this cannot show is the instance's hop
+  # limit of 1, which only EC2 enforces; check-imds.sh on the host covers it.
+  imds-lockdown:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: shellcheck (POSIX sh, as SSM runs them)
+        run: |
+          shellcheck -s sh scripts/imds-lockdown.sh scripts/release/check-imds.sh
+          # The two scripts the lockdown installs on the host.
+          awk '/cat > "\$FIREWALL" <<.SH./{f=1;next} /^SH$/{f=0} f' scripts/imds-lockdown.sh > "$RUNNER_TEMP/firewall.sh"
+          awk '/cat > "\$REFRESH" <<.SH./{f=1;next} /^SH$/{f=0} f' scripts/imds-lockdown.sh > "$RUNNER_TEMP/refresh.sh"
+          test -s "$RUNNER_TEMP/firewall.sh" && test -s "$RUNNER_TEMP/refresh.sh"
+          shellcheck -s sh "$RUNNER_TEMP/firewall.sh" "$RUNNER_TEMP/refresh.sh"
+
+      - name: A fake IMDS behind the host, as on EC2
+        run: |
+          cat > "$RUNNER_TEMP/fake_imds.py" <<'PY'
+          import datetime, http.server, json
+          class H(http.server.BaseHTTPRequestHandler):
+              def reply(self, code, body=""):
+                  b = body.encode()
+                  self.send_response(code)
+                  self.send_header("Content-Length", str(len(b)))
+                  self.end_headers()
+                  self.wfile.write(b)
+              def do_PUT(self):
+                  ok = self.path == "/latest/api/token" and self.headers.get("X-aws-ec2-metadata-token-ttl-seconds")
+                  self.reply(200, "tok") if ok else self.reply(400)
+              def do_GET(self):
+                  if self.headers.get("X-aws-ec2-metadata-token") != "tok":
+                      return self.reply(401)
+                  if self.path == "/latest/meta-data/iam/security-credentials/":
+                      return self.reply(200, "ci-role")
+                  if self.path == "/latest/meta-data/iam/security-credentials/ci-role":
+                      exp = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=6)
+                      return self.reply(200, json.dumps({"Code": "Success", "Type": "AWS-HMAC",
+                          "AccessKeyId": "ASIACI", "SecretAccessKey": "s", "Token": "t",
+                          "Expiration": exp.strftime("%Y-%m-%dT%H:%M:%SZ")}, indent=2))
+                  self.reply(404)
+          http.server.HTTPServer(("169.254.169.254", 80), H).serve_forever()
+          PY
+          sudo ip netns add imds
+          sudo ip link add imds-h type veth peer name imds-n
+          sudo ip link set imds-n netns imds
+          sudo ip addr add 169.254.170.1/30 dev imds-h
+          sudo ip link set imds-h up
+          sudo ip netns exec imds sh -c '
+            ip link set lo up
+            ip addr add 169.254.170.2/30 dev imds-n
+            ip addr add 169.254.169.254/32 dev imds-n
+            ip link set imds-n up
+            ip route add default via 169.254.170.1'
+          # Replaces the runner's route to Azure's own metadata service.
+          sudo ip route replace 169.254.169.254/32 via 169.254.170.2 dev imds-h
+          sudo ip netns exec imds python3 "$RUNNER_TEMP/fake_imds.py" > "$RUNNER_TEMP/fake_imds.log" 2>&1 &
+          for _ in $(seq 1 20); do
+            curl -fsS -m 1 -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' http://169.254.169.254/latest/api/token && break
+            sleep 0.5
+          done
+          echo
+
+      - name: A host before the lockdown
+        run: |
+          d="$RUNNER_TEMP/compose"; mkdir -p "$d"
+          cat > "$d/docker-compose.yml" <<'YAML'
+          services:
+            compute-api:
+              image: alpine:3.20
+              command: ["sleep", "infinity"]
+              restart: unless-stopped
+            console:
+              image: alpine:3.20
+              command: ["sleep", "infinity"]
+              restart: unless-stopped
+              networks: [default, other]
+          networks:
+            other: {}
+          YAML
+          echo COMPOSE_FILE=docker-compose.yml > "$d/.env"
+          (cd "$d" && sudo docker compose --env-file .env up -d --quiet-pull)
+          # Outside the compose project: the rule is not about compose.
+          sudo docker run -d --quiet --name stray --restart unless-stopped alpine:3.20 sleep infinity
+          # The check must see the hole before it can be trusted to see it closed.
+          if sudo sh scripts/release/check-imds.sh > before.txt; then
+            cat before.txt; echo "::error::check-imds passed on a host that is not locked down"; exit 1
+          fi
+          cat before.txt
+          for c in compose-compute-api-1 compose-console-1 stray; do
+            grep -qx "FAIL $c: IMDS answered HTTP 200" before.txt || { echo "::error::$c did not reach the fake IMDS before the lockdown"; exit 1; }
+          done
+
+      - name: Lock down, then check
+        run: |
+          sudo env COMPOSE_DIR="$RUNNER_TEMP/compose" sh scripts/imds-lockdown.sh | tee lockdown.txt
+          tail -n 1 lockdown.txt | grep -qx 'IMDS_LOCKDOWN_DONE all'
+          sudo sh scripts/release/check-imds.sh
+          test "$(sudo stat -c '%u %a' /run/unify-compute/compute-api-aws/credentials.json)" = "65532 400"
+
+      - name: Idempotent
+        run: |
+          sudo env COMPOSE_DIR="$RUNNER_TEMP/compose" sh scripts/imds-lockdown.sh | tail -n 1 | grep -qx 'IMDS_LOCKDOWN_DONE all'
+          test "$(sudo iptables -t raw -S PREROUTING | grep -c unify-compute-imds)" = 1
+          test "$(grep -o docker-compose.imds.yml "$RUNNER_TEMP/compose/.env" | wc -l)" = 1
+
+      - name: The rule survives a Docker restart, and a lost one comes back with it
+        run: |
+          wait_up() {
+            for _ in $(seq 1 30); do
+              [ "$(sudo docker ps -q | wc -l)" = 3 ] && return 0
+              sleep 1
+            done
+            sudo docker ps -a; return 1
+          }
+          sudo systemctl restart docker
+          wait_up
+          sudo sh scripts/release/check-imds.sh
+
+          # Removed behind the unit's back: the check and host.sh's guard see it...
+          sudo iptables -t raw -D PREROUTING -d 169.254.169.254/32 -m comment --comment unify-compute-imds -j DROP
+          if sudo /usr/local/sbin/unify-compute-imds-firewall check; then echo "::error::check missed a removed rule"; exit 1; fi
+          if sudo sh scripts/release/check-imds.sh > lost.txt; then cat lost.txt; echo "::error::check-imds passed without the rule"; exit 1; fi
+          cat lost.txt
+          # ...and restarting Docker re-applies it (PartOf=docker.service).
+          sudo systemctl restart docker
+          wait_up
+          sudo sh scripts/release/check-imds.sh
+          test "$(sudo iptables -t raw -S PREROUTING | grep -c unify-compute-imds)" = 1
+
+      - name: Diagnostics
+        if: failure()
+        run: |
+          sudo iptables -t raw -S PREROUTING || true
+          sudo systemctl status unify-compute-imds-firewall unify-compute-api-credentials.timer --no-pager || true
+          sudo docker ps -a || true
+          cat "$RUNNER_TEMP/fake_imds.log" || true
+
   # Named for what it does. It was called `deploy`, which invited the
   # assumption that merging to main ships something; nothing here has
   # credentials and nothing here deploys.

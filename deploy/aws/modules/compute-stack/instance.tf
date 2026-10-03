@@ -196,6 +196,7 @@ locals {
     public_url            = "https://${var.api_domain}"
     skypilot_enabled      = local.skypilot_enabled
     skypilot_host_setup   = local.skypilot_host_setup
+    imds_lockdown         = file("${path.module}/../../../../scripts/imds-lockdown.sh")
   })
 }
 
@@ -210,12 +211,11 @@ resource "aws_instance" "this" {
   # only decides what an explicit `-replace` does with it: render it fresh.
   user_data_replace_on_change = true
 
-  # Gzipped when SkyPilot is on: the setup script and its embedded files take
-  # the rendered script past EC2's 16 KB, and cloud-init decompresses gzip
-  # user data itself. Plain otherwise, so a stack without SkyPilot renders
-  # exactly what it always has.
-  user_data        = local.skypilot_enabled ? null : local.user_data
-  user_data_base64 = local.skypilot_enabled ? base64gzip(local.user_data) : null
+  # Gzipped: the embedded scripts (IMDS lockdown, SkyPilot setup) take the
+  # rendered script past EC2's 16 KB, and cloud-init decompresses gzip user
+  # data itself. Both attributes are in ignore_changes below, so moving from
+  # user_data to user_data_base64 plans nothing for a running instance.
+  user_data_base64 = base64gzip(local.user_data)
 
   root_block_device {
     volume_size = 16
@@ -225,13 +225,13 @@ resource "aws_instance" "this" {
 
   metadata_options {
     http_tokens = "required" # IMDSv2 only
-    # compute-api runs in a container, one hop beyond the instance, and
-    # needs the instance role for artifact storage (ADR-0005); with a limit
-    # of 1 the IMDSv2 token response never reaches it. The AL2023 AMI already
-    # defaults to 2 (both instances showed 2 on 2026-10-02, so this changes
-    # nothing); it is written here because it is now load-bearing. It also
-    # means every container on the host can reach the role; see ADR-0005.
-    http_put_response_hop_limit = 2
+    # 1: the IMDSv2 token response dies one hop out, at the container
+    # boundary, so no container can obtain the instance role even if the
+    # host's IMDS rule (scripts/imds-lockdown.sh) were gone. compute-api
+    # reads the role from a file the host writes instead (ADR-0005,
+    # amendment of 2026-10-03). It was 2, the AL2023 default, until then.
+    # Changed in place (ModifyInstanceMetadataOptions), no stop/start.
+    http_put_response_hop_limit = 1
   }
 
   # Name and Project are what the GitHub deploy roles match on
@@ -284,13 +284,12 @@ resource "aws_instance" "this" {
     }
 
     # EC2 rejects user data over 16 KB, but only at apply, after the plan
-    # looked fine. The compose files are embedded verbatim, so growing them
-    # grows this; staging rendered at ~12 KB on 2026-10-02.
-    # Gzipped, the limit applies to the compressed bytes: 16384 raw is 21848
-    # characters of base64.
+    # looked fine. The compose files and scripts are embedded verbatim, so
+    # growing them grows this. Gzipped, the limit applies to the compressed
+    # bytes: 16384 raw is 21848 characters of base64.
     precondition {
-      condition     = local.skypilot_enabled ? length(base64gzip(local.user_data)) <= 21848 : length(local.user_data) <= 16384
-      error_message = "Rendered user_data exceeds EC2's 16 KB limit; trim the template or the embedded compose files."
+      condition     = length(base64gzip(local.user_data)) <= 21848
+      error_message = "Rendered user_data exceeds EC2's 16 KB limit; trim the template or the embedded files."
     }
   }
 }
