@@ -45,7 +45,7 @@ on migration numbers (A1 takes `0005`, A6 takes `0006`).
 | # | Step | Needed by | Notes |
 |---|---|---|---|
 | O1 | Accept ADR-0011 and answer D1–D8 | everything | Edits ADR-0011's Status; AGENTS.md "What is decided" follows in A9 |
-| O2 | **Stripe account**: decide the entity (D2), complete KYC and bank details, statement descriptor (e.g. `UNIFY COMPUTE`), Radar rules (block on failed CVC or postal check, 3-D Secure when Radar asks), turn on receipts. Create a restricted test key and a webhook endpoint for staging, put both in SSM | B1 | Test mode only until O6 |
+| O2 | **Stripe account**: the existing account Unify API runs production on (decided 2026-10-03: KYC, bank and receipts already done). Create compute's own restricted test key and its own staging webhook endpoint, put both in SSM (`docs/staging.md`, "Stripe top-ups"). Radar rules and the statement descriptor are account-wide, shared with Unify API: change them only with its owner | B1 | Test mode only until O6 |
 | O3 | **Turnstile**: create a widget in a Cloudflare account for `app.compute.unifyai.us` and `app.staging.compute.unifyai.us`; put the site key and secret in SSM | A8 (A4 can merge with test keys) | Free. DNS stays in Route53; Turnstile does not need Cloudflare DNS |
 | O4 | **SES**: approve applying `deploy/aws/shared/ses-compute` (identity, DKIM, MAIL FROM, DMARC, configuration set). **No sandbox exit**: the account already has production access (checked 2026-10-03: 50,000/24 h, healthy) | A8 | Shares account-level reputation with Unify API and Unify Data |
 | O5 | **Legal**: terms of service, acceptable-use policy (no mining), refund policy for prepaid credit, privacy-policy processors (Stripe, Cloudflare, AWS SES), record retention; and **tax**: Malaysian service tax, US sales tax, EU/UK VAT, consumer vs business-only (D2) | O6, and C4 | Before the first live top-up |
@@ -258,11 +258,17 @@ on migration numbers (A1 takes `0005`, A6 takes `0006`).
 
 - **Depends on:** A8, O2.
 - **Touches:** new `compute-api/internal/payments/` (Checkout Session
-  create, webhook verify and dispatch), `0007_topups.sql` (`topups`,
-  `stripe_events`), `compute-api/internal/dashboard/` (`/topups`),
-  `compute-api/internal/api/server.go` (`/stripe/v1/webhook` on the API
-  host), `dashboard/` (Billing page), `compute-api/internal/mailer` (top-up
+  create, webhook verify and dispatch), `0008_topups.sql` (`topups`,
+  `stripe_events`; 0007 went to API keys), `compute-api/internal/dashboard/`
+  (`/topups`, and the webhook at `/dashboard/v1/stripe/webhook` on the app
+  host, inside the prefix the ALB already sends to compute-api),
+  `dashboard/` (Billing page), `compute-api/internal/mailer` (top-up
   received).
+- **Status (2026-10-03):** built on a branch except the top-up received
+  email; the Stripe account is the one Unify API already uses, so compute
+  has its own restricted keys and endpoint and ignores every event that is
+  not its own (`spec/accounts.md`, "Stripe webhook"). Operator steps:
+  `docs/staging.md`, "Stripe top-ups".
 - **Done when:** in Stripe test mode on staging: a USD 10 top-up with
   `4242…` credits exactly 50,000,000 units once; replaying the webhook (Stripe
   CLI `events resend`) changes nothing; a forged signature is `400`; a

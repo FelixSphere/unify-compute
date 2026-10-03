@@ -11,9 +11,13 @@
   `account`, `balance` and `audit` verbs (A6), and API keys (A5: migration
   `0007_api_keys.sql`, the dashboard's `/keys` routes, and the job API's
   `uck_` verifier with scopes), and the dashboard's balance, history, usage
-  and job routes (A7d). All of it is behind `ACCOUNTS_BACKEND=local`, which
-  no environment sets. Top-ups, `GET /compute/v1/balance`, account export
-  and close do not exist yet.
+  and job routes (A7d), and card top-ups (B1: migration `0008_topups.sql`,
+  `internal/payments`, the dashboard's `/topups` routes and the Stripe
+  webhook, the Billing page's "Add credit"). All of it is behind
+  `ACCOUNTS_BACKEND=local`, which no environment sets, and top-ups also need
+  the Stripe keys, which no environment has yet. Refunds and disputes (B2),
+  the top-up receipt email, `admin account limits`, `GET /compute/v1/balance`,
+  account export and close do not exist yet.
 - Task breakdown: [`plan-own-accounts.md`](../plan-own-accounts.md).
 - Depends on: [`job-api.md`](job-api.md) (error envelope, job routes),
   [`metering.md`](metering.md) (holds H1–H7, settlement R1–R6, the quota unit),
@@ -27,7 +31,7 @@
 | Dashboard pages (static) | `app.compute.unifyai.us` | everything except `/dashboard/v1/*` | none; served by the `site` container |
 | Dashboard API | `app.compute.unifyai.us` | `/dashboard/v1/*` | session cookie + CSRF header |
 | Job API | `api.compute.unifyai.us` | `/compute/v1/*` | `Authorization: Bearer uck_…` |
-| Stripe webhook | `api.compute.unifyai.us` | `/stripe/v1/webhook` | `Stripe-Signature` |
+| Stripe webhook | `app.compute.unifyai.us` | `/dashboard/v1/stripe/webhook` | `Stripe-Signature` (no session, no Origin check) |
 | Admin | the host, over SSM | `compute-api admin …` (CLI) | host access |
 
 Staging uses `app.staging.compute.unifyai.us` and `staging.compute.unifyai.us`
@@ -191,21 +195,23 @@ After the cutover its `user_id` holds the account id and `token_id` the key id.
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | `text` PK | `tu_` + ULID; Checkout `client_reference_id` and `metadata.topup_id` |
-| `account_id`, `user_id` | `bigint` | |
+| `id` | `text` PK | `tu_` + ULID; Checkout `client_reference_id`, `metadata.topup_id` and the Checkout idempotency key |
+| `account_id`, `user_id` | `bigint` | No foreign key, like `balance_entries` |
 | `amount_cents` | `integer` | `currency` is always `usd` |
-| `status` | `text` | See [Top-up](#top-up) |
-| `stripe_checkout_session_id` | `text` unique | |
-| `stripe_payment_intent_id`, `stripe_charge_id` | `text` | From the completed session |
+| `status` | `text` | See [Top-up](#top-up). At most one `open` per account (partial unique index) |
+| `stripe_checkout_session_id` | `text` unique | Null only between the insert and Stripe's answer; a top-up whose session could not be created is deleted |
+| `stripe_customer_id` | `text` | The account's Customer (also on `accounts`) |
+| `stripe_payment_intent_id`, `stripe_charge_id` | `text` | The PaymentIntent from the completed session; the charge and receipt looked up after the credit |
 | `receipt_url` | `text` | Stripe's hosted receipt |
-| `refunded_cents`, `disputed_cents` | `integer` | |
-| `created_at`, `paid_at`, `expires_at` | `timestamptz` | `expires_at` = Checkout's (24 h) |
+| `refunded_cents`, `disputed_cents` | `integer` | B2 |
+| `created_at`, `paid_at`, `expires_at` | `timestamptz` | `expires_at` = Checkout's, one hour after creation (`payments.CheckoutTTL`) |
 
 ### `stripe_events`
 
-`event_id PK`, `type`, `received_at`, `processed_at`, `payload_sha256`.
-Inserted in the same transaction as the effect, so a redelivered event is a
-no-op.
+`event_id PK`, `type`, `livemode`, `topup_id`, `outcome`, `payload_sha256`,
+`received_at`, `processed_at`. Inserted first in the same transaction as the
+effect, so a redelivered event, even one delivered concurrently, is a no-op.
+Only compute's own events are stored; see [Stripe webhook](#stripe-webhook-post-dashboardv1stripewebhook).
 
 ### `audit_events` (**append-only**)
 
@@ -275,16 +281,27 @@ key is `401 invalid_key`, with no cache.
 ### Top-up
 
 ```
-          create                webhook: completed, paid
+          create                webhook: completed + paid, or async_payment_succeeded
 (none) ──────────▶ open ─────────────────────────────▶ credited ──refund──▶ refunded / partially_refunded
                     │                                    │
-                    └──webhook: expired (24 h)──▶ expired │ dispute.created
-                                                         ▼
+                    ├──webhook: expired (1 h)──▶ expired │ dispute.created
+                    ├──a new top-up expires it──▶ expired ▼
+                    └──webhook: async_payment_failed──▶ failed
                                                      disputed ──closed: won──▶ credited
                                                          └──────closed: lost──▶ lost (terminal)
 ```
 
 - `credited` is written only by the webhook, never by the return page.
+- Creating a top-up while one is `open` first expires that one's Checkout
+  Session at Stripe (`POST /v1/checkout/sessions/{id}/expire`), so a payment
+  page left open in another tab can no longer be paid, then marks it
+  `expired`. If Stripe refuses because the session is already complete, the
+  payment went through and its webhook will credit it: `409 topup_open`.
+- `failed` cannot happen with cards only; it is handled because the event
+  exists.
+- Refunds and disputes (below) are B2. Until B2, their events on a top-up
+  are stored (`outcome = recorded`) and logged as errors for the operator,
+  and nothing moves.
 - `disputed` debits `disputed_cents` immediately; `won` writes a
   `dispute_reversal` entry; `lost` writes nothing more.
 - A refund is created by the admin CLI (`refund` entry, top-up →
@@ -321,7 +338,8 @@ named by `param`, or in the form-level box when `param` is absent
 | 400 | `invalid_request` | `invalid_name` | Key name empty after trimming, over 64 characters, or containing a control character, a Unicode format character (bidi override, zero-width) or `<` `>` |
 | 400 | `invalid_request` | `invalid_scope` | Key scopes empty or unknown |
 | 400 | `invalid_request` | `invalid_expires_at` | Key `expires_at` (Unix seconds) not in the future |
-| 400 | `invalid_request` | `invalid_amount` | Top-up not a whole-cent USD amount |
+| 400 | `invalid_request` | `invalid_amount` | Top-up not a whole-cent USD amount (`param: amount_usd`) |
+| 400 | `invalid_request` | `invalid_signature` | Stripe webhook: `Stripe-Signature` missing, malformed, wrong or stale. Nothing stored |
 | 401 | `authentication_error` | `invalid_credentials` | Login: unknown email or wrong password (indistinguishable) |
 | 401 | `authentication_error` | `session_required` | Dashboard route without a valid session |
 | 401 | `authentication_error` | `reauth_required` | Sensitive action more than 10 min after the password was last entered |
@@ -334,15 +352,16 @@ named by `param`, or in the form-level box when `param` is absent
 | 403 | `permission_error` | `compute_not_enabled` | Submit while `compute_enabled` is off |
 | 403 | `permission_error` | `scope_denied` | Key lacks the scope (`read` key on submit or cancel) |
 | 403 | `permission_error` | `csrf_failed` | Missing or wrong `X-CSRF-Token`, or foreign `Origin` |
-| 403 | `permission_error` | `topup_limit_exceeded` | Below the minimum, above the per-top-up maximum, would exceed the balance maximum, or over the daily count. `message` says which and invites contact for a review |
+| 403 | `permission_error` | `topup_limit_exceeded` | Below the minimum, above the per-top-up maximum, would exceed the balance maximum (`param: amount_usd` for these three), or over the daily count (no `param`). `message` says which and invites contact for a review |
 | 403 | `permission_error` | `key_limit_reached` | 10 active keys already |
 | 400 | `invalid_request` | `invalid_month` | `/usage`: `month` not `YYYY-MM` |
 | 400 | `invalid_request` | `invalid_cursor`, `invalid_limit`, `invalid_status` | List routes: `after` not one of this account's entries or jobs, `limit` out of range, unknown job status (`param` names it) |
 | 404 | `not_found` | `not_found` | Key or top-up not in this account |
 | 404 | `not_found` | `job_not_found` | Job not in this account, on the dashboard as on the job API |
-| 409 | `conflict` | `topup_open` | A top-up from this account is already `open`; finish or abandon it (returns its id) |
+| 409 | `conflict` | `topup_open` | The account's `open` top-up was already paid at Stripe and its webhook has not arrived; `error.topup_id` names it. An unpaid open top-up never blocks: it is expired and replaced |
 | 429 | `rate_limited` | `rate_limited` | Any throttle; always with `Retry-After` |
-| 502 | `payment_provider_error` | `stripe_unavailable` | Stripe did not create the Checkout Session; nothing was charged |
+| 502 | `payment_provider_error` | `stripe_unavailable` | Stripe did not create the Checkout Session (or the Customer, or did not answer the expiry of an open session); nothing was charged and no top-up is kept |
+| 503 | `topups_unavailable` | `topups_unavailable` | No Stripe keys in this deployment, or keys refused for its environment (see Configuration). Listing still works |
 | 503 | `email_unavailable` | `email_unavailable` | SES refused a verification email at signup; the signup is rolled back (Unify Data's behaviour). Never returned by forgot-password (that answers `202` either way) |
 
 `console_unavailable` disappears with the bridge. `billing_unavailable`
@@ -372,6 +391,7 @@ resend, login and forgot-password. Throttles, as built:
 | Resend per IP | 20 / h | every request |
 | Forgot per IP, per address | 5 / h each | every request, unknown addresses included |
 | Key creation per account | 20 / h | every well-formed request after reauth, refusals for the key limit included: each creation sends an email |
+| Top-up creation per account | 10 / h | every request with a well-formed amount, limit refusals included: bounds Checkout Sessions (and card attempts inside them), since abandoned top-ups do not count against the daily 3 |
 | Reads per account | 600 / min | every `GET` of `/balance`, `/transactions`, `/usage` and `/jobs…`, as the job API's 600 reads a minute per key; in process memory, per replica. Cancel is not a read |
 
 The client IP is the **last** `X-Forwarded-For` entry (the ALB appends it),
@@ -409,16 +429,22 @@ after the response, so neither the status nor the time depends on it.
 | `POST /jobs/{id}/cancel` | — | As the job API: `202` with the Job, `409 job_terminal` once ended. Needs the CSRF header. Built (A7d) |
 | `GET /jobs/{id}/artifacts` | — | As the job API: the listing and presigned GET URLs. Without it the job page could not offer downloads, because the page has a session and the job API takes only a key. Built (A7d) |
 | `GET /usage?month=YYYY-MM` | — | `{ object: "compute.usage", month, currency: "USD", gpu_seconds, gpu_usd, storage_usd, egress_usd, total_usd, by_sku: [{ sku, gpu_seconds, usd }] }` for one UTC month (absent: the current one; malformed: `400 invalid_month`). Totals the settles accepted in the month by SKU, in quota units converted once, so `total_usd` is exactly what the month's settle entries took; `gpu_seconds` counts what each settle added. Usage accrued but not yet settled is not in it. Holds whose SKU is `storage` or `egress` (R5, not built) go to those meters, so both read `0.0000` today. Built (A7d) |
-| `POST /topups` | `{ amount_usd: "20.00" }` | `201 { id, status: "open", checkout_url }` |
-| `GET /topups`, `GET /topups/{id}` | — | `{ id, amount_usd, status, created_at, paid_at, receipt_url, refunded_usd }` |
+| `POST /topups` | `{ amount_usd: "20.00" }` | `201 { id, object: "compute.topup", status: "open", checkout_url }`. Checks the account is active and the limits, expires an open top-up's session (above), creates the Customer on the first top-up and the Checkout Session: mode `payment`, one USD line item, `payment_method_types[0]=card`, `saved_payment_method_options[payment_method_save]=disabled`, no `setup_future_usage`, `client_reference_id` and idempotency key from the top-up id, `metadata` and `payment_intent_data[metadata]` = `product: unify-compute`, `account_id`, `topup_id`, `environment`, return URLs `APP_ORIGIN/billing?topup=<id>&checkout=success` / `=cancelled`, expiring after 1 h. Writes `topup_created`. Built (B1) |
+| `GET /topups` | — | `{ object: "list", data, has_more: false, topups_enabled }`: the 50 newest, newest first, each `{ id, object: "compute.topup", amount_usd, status, created_at, paid_at, receipt_url, refunded_usd }`. `topups_enabled` says whether `POST` can work here, so the page offers the form only then. Built (B1) |
+| `GET /topups/{id}` | — | One top-up, as listed; another account's is `404 not_found`. What `/billing` polls after the return from Checkout. Built (B1) |
+| `POST /stripe/webhook` | Stripe event | Not for the pages: see [Stripe webhook](#stripe-webhook-post-dashboardv1stripewebhook). Built (B1) |
 | `GET /account/export` | — | `200` JSON attachment: user, account, keys (metadata), jobs, balance entries, top-ups |
 | `POST /account/close` | `{ password }` | `202`; jobs cancelled, keys revoked, artifacts deleted, sessions ended, address tombstoned |
 
 Submitting jobs from the dashboard is not in the first version: customers
 submit with a key.
 
-The pages (A7c, `dashboard/`) call every route above except top-ups, export
-and close, and since A7d every one they call is built. The job routes are
+The pages (A7c, `dashboard/`) call every route above except export and
+close, and every one they call is built. `/billing` sends the browser to
+`checkout_url` with a full navigation (no Stripe script on our pages, so the
+CSP is unchanged and PCI scope stays SAQ-A), and on the return cleans the
+URL, says "cancelled" or polls `GET /topups/{id}` until the webhook has
+moved it out of `open`. The job routes are
 the job API's own handlers (`api.Server.AccountJobs`) run for the session's
 account, so bodies, pagination and errors are the job API's; another
 account's job answers `404 job_not_found` exactly as a missing one does.
@@ -441,27 +467,64 @@ not_found` or `501`, so the pages also work against an older compute-api.
   `{ available_usd, held_usd }`, so scripts can check before submitting.
 - Per-key rate limits (`quotas.md`) key on the key id instead of the raw key.
 
-## Stripe webhook (`POST /stripe/v1/webhook`)
+## Stripe webhook (`POST /dashboard/v1/stripe/webhook`)
+
+On the app host, inside `/dashboard/v1` so the ALB rule that already sends
+that prefix to compute-api covers it. It is the one dashboard route with no
+session, no CSRF header and no Origin check; the Host check still applies.
+
+The Stripe account is the one Unify API already runs production on. Compute
+has its own restricted keys and its own endpoint and must not act on, or
+fail on, anything of Unify API's. Every Stripe object compute creates
+(Customer, Checkout Session, and through `payment_intent_data` the
+PaymentIntent and its charge) carries `metadata.product = unify-compute`,
+`account_id` and `environment`.
 
 1. Read the raw body (at most 256 KiB). Parse `Stripe-Signature`
-   (`t=…,v1=…`). Compute HMAC-SHA256 of `t + "." + body` with
-   `STRIPE_WEBHOOK_SECRET`; constant-time compare with any `v1`; refuse if
-   `|now − t| > 300 s`. Failure → `400`, nothing stored.
-2. Insert into `stripe_events`; on conflict → `200`, done.
-3. Dispatch on `type` (`checkout.session.completed`,
-   `checkout.session.expired`, `charge.refunded`, `charge.dispute.created`,
-   `charge.dispute.closed`), in the same transaction. Any other type: `200`.
-4. For `checkout.session.completed`: require `payment_status = "paid"`,
-   `mode = "payment"`, `currency = "usd"`, and that `amount_total` equals the
-   top-up's `amount_cents` and `client_reference_id` names an `open` top-up
-   of the same account (via `metadata.account_id`). A mismatch is logged,
-   alerted, and answered `200` without crediting, so Stripe does not retry
-   something that will never be valid.
-5. Commit, then send the receipt email (outside the transaction; a failed
-   email never un-credits).
+   (`t=…,v1=…[,v1=…]`). Compute HMAC-SHA256 of `t + "." + body` with
+   `STRIPE_WEBHOOK_SECRET`; constant-time compare with every `v1`; refuse if
+   `|now − t| > 300 s`. Failure → `400 invalid_signature`, nothing stored.
+2. Decide whether the event is compute's. Not compute's → `200`
+   (`outcome: ignored`), nothing stored, so Stripe neither retries it nor
+   marks the endpoint failing:
+   - `livemode` differs from the key's mode;
+   - a `checkout.session.*` event whose session lacks
+     `metadata.product = unify-compute` or carries another `environment`
+     (staging and a developer's machine share test mode);
+   - a `charge.refunded` or `charge.dispute.*` event whose `payment_intent`
+     is not a top-up's;
+   - any other type.
+3. Insert into `stripe_events`; on conflict → `200` (`duplicate`), done.
+4. Dispatch, in the same transaction:
+   - `checkout.session.completed` with `payment_status = "paid"`, and
+     `checkout.session.async_payment_succeeded`: credit. Requires that
+     `client_reference_id` names a top-up, that its stored session id is the
+     event's, that `metadata.topup_id` and `metadata.account_id` match it,
+     `mode = "payment"`, `currency = "usd"` and `amount_total =
+     amount_cents`. A mismatch, or a payment for a top-up already `expired`
+     or `failed`, is logged as an error and answered `200` (`rejected`)
+     without crediting, so Stripe does not retry something that will never
+     be valid. Otherwise: the top-up moves to `credited` (`paid_at`, the
+     PaymentIntent), a `topup` balance entry with idempotency key
+     `topup:<id>` is written under the account lock, and a `topup_credited`
+     audit row (actor `stripe`, the event id). A second event for an
+     already credited top-up is `already_credited`. `completed` with
+     `payment_status = "unpaid"` changes nothing (`awaiting_payment`).
+   - `checkout.session.expired`: `open` → `expired`.
+   - `checkout.session.async_payment_failed`: `open` → `failed`.
+   - `charge.refunded`, `charge.dispute.created`, `charge.dispute.closed`
+     on a top-up: stored as `recorded` and logged as an error for the
+     operator. Applying them is B2.
+5. Commit, then look up the PaymentIntent with `latest_charge` expanded and
+   store the charge id and `receipt_url` (outside the transaction; a failure
+   leaves the top-up credited without a receipt link). The "Top-up
+   received" email belongs here and is not built yet.
 
-A `5xx` from us makes Stripe retry for up to 3 days, which is the retry policy
-for database outages.
+The response body is `{ received: true, outcome }`, so Stripe's delivery log
+says what happened. A `5xx` from us makes Stripe retry for up to 3 days,
+which is the retry policy for database outages. Events are parsed in API
+version `2024-06-20` (`payments.APIVersion`, also sent as `Stripe-Version`
+on every request); the endpoint is created with that version.
 
 ## Admin CLI (`compute-api admin`)
 
@@ -486,8 +549,9 @@ Stripe exists. It refuses an account with no verified user, because
 after the change commits; a failed email is reported and does not undo it.
 
 Built (A6): `account show|enable-compute|disable-compute|suspend|reinstate`,
-`balance show|credit|debit`, `audit`. Not yet: `account limits` (with top-ups,
-B1) and `topup refund` (B2). Suspending does not stop running jobs yet (B2).
+`balance show|credit|debit`, `audit`. Not yet: `account limits` (the per-
+account top-up columns exist and are read; until the verb exists the
+operator changes them with SQL and an audit row) and `topup refund` (B2). Suspending does not stop running jobs yet (B2).
 The CLI never migrates; the service does at boot.
 
 ## Emails
@@ -539,11 +603,14 @@ line.
 | `SES_CONFIGURATION_SET` | `unify-compute` (also the identity default; set for clarity) |
 | `MAIL_OUTBOX_DIR` | Only with `ENVIRONMENT=development` and no `SES_SENDER`: where messages are written as `.eml` files instead of sent (default `outbox`) |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET` | Cloudflare; test keys in development |
-| `STRIPE_SECRET_KEY` | `sk_test_…` until the operator approves live mode; a restricted key with Checkout Sessions write, Customers write, Refunds write, and read on Charges and Disputes |
-| `STRIPE_WEBHOOK_SECRET` | `whsec_…` of the endpoint |
+| `STRIPE_SECRET_KEY` | Compute's own restricted key on the shared Stripe account: `rk_test_…` with any `ENVIRONMENT` but `production`, `rk_live_…` only with `ENVIRONMENT=production` (and only after O5/O6). B1 needs Checkout Sessions write, Customers write, PaymentIntents read and Charges read (the receipt lookup expands `latest_charge`); B2 adds Refunds write and Disputes read. A key in the wrong environment, a malformed one, or one without its webhook secret is logged as an error and top-ups answer `503 topups_unavailable`; compute-api still boots |
+| `STRIPE_WEBHOOK_SECRET` | `whsec_…` of compute's own endpoint (`https://<app host>/dashboard/v1/stripe/webhook`), never Unify API's |
 
 Secrets come from SSM under the stack's prefix, like the existing ones
-(`deploy/aws/modules/compute-stack/instance.tf`, `ssm_prefix`).
+(`deploy/aws/modules/compute-stack/instance.tf`, `ssm_prefix`). The Stripe
+pair is `/unify-compute-<env>/stripe_secret_key` and
+`/unify-compute-<env>/stripe_webhook_secret` (SecureString, written by the
+operator; `docs/staging.md`, "Stripe top-ups").
 
 ## Open points
 
