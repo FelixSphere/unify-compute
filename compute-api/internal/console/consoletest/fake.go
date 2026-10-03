@@ -6,9 +6,8 @@
 // `message`, a bodiless 404 when the bridge is disabled, 403 with data.status
 // for suspended tenants and disabled users, and a dedicated rate limiter.
 // From the 2026-10-02 revision it implements 413 payload_too_large (checked
-// before the signature) and internal_error on a forced 500. It does NOT yet
-// refuse a settle without sku as 400 invalid_request: it answers 409
-// sku_mismatch, which an existing test pins and only the operator may change.
+// before the signature), internal_error on a forced 500, and 400
+// invalid_request for a settle without sku.
 //
 // Nothing here is derived from FelixSphere/unifyapi-console (AGPL-3.0). Where
 // the spec is silent, the behaviour chosen is documented on the method or

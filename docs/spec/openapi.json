@@ -1165,30 +1165,7 @@
             "sku_unavailable",
             "missing_max_runtime",
             "runtime_over_ceiling",
-            "provider_not_offered"
-          ],
-          "authentication_error": [
-            "missing_key"
-          ],
-          "insufficient_balance": [],
-          "quota_exceeded": [],
-          "not_found": [],
-          "conflict": [],
-          "rate_limited": [],
-          "internal_error": [
-            "placement_failed"
-          ],
-          "not_implemented": [
-            "not_implemented"
-          ],
-          "console_unavailable": [],
-          "upstream_unavailable": [
-            "upstream_unavailable"
-          ],
-          "storage_unavailable": []
-        },
-        "x-error-codes-wired": {
-          "invalid_request": [
+            "provider_not_offered",
             "unknown_template",
             "template_unavailable",
             "field_not_overridable",
@@ -1206,6 +1183,7 @@
             "invalid_cursor"
           ],
           "authentication_error": [
+            "missing_key",
             "invalid_key",
             "account_disabled",
             "account_suspended"
@@ -1223,17 +1201,24 @@
             "idempotency_conflict",
             "job_terminal"
           ],
+          "rate_limited": [],
+          "internal_error": [
+            "placement_failed"
+          ],
           "not_implemented": [
+            "not_implemented",
             "outputs_unsupported"
           ],
           "console_unavailable": [
             "console_unavailable"
           ],
           "upstream_unavailable": [
+            "upstream_unavailable",
             "logs_unavailable"
-          ]
+          ],
+          "storage_unavailable": []
         },
-        "description": "`type` is the class (a closed set); `code` is the specific reason. `x-error-codes` lists, per type, the codes every build emits, including the dark build; `x-error-codes-wired` lists the further codes a build with a job store emits. Clients must tolerate codes not listed in either.",
+        "description": "`type` is the class (a closed set); `code` is the specific reason. `x-error-codes` lists, per type, the codes the service emits. A build without a job store emits a subset of them. Clients must tolerate codes not listed.",
         "properties": {
           "type": {
             "type": "string",

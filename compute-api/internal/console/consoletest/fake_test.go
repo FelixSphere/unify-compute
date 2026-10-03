@@ -377,7 +377,7 @@ func TestSettleIsIdempotentBoundedAndFinal(t *testing.T) {
 	_, err = c.Settle(ctx, "hold_1", console.SettleRequest{EventID: "ue_2c", CumulativeQuota: 500_000, SKU: "h100-80gb-x1"})
 	refusal(t, err, 409, CodeSKUMismatch)
 	_, err = c.Settle(ctx, "hold_1", console.SettleRequest{EventID: "ue_2e", CumulativeQuota: 500_000})
-	refusal(t, err, 409, CodeSKUMismatch)
+	refusal(t, err, 400, CodeInvalidRequest)
 	if len(s.ConsumeLogs()) != 1 {
 		t.Fatalf("refused settles wrote consume logs: %+v", s.ConsumeLogs())
 	}

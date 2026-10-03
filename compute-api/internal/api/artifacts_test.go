@@ -63,12 +63,15 @@ type artifactsHarness struct {
 func newArtifactsHarness(t *testing.T) *artifactsHarness {
 	t.Helper()
 	h := &artifactsHarness{srv: newTestServer(t, "aws")}
-	h.http = httptest.NewServer(h.srv)
+	// Started only once srv is fully configured: setting its fields while the
+	// server goroutines can read them is a data race. The public URL is known
+	// before Start because the listener is already bound.
+	h.http = httptest.NewUnstartedServer(h.srv)
 	t.Cleanup(h.http.Close)
 	h.fake = awsv4test.New(t, "unify-compute-staging-artifacts-123456789012")
 	art, err := artifacts.New(artifacts.Config{
 		Bucket: h.fake.Bucket, WriterRoleARN: "arn:aws:iam::123456789012:role/unify-compute-staging-artifacts-writer",
-		PublicURL: h.http.URL, TokenSecret: []byte(strings.Repeat("k", 32)),
+		PublicURL: "http://" + h.http.Listener.Addr().String(), TokenSecret: []byte(strings.Repeat("k", 32)),
 		Creds: awsv4.Static(h.fake.Instance), Client: h.fake.Client(),
 	})
 	if err != nil {
@@ -89,6 +92,7 @@ func newArtifactsHarness(t *testing.T) *artifactsHarness {
 		}
 		return "", ErrKeyRejected
 	}
+	h.http.Start()
 	return h
 }
 

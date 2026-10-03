@@ -246,9 +246,13 @@ func (s *Server) settle(r *http.Request, body []byte) response {
 	if refusal != nil {
 		return *refusal
 	}
-	// Compared literally, so an omitted sku is a mismatch too: the spec says
-	// "differs from the hold's", and a consume log needs the real SKU.
+	// Checked after the hold lookup, not with the other required fields, so a
+	// settle on an unknown hold still says hold_not_found. The spec leaves the
+	// order open.
 	sku := in.SKU
+	if sku == "" {
+		return fail(http.StatusBadRequest, CodeInvalidRequest)
+	}
 	if sku != h.SKU {
 		return fail(http.StatusConflict, CodeSKUMismatch)
 	}
