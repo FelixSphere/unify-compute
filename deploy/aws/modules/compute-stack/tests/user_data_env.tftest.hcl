@@ -5,7 +5,8 @@
 # Stripe after production moved to its own accounts (2026-10-03), refusing
 # every uck_ key. The reverse gap, .env set and compose not passing it, was #67.
 #
-# Mocked provider: no credentials, no state, nothing created.
+# Mocked provider: no credentials, no state, nothing created. Terraform >= 1.11
+# (override_during), unlike the stacks.
 #   make tf-test
 
 mock_provider "aws" {

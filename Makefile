@@ -57,7 +57,8 @@ tf-validate: tf-fmt
 
 # Renders user-data for production's and staging's shapes with a mocked AWS
 # provider (no credentials, no state) and checks the .env it writes against
-# what docker-compose.yml passes to compute-api.
+# what docker-compose.yml passes to compute-api. Needs Terraform >= 1.11
+# (override_during), unlike the stacks themselves.
 tf-test:
 	terraform -chdir=$(TF_ROOT)/modules/compute-stack init -backend=false -input=false >/dev/null
 	terraform -chdir=$(TF_ROOT)/modules/compute-stack test
