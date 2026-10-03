@@ -5,11 +5,14 @@
 #
 # --env picks the prefix and the parameter set: staging runs its own console
 # and SkyPilot and needs six (the console's four, artifacts_token_secret and
-# skypilot_admin_password); production runs no console and no Redis and keeps
-# the bridge dark (bridge_enabled = false), so it needs only
-# postgres_password and artifacts_token_secret. Creating a production
-# bridge_secret here would be a secret nothing reads, waiting to be mistaken
-# for the real one. artifacts_token_secret signs job upload tokens (ADR-0005);
+# skypilot_admin_password); production runs no console and no Redis, so it
+# needs postgres_password and artifacts_token_secret. Production's
+# bridge_secret is deliberately NOT generated here: it must equal the
+# production console's value (ap-southeast-5
+# /unifyapi/console/compute_bridge_secret), so it is written once, to both, by
+# the release owner (docs/staging.md, "Production console bridge"). A value
+# generated here would be a second secret that matches nothing and turns
+# every keyed route into console_unavailable. artifacts_token_secret signs job upload tokens (ADR-0005);
 # rotating it only invalidates the tokens of jobs running at that moment.
 #
 # Why this is a script and not four `aws ssm put-parameter` lines in a runbook:
