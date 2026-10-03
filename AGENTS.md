@@ -72,25 +72,27 @@ Current status (say what exists rather than describing targets as shipped):
   [ADR-0009](docs/adr/0009-host-everything-on-aws.md), **Proposed**.
   Applied on 2026-10-02: `shared/ecr`, `shared/github-oidc`, staging (VPC
   10.72/16, instance `i-06125c23285803d7a`) and production (VPC 10.71/16,
-  instance `i-07dd2f6d313a0dafd`). Both run compute-api and the site at
-  compute-api `ec4bd964…` (a8562dd) and site `7b9bb659…` (ea56779, v4 tab
-  icons). Records are in `deploy/releases/`. Staging also runs its own console. Production's
-  compute-api is dark: no bridge secret and no `CONSOLE_URL`. The deployed
-  builds answer job submission `501`; the build on `main` would answer
-  `503 console_unavailable` on production's configuration, as job-api.md
-  specifies for a key that cannot be verified. `compute.unifyai.us` was cut over
+  instance `i-07dd2f6d313a0dafd`). Both run compute-api `9dfc652a…` and site `6981df35…`
+  (built from e5ce490, 2026-10-03; records in `deploy/releases/`). That is the
+  wired job API. Staging also runs its own console (UnifyAPI trial build
+  `e3cef17`, with the bridge on), SkyPilot, and artifact storage; a real key
+  there gets a job accepted and held. Production's compute-api has no bridge
+  secret and no `CONSOLE_URL`, so every keyed route answers
+  `503 console_unavailable` there. Both hosts are IMDS-locked (hop limit 1). `compute.unifyai.us` was cut over
   from OpenAI Sites to production's ALB on 2026-10-02 (Route53 change
   `C07235422LT740FCOOAEW`). The Sites project and its two TXT records remain
   as the rollback path.
 - GPU workers and the SkyPilot API server
   ([ADR-0010](docs/adr/0010-gpu-workers-in-the-shared-account.md),
   **Proposed**): `deploy/aws/modules/gpu-workers/`, called by staging, and
-  `deploy/compose/docker-compose.skypilot.yml`. **Defined, not applied**:
-  no workers VPC, launch role or reaper exists, and the staging host does not
-  run SkyPilot. Production has the same module behind
-  `gpu_workers_enabled = false`. The account's G/VT GPU quota was 0 vCPU on
-  2026-10-03, so nothing could launch anyway. Apply steps are in
-  `docs/staging.md`.
+  `deploy/compose/docker-compose.skypilot.yml`. **Applied on staging
+  2026-10-03**: workers VPC 10.73/16, launch role, reaper, and SkyPilot on the
+  host. A staging job reaches SkyPilot and fails with `capacity_exhausted`,
+  because the account's G/VT quota is 0 vCPU (AWS: `VcpuLimitExceeded`). The
+  request for 8 is open (`d81c8fcd…`). Production has the module behind
+  `gpu_workers_enabled = false`. The GPU budget
+  (`deploy/aws/shared/gpu-budget`) is **not applied**: it needs an alert
+  email.
 
 ## Licence boundary — the expensive mistake
 
