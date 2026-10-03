@@ -218,13 +218,15 @@ footer > .copyright { width: 100%; font-size: var(--u-text-xs); padding-bottom: 
 .guide a { color: var(--u-text); text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }
 .guide a:hover { text-decoration-thickness: 2px; }
 .guide p { margin: 0 0 16px; }
-.guide p code { font: 13px var(--u-font-mono); background: var(--u-accent-tint); color: var(--u-badge-fg); padding: 2px 4px; border-radius: var(--u-radius); }
+.guide p code, .guide-substeps code { font: 13px var(--u-font-mono); background: var(--u-accent-tint); color: var(--u-badge-fg); padding: 2px 4px; border-radius: var(--u-radius); }
 .badge { display: inline-block; font: 500 11px var(--u-font-mono); letter-spacing: 1px; text-transform: uppercase; background: var(--u-badge-bg); color: var(--u-badge-fg); padding: 4px 8px; border-radius: var(--u-radius); }
 .early-access { background: var(--u-surface); border: var(--u-rule); border-radius: var(--u-radius); padding: 22px 24px; margin-bottom: 20px; }
 .early-access .badge { margin-bottom: 12px; }
 .early-access p { margin: 0; font-size: var(--u-text-sm); }
 .guide-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 48px; }
 .guide-steps > li { min-width: 0; }
+.guide-substeps { margin: 0 0 20px; padding-left: 22px; }
+.guide-substeps li { margin-bottom: 8px; }
 .guide-steps h2 { font-size: var(--u-h2); letter-spacing: -.4px; color: var(--u-text); margin: 20px 0 12px; }
 .code { background: var(--u-code-bg); color: var(--u-code-fg); font: 13px/1.6 var(--u-font-mono); border-radius: var(--u-radius); padding: 16px 20px; margin: 0 0 20px; overflow-x: auto; white-space: pre; }
 .code code { font: inherit; }
