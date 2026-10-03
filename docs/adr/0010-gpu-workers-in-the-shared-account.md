@@ -234,8 +234,13 @@ alarms and SNS cost cents.
 - File mounts from S3 run on the worker with the worker's credentials. With a
   deny-all role, a private customer bucket cannot be read, and neither can
   the artifact bucket. Backend.md open question 1 (outputs) now also covers
-  inputs. The first template has to fetch its inputs over HTTPS (Hugging
-  Face, presigned URLs) until that is decided.
+  inputs. This blocks the first workload as it is written:
+  `batch-infer-vllm` (`compute-api/config/templates.json`) reads
+  `/mnt/in/requests.jsonl` and writes `/mnt/out/results.jsonl`. Its image
+  (`vllm/vllm-openai`, Docker Hub) and its model (Hugging Face, not gated)
+  need only the open egress. Until the storage decision (ADR-0005) says
+  which bucket and prefix a worker may read and write, the first real run
+  needs an input that is reachable without AWS credentials.
 - The SkyPilot image is upstream's `berkeleyskypilot/skypilot:0.13.0`,
   pinned by digest, which is the multi-arch index with linux/arm64. It is
   built from the same commit as the `FelixSphere/skypilot` pin (tag v0.13.0,
@@ -279,5 +284,6 @@ be unwound.
 - The quota to request. 8 vCPU (two g5.xlarge) is proposed in
   `docs/staging.md`; 4 is the minimum for one.
 - The budget amount (USD 300) and the alert address.
-- Whether workers may pull from our ECR (the first template's image), which
-  would mean narrowing the worker role's Deny for the first time.
+- What the worker role may do in S3 for `batch-infer-vllm`'s input and
+  output mounts, which would be the first narrowing of its Deny, scoped to
+  one job's prefix. That is ADR-0005's to decide.
