@@ -224,6 +224,51 @@ const clickAndExpectSoftNav = async (selector, label) => {
   }
 };
 
+const START_TITLE = 'Get started — Unify Compute';
+const START_H1 = 'Get started with Unify Compute';
+const LOGIN = 'https://app.unifyapi.ai/login';
+const REGISTER = 'https://app.unifyapi.ai/register';
+
+const setViewport = (width, height, mobile) =>
+  page('Emulation.setDeviceMetricsOverride', {
+    width,
+    height,
+    deviceScaleFactor: 1,
+    mobile,
+  });
+
+// Rendered and inside the viewport horizontally: display:none, hidden, or a
+// link pushed off the right edge all fail.
+const visible = (selector) => `(() => {
+  const el = document.querySelector(${JSON.stringify(selector)});
+  if (!el) return false;
+  const r = el.getBoundingClientRect();
+  return r.width > 0 && r.height > 0 && r.left >= 0 && r.right <= innerWidth;
+})()`;
+
+const clickToStart = async (selector, label) => {
+  await evaluate(
+    `window.__softNav = true; document.querySelector(${JSON.stringify(selector)}).click()`,
+  );
+  if (
+    await waitFor(
+      `location.pathname === '/start' && document.querySelector('h1')?.textContent === ${JSON.stringify(START_H1)}`,
+      `${label} to reach /start`,
+    )
+  ) {
+    check(
+      await evaluate('window.__softNav === true'),
+      `${label} navigated client-side`,
+      `${label} reached /start by a full page load, not client-side navigation`,
+    );
+    check(
+      (await evaluate('document.title')) === START_TITLE,
+      `${label}: title "${START_TITLE}"`,
+      `${label}: title is "${await evaluate('document.title')}"`,
+    );
+  }
+};
+
 const back = async () => {
   await evaluate('window.__softNav = true; history.back()');
   if (
@@ -277,6 +322,74 @@ try {
     (await evaluate(hubspotLoaders)) === 1,
     'HubSpot loader still present once after navigating',
     'HubSpot loader duplicated or lost by navigation',
+  );
+
+  // Compute has no accounts of its own (ADR-0001); the header sends people to
+  // the Unify API console. UI-STANDARD "Marketing header": Log in, then Sign up.
+  await setViewport(1280, 900, false);
+  await load('/');
+  await waitFor(`!!document.querySelector(${JSON.stringify(COOKIE_LINK)})`, 'hydration at 1280');
+  for (const [href, text] of [
+    [LOGIN, 'Log in'],
+    [REGISTER, 'Sign up'],
+  ]) {
+    const sel = `header .nav-actions a[href="${href}"]`;
+    check(
+      (await evaluate(visible(sel))) &&
+        (await evaluate(`document.querySelector(${JSON.stringify(sel)}).textContent.trim()`)) === text,
+      `1280: header "${text}" visible → ${href}`,
+      `1280: header "${text}" link to ${href} missing or not visible`,
+    );
+  }
+  check(
+    await evaluate(visible('header .nav-inline a[href="/start"]')),
+    '1280: header "Quick start" visible',
+    '1280: header "Quick start" link missing or not visible',
+  );
+  await clickToStart('header .nav-inline a[href="/start"]', 'header "Quick start"');
+  await back();
+
+  await setViewport(375, 812, true);
+  await load('/');
+  await waitFor(`!!document.querySelector(${JSON.stringify(COOKIE_LINK)})`, 'hydration at 375');
+  check(
+    !(await evaluate(visible(`header .nav-actions a[href="${REGISTER}"]`))),
+    '375: header Sign up collapsed into the menu',
+    '375: header Sign up still shown outside the menu',
+  );
+  check(
+    (await evaluate('document.documentElement.scrollWidth')) <= 375,
+    '375: no horizontal scroll',
+    `375: page is ${await evaluate('document.documentElement.scrollWidth')}px wide`,
+  );
+  await evaluate(`document.querySelector('.menu-button').click()`);
+  if (await waitFor(visible(`#site-menu a[href="${REGISTER}"]`), 'mobile menu to open')) {
+    check(
+      await evaluate(visible(`#site-menu a[href="${LOGIN}"]`)),
+      `375: menu "Log in" visible → ${LOGIN}`,
+      '375: menu "Log in" missing or not visible',
+    );
+    check(
+      await evaluate(
+        `getComputedStyle(document.querySelector('#site-menu a[href="${REGISTER}"]')).backgroundColor === 'rgb(245, 166, 35)'`,
+      ),
+      `375: menu "Sign up" is the amber primary → ${REGISTER}`,
+      '375: menu "Sign up" is not styled as the primary button',
+    );
+    await clickToStart('#site-menu a[href="/start"]', 'menu "Quick start"');
+    check(
+      await evaluate(`document.getElementById('site-menu').hidden`),
+      'menu closed after navigating',
+      'menu still open after navigating',
+    );
+  }
+  await setViewport(1280, 900, false);
+
+  await load('/start');
+  check(
+    (await evaluate(`document.querySelector('h1')?.textContent`)) === START_H1,
+    '/start full page load',
+    '/start full page load did not render the guide',
   );
 
   await load('/privacy');

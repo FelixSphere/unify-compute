@@ -1,6 +1,5 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
-import { BrandLockup, CompanyLine } from '../brand';
+import { SiteFooter } from '../site-footer';
 import { SiteHeader } from '../site-header';
 
 export const metadata: Metadata = {
@@ -823,16 +822,7 @@ export default function PrivacyPolicy() {
 
         <p>By phone number: 408.462.2806</p>
       </article>
-      <footer className="wrap">
-        <Link href="/" className="brand" aria-label="Unify Compute home">
-          <BrandLockup decorative />
-        </Link>
-        <span>Compute beyond chat.</span>
-        <Link href="/privacy" className="footer-privacy" aria-current="page">
-          Privacy
-        </Link>
-        <CompanyLine />
-      </footer>
+      <SiteFooter current="/privacy" />
     </main>
   );
 }

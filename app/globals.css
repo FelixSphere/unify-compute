@@ -102,12 +102,21 @@ a:focus-visible, button:focus-visible { outline: none; box-shadow: var(--u-focus
 
 .nav { height: var(--u-header-height); display: flex; align-items: center; justify-content: space-between; gap: 0 24px; border-bottom: var(--u-rule); }
 .nav-inline { display: flex; gap: 32px; font-size: var(--u-text-sm); color: var(--u-text-2); }
-.nav-inline a:hover, footer a:not(.brand):hover, .text-link:hover { color: var(--u-text); text-decoration: underline; text-underline-offset: 4px; }
+.nav-inline a:hover, footer .footer-links a:hover, .text-link:hover { color: var(--u-text); text-decoration: underline; text-underline-offset: 4px; }
 
 .button { display: inline-flex; align-items: center; justify-content: center; gap: 12px; height: var(--u-btn-height); padding: 0 20px; border-radius: var(--u-radius); font-family: var(--u-font-body); font-size: 15px; font-weight: 600; transition: background .2s; }
 .primary { background: var(--u-btn-primary-bg); color: var(--u-btn-primary-fg); }
 .primary:hover { background: var(--u-accent-hover); }
 .primary:active { background: var(--u-accent-active); }
+.ghost { background: var(--u-btn-ghost-bg); color: var(--u-btn-ghost-fg); border: 1px solid var(--u-btn-ghost-border); }
+.ghost:hover { background: var(--u-paper); }
+
+/* UI-STANDARD "Marketing header": Log in as a text link, then Sign up as the
+   page's one primary button, 40px tall inside the 64px header. */
+.nav-actions { display: flex; align-items: center; gap: 24px; }
+.nav-login { font-size: var(--u-text-sm); color: var(--u-text); }
+.nav-login:hover { text-decoration: underline; text-underline-offset: 4px; }
+.nav-actions .button { height: 40px; padding: 0 16px; }
 
 .hero { display: grid; grid-template-columns: 1.12fr 1fr; gap: 56px; align-items: center; padding-block: 88px; }
 .eyebrow { font-family: var(--u-font-mono); font-size: var(--u-text-xs); letter-spacing: 1.6px; text-transform: uppercase; color: var(--u-text-muted); margin: 0 0 28px; display: flex; align-items: center; gap: 8px; }
@@ -184,7 +193,8 @@ h3 { font-size: var(--u-h3); }
 
 footer { display: flex; align-items: center; column-gap: 32px; flex-wrap: wrap; border-top: var(--u-rule); padding-block: 8px; margin-bottom: 12px; }
 footer > span { font-size: var(--u-text-sm); color: var(--u-text-muted); }
-footer > a:not(.brand) { display: flex; gap: 8px; align-items: center; margin-left: auto; font-size: var(--u-text-sm); }
+footer .footer-links { display: flex; flex-wrap: wrap; gap: 8px 24px; margin-left: auto; font-size: var(--u-text-sm); }
+footer .footer-links a[aria-current] { color: var(--u-text-muted); }
 footer > .copyright { width: 100%; font-size: var(--u-text-xs); padding-bottom: 28px; }
 
 .legal { max-width: 760px; padding-block: 72px 96px; line-height: 1.75; color: var(--u-text-2); }
@@ -200,13 +210,30 @@ footer > .copyright { width: 100%; font-size: var(--u-text-xs); padding-bottom: 
 .legal a { color: var(--u-text); text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }
 .legal a:hover { text-decoration-thickness: 2px; }
 
+/* /start: the post-sign-up guide. */
+.guide { max-width: 760px; padding-block: 72px 96px; color: var(--u-text-2); line-height: 1.75; }
+.guide h1 { font-size: var(--u-h1); line-height: 1.15; letter-spacing: -1px; color: var(--u-text); margin: 0 0 16px; }
+.guide-lead { font-size: var(--u-text-lg); line-height: 1.5; color: var(--u-text); margin: 0 0 32px; }
+.guide a { color: var(--u-text); text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }
+.guide a:hover { text-decoration-thickness: 2px; }
+.guide p { margin: 0 0 16px; }
+.guide p code { font: 13px var(--u-font-mono); background: var(--u-accent-tint); color: var(--u-badge-fg); padding: 2px 4px; border-radius: var(--u-radius); }
+.badge { display: inline-block; font: 500 11px var(--u-font-mono); letter-spacing: 1px; text-transform: uppercase; background: var(--u-badge-bg); color: var(--u-badge-fg); padding: 4px 8px; border-radius: var(--u-radius); }
+.early-access { background: var(--u-surface); border: var(--u-rule); border-radius: var(--u-radius); padding: 22px 24px; margin-bottom: 48px; }
+.early-access .badge { margin-bottom: 12px; }
+.early-access p { margin: 0; font-size: var(--u-text-sm); }
+.guide-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 48px; }
+.guide-steps h2 { font-size: var(--u-h2); letter-spacing: -.4px; color: var(--u-text); margin: 20px 0 12px; }
+.code { background: var(--u-code-bg); color: var(--u-code-fg); font: 13px/1.6 var(--u-font-mono); border-radius: var(--u-radius); padding: 16px 20px; margin: 0 0 20px; overflow-x: auto; white-space: pre; }
+.code code { font: inherit; }
+
 .skip-link { position: absolute; left: 16px; top: -100px; background: var(--u-btn-primary-bg); color: var(--u-btn-primary-fg); padding: 12px; border-radius: var(--u-radius); z-index: 10; }
 .skip-link:focus { top: 12px; }
 
 @media (min-width: 1450px) { .hero { padding-block: 104px; } }
 @media (max-width: 1100px) { .wrap { width: calc(100% - 56px); } .hero { gap: 32px; } .hero-actions { gap: 16px; } .diagram-inputs { margin-inline: 12px; gap: 4px; } .panel-label { display: none; } .engine { margin-inline: 32px; } .workload { padding-inline: 20px; } .consumption { gap: 48px; } .steps { gap: 36px; } }
 @media (max-width: 800px) { .hero { grid-template-columns: 1fr; padding-block: 56px; gap: 40px; } .hero-copy { max-width: 572px; } .hero-description, .hero-detail { max-width: 540px; } .compute-panel { max-width: 560px; width: 100%; margin: auto; } .workload-grid { grid-template-columns: repeat(2, 1fr); } .workload:nth-child(3) { border-left: 0; border-top: var(--u-rule); } .workload:nth-child(4) { border-top: var(--u-rule); } .workload p { min-height: auto; } .section-heading { align-items: flex-start; flex-direction: column; gap: 20px; } .section { padding-block: 60px; } .steps { gap: 24px; } .consumption { gap: 36px; } .billing-card { padding: 24px; } .billing-card p { font-size: var(--u-h2); } .principles span { gap: 8px; } .subtle-label { display: none; } footer { column-gap: 20px; } }
-@media (max-width: 520px) { .wrap { width: calc(100% - 48px); } h1 { font-size: var(--u-h1); letter-spacing: -1px; } h2 { font-size: var(--u-h2); letter-spacing: -.4px; } .eyebrow { letter-spacing: 1.2px; } .hero-actions { align-items: flex-start; flex-direction: column; gap: 20px; } .hero-detail { font-size: var(--u-text-sm); } .principles .wrap { flex-wrap: wrap; gap: 8px 20px; } .principles .wrap > span:last-child { width: 100%; } .workload-grid { grid-template-columns: 1fr; } .workload + .workload { border-left: 0; border-top: var(--u-rule); } .card-top { margin-bottom: 24px; } .workload p { font-size: var(--u-text-md); max-width: 360px; } .steps, .consumption { grid-template-columns: 1fr; } .steps { gap: 32px; margin-top: 32px; } .steps p { max-width: none; } .panel-head { padding: 16px; } .diagram-inputs > span { flex-direction: column; gap: 8px; } .gpu-grid { gap: 8px; margin-inline: 16px; } .panel-foot { padding-inline: 16px; } .flow-lines { margin-inline: 44px; } .engine { margin-inline: 16px; } .engine-caption { width: 100%; padding-bottom: 28px; } .menu-panel a { padding-inline: 24px; } .engine-bars { position: absolute; right: 20px; top: 40px; } .engine-bars i { width: 3px; } footer > span:nth-child(2) { display: none; } footer > a:not(.brand) { gap: 4px; } .section { padding-block: 48px; } }
+@media (max-width: 520px) { .wrap { width: calc(100% - 48px); } h1 { font-size: var(--u-h1); letter-spacing: -1px; } h2 { font-size: var(--u-h2); letter-spacing: -.4px; } .eyebrow { letter-spacing: 1.2px; } .hero-actions { align-items: flex-start; flex-direction: column; gap: 20px; } .hero-detail { font-size: var(--u-text-sm); } .principles .wrap { flex-wrap: wrap; gap: 8px 20px; } .principles .wrap > span:last-child { width: 100%; } .workload-grid { grid-template-columns: 1fr; } .workload + .workload { border-left: 0; border-top: var(--u-rule); } .card-top { margin-bottom: 24px; } .workload p { font-size: var(--u-text-md); max-width: 360px; } .steps, .consumption { grid-template-columns: 1fr; } .steps { gap: 32px; margin-top: 32px; } .steps p { max-width: none; } .panel-head { padding: 16px; } .diagram-inputs > span { flex-direction: column; gap: 8px; } .gpu-grid { gap: 8px; margin-inline: 16px; } .panel-foot { padding-inline: 16px; } .flow-lines { margin-inline: 44px; } .engine { margin-inline: 16px; } .engine-caption { width: 100%; padding-bottom: 28px; } .menu-panel a { padding-inline: 24px; } .guide { padding-block: 48px 64px; } .engine-bars { position: absolute; right: 20px; top: 40px; } .engine-bars i { width: 3px; } footer > span:nth-child(2) { display: none; } footer .footer-links { margin-left: 0; width: 100%; gap: 8px 20px; padding-bottom: 16px; } .section { padding-block: 48px; } }
 /* UI-STANDARD mobile shell: the header stays 64px and the links collapse into
    a menu that opens as a full-width Paper panel directly under it. */
 @media (max-width: 767px) {
@@ -217,6 +244,9 @@ footer > .copyright { width: 100%; font-size: var(--u-text-xs); padding-bottom: 
   .menu-panel a { display: flex; align-items: center; height: 48px; padding: 0 28px; font-size: var(--u-text-sm); border-radius: 0; }
   .menu-panel a:hover { background: var(--u-surface); }
   .menu-panel a[aria-current] { background: var(--u-nav-active-bg); color: var(--u-nav-active-fg); }
+  .menu-panel a.menu-signup { justify-content: center; height: 48px; margin: 8px 28px 16px; padding: 0 20px; border-radius: var(--u-radius); font-size: 15px; }
+  .menu-panel a.menu-signup:hover { background: var(--u-accent-hover); }
+  .nav-actions { display: none; }
 }
 /* Below 581px the header shows the mark alone at 32px (artwork height). */
 @media (max-width: 580px) {

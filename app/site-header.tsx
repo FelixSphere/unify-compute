@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Menu, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { BrandLockup } from './brand';
+import { CONSOLE_LOGIN, CONSOLE_REGISTER } from './links';
 
 type NavItem = { href: string; label: string };
 
@@ -26,7 +27,7 @@ function useCurrentHash() {
   return hash;
 }
 
-export function SiteHeader({ homeHref = '/' }: { homeHref?: string }) {
+export function SiteHeader({ homeHref = '/', current }: { homeHref?: string; current?: '/start' }) {
   const [open, setOpen] = useState(false);
   const hash = useCurrentHash();
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -78,7 +79,18 @@ export function SiteHeader({ homeHref = '/' }: { homeHref?: string }) {
             {item.label}
           </a>
         ))}
+        <Link href="/start" aria-current={current === '/start' ? 'page' : undefined}>
+          Quick start
+        </Link>
       </nav>
+      <div className="nav-actions">
+        <a href={CONSOLE_LOGIN} className="nav-login">
+          Log in
+        </a>
+        <a href={CONSOLE_REGISTER} className="button primary">
+          Sign up
+        </a>
+      </div>
       <button
         ref={buttonRef}
         type="button"
@@ -102,6 +114,13 @@ export function SiteHeader({ homeHref = '/' }: { homeHref?: string }) {
               {item.label}
             </a>
           ))}
+          <Link href="/start" aria-current={current === '/start' ? 'page' : undefined} onClick={() => close(false)}>
+            Quick start
+          </Link>
+          <a href={CONSOLE_LOGIN}>Log in</a>
+          <a href={CONSOLE_REGISTER} className="menu-signup button primary">
+            Sign up
+          </a>
         </nav>
       </div>
     </header>

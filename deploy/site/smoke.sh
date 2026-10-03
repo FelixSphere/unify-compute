@@ -53,6 +53,28 @@ grep -q '<title>Privacy Policy — Unify Compute</title>' "$tmp/body" \
   || { echo "FAIL /privacy: title missing"; fail=1; }
 check /privacy/ 308 "Location: /privacy"
 
+check /start 200 "Content-Type: text/html" "Cache-Control: no-cache" "${common[@]}"
+grep -q '<title>Get started — Unify Compute</title>' "$tmp/body" \
+  || { echo "FAIL /start: title missing"; fail=1; }
+check /start/ 308 "Location: /start"
+
+# Compute has no accounts of its own (ADR-0001): every page's header sends
+# visitors to the Unify API console, and links the quick start.
+links_ok=1
+for page in / /start /privacy; do
+  curl -s "$base$page" > "$tmp/links"
+  for href in 'https://app.unifyapi.ai/login' 'https://app.unifyapi.ai/register' '/start'; do
+    grep -q "href=\"$href\"" "$tmp/links" \
+      || { echo "FAIL $page: no link to $href"; fail=1; links_ok=0; }
+  done
+done
+curl -s "$base/start" > "$tmp/links"
+for href in 'https://app.unifyapi.ai/console/token' 'https://api.compute.unifyai.us/compute/v1/openapi.json'; do
+  grep -q "href=\"$href\"" "$tmp/links" \
+    || { echo "FAIL /start: no link to $href"; fail=1; links_ok=0; }
+done
+[ "$links_ok" = 1 ] && echo "ok   sign-up, log-in and quick-start links"
+
 check /does-not-exist 404 "Content-Type: text/html" "Cache-Control: no-cache" "${common[@]}"
 grep -q 'This page could not be found' "$tmp/body" \
   || { echo "FAIL 404: not the export's 404 page"; fail=1; }
@@ -82,7 +104,7 @@ check /brand 404
 # into 404s and every link click into a full page load. The payload must come
 # from the same build as the HTML, or the router discards it.
 privacy_version=$(curl -s "$base/privacy" | grep -oE 'deploymentVersion\\?":\\?"[0-9a-f-]+' | grep -oE '[0-9a-f-]{36}' | head -1)
-for page in /privacy /; do
+for page in /privacy /start /; do
   payload=$page.txt; [ "$page" = / ] && payload=/index.txt
   CURL_ARGS="-H RSC:1" check "$payload" 200 \
     "Content-Type: text/plain" "Cache-Control: no-cache" "${common[@]}"
