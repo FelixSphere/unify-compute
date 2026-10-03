@@ -5,11 +5,13 @@
   Until the cutover in that ADR, compute-api authenticates through the console
   bridge ([`console-billing-bridge.md`](console-billing-bridge.md)). On `main`
   but not deployed anywhere: the account tables and `internal/accounts` (A1),
-  the mailer (A2), and `balance_entries`, the local biller
+  the mailer (A2), the public and session auth routes of the dashboard API
+  (`internal/dashboard`, A4), and `balance_entries`, the local biller
   (`internal/billing`, migration `0006_billing.sql`) and the admin CLI's
-  `account`, `balance` and `audit` verbs (A6). The dashboard routes, keys and
-  top-ups do not exist yet; `ACCOUNTS_BACKEND=local` therefore leaves keyed
-  job routes answering `503 console_unavailable` until A5.
+  `account`, `balance` and `audit` verbs (A6). All of it is behind
+  `ACCOUNTS_BACKEND=local`, which no environment sets. Keys and top-ups do
+  not exist yet; `ACCOUNTS_BACKEND=local` therefore leaves keyed job routes
+  answering `503 console_unavailable` until A5.
 - Task breakdown: [`plan-own-accounts.md`](../plan-own-accounts.md).
 - Depends on: [`job-api.md`](job-api.md) (error envelope, job routes),
   [`metering.md`](metering.md) (holds H1–H7, settlement R1–R6, the quota unit),
@@ -311,7 +313,7 @@ named by `param`, or in the form-level box when `param` is absent
 | 400 | `invalid_request` | `invalid_email` | Not an address (≤ 254 chars, one `@`, a dotted domain). Unify Data's `bad_email`, renamed to our `invalid_*` style |
 | 400 | `invalid_request` | `weak_password` | Under 12 or over 128 chars, equal to the email or its local part, or fewer than 5 distinct characters |
 | 400 | `invalid_request` | `password_mismatch` | `password` ≠ `password_confirm` (the page checks first; the server checks too) |
-| 400 | `invalid_request` | `bot_check_failed` | Turnstile token missing, invalid, expired or reused; or the honeypot field filled |
+| 400 | `invalid_request` | `bot_check_failed` | The honeypot field (`website`) filled. While Turnstile is off (ADR-0011 D5) that is the only cause; with Turnstile, also a missing, invalid, expired or reused token |
 | 400 | `invalid_request` | `invalid_code` | Verification code wrong, expired, exhausted or superseded (one code for all four) |
 | 400 | `invalid_request` | `invalid_token` | Reset link invalid, used or expired |
 | 400 | `invalid_request` | `invalid_scope` | Key scopes empty or unknown |
@@ -343,19 +345,41 @@ stays as a job `error.code` for a database failure during settlement.
 
 All bodies JSON. Unauthenticated routes need no CSRF header but do need a
 same-origin `Origin`. Every route that sends email or creates something is
-throttled (limits in ADR-0011, section 8).
+throttled (limits in ADR-0011, section 8). The built routes are documented,
+with every status and error code, in
+[`dashboard-openapi.json`](dashboard-openapi.json), which a test holds against
+the registered routes. A malformed body is `400 malformed_body`, as in the job
+API.
+
+While Turnstile is off (ADR-0011 D5) there is no `turnstile_token`; a page may
+still send it and it is ignored. The honeypot `website` is accepted on signup,
+resend, login and forgot-password. Throttles, as built:
+
+| Rule | Limit | Counts |
+|---|---|---|
+| Login per IP | 20 / 10 min | every attempt, success included: the limit bounds the argon2id work one client can cause, and a success costs the same hash |
+| Login per address | 50 / 10 min | failures only (wrong password), keyed on the normalised email whether or not it is registered, so a `429` is no oracle. Wrong current passwords on `POST /password` and `/reauth` count here too |
+| Signup per IP | 5 / h | well-formed requests (validation errors do not count) |
+| Verify per IP | 20 / h | wrong codes only |
+| Resend per address | 1 / min and 5 / h | every accepted request, unknown addresses included |
+| Resend per IP | 20 / h | every request |
+| Forgot per IP, per address | 5 / h each | every request, unknown addresses included |
+
+The client IP is the **last** `X-Forwarded-For` entry (the ALB appends it),
+never the first. Resend and forgot-password look the address up and send
+after the response, so neither the status nor the time depends on it.
 
 ### Public
 
 | Route | Body | Success | Notes |
 |---|---|---|---|
-| `GET /config` | — | `200 { turnstile_site_key, min_password_length: 12, topup: { min_usd, max_usd } }` | What the signed-out pages need |
-| `POST /signup` | `{ email, password, password_confirm, turnstile_token, website }` | `202 { status: "verification_sent" }` | Always `202` for a well-formed request. A new address gets a code; a registered one gets "someone tried to sign up". `website` is the honeypot |
+| `GET /config` | — | `200 { turnstile_site_key, min_password_length: 12, topup: { min_usd, max_usd } }` | What the signed-out pages need. `turnstile_site_key` is `null` while Turnstile is off |
+| `POST /signup` | `{ email, password, password_confirm, website }` | `202 { status: "verification_sent" }` | Always `202` for a well-formed request. A new address gets a code; a registered one gets "someone tried to sign up". `website` is the honeypot |
 | `POST /verify` | `{ email, code }` | `200 { user, account, csrf_token }` + `Set-Cookie` | Activates and logs in |
-| `POST /verify/resend` | `{ email, turnstile_token }` | `202` | Always `202`; sends only to a `pending` user; at most 1 a minute and 5 an hour per address |
-| `POST /login` | `{ email, password, turnstile_token }` | `200 { user, account, csrf_token }` + `Set-Cookie` | Rotates any existing session |
-| `POST /password/forgot` | `{ email, turnstile_token }` | `202` | Always `202` |
-| `POST /password/reset` | `{ token, password, password_confirm }` | `200` | Ends every session; does not log in |
+| `POST /verify/resend` | `{ email, website }` | `202 { status: "verification_sent" }` | Always `202`; sends only to a `pending` user; at most 1 a minute and 5 an hour per address |
+| `POST /login` | `{ email, password, website }` | `200 { user, account, csrf_token }` + `Set-Cookie` | Rotates any existing session |
+| `POST /password/forgot` | `{ email, website }` | `202 { status: "reset_requested" }` | Always `202` |
+| `POST /password/reset` | `{ token, password, password_confirm }` | `200 { status: "password_reset" }`, cookie cleared | Ends every session; does not log in |
 
 ### Session (cookie `__Host-uc_session` + `X-CSRF-Token`)
 
@@ -363,7 +387,7 @@ throttled (limits in ADR-0011, section 8).
 |---|---|---|
 | `GET /me` | — | `{ user: { email, created_at }, account: { id, status, compute_enabled }, csrf_token }` |
 | `POST /logout` | — | `204`, cookie cleared |
-| `POST /password` | `{ current_password, password, password_confirm }` | `204`; other sessions ended |
+| `POST /password` | `{ current_password, password, password_confirm }` | `204`; other sessions ended. `current_password` is the recent-password check and counts as a reauth; wrong is `401 invalid_credentials` with `param: current_password` |
 | `POST /reauth` | `{ password }` | `204`; sets `reauth_at` |
 | `GET /balance` | — | `{ available_usd, held_usd, limits: { topup_min_usd, topup_max_usd, balance_max_usd, topups_per_day } }` |
 | `GET /transactions?after=&limit=` | — | Cursor list of balance entries, newest first: `{ id, kind, amount_usd, available_after_usd, ref, created_at, detail }` |

@@ -21,6 +21,7 @@ import (
 	"github.com/FelixSphere/unify-compute/compute-api/internal/backend"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/billing"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/console"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/dashboard"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/jobs"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/mailer"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/quota"
@@ -159,8 +160,8 @@ func main() {
 
 	// Account mail (ADR-0011). With ACCOUNTS_BACKEND=local a deployment that
 	// cannot send refuses to start: Unify Data's silent outbox fallback
-	// meant production signups that never got their code. Nothing calls the
-	// mailer yet; A4 hands it to the accounts routes.
+	// meant production signups that never got their code. The dashboard
+	// routes below are its only caller.
 	mailSettings := mailer.SettingsFromEnv(os.Getenv)
 	mail, err := mailer.New(mailSettings, &awsv4.Client{Region: env("AWS_REGION", "us-east-1")}, creds)
 	if err != nil {
@@ -189,9 +190,11 @@ func main() {
 	// Without DATABASE_URL every job route keeps answering 501 after
 	// validation, as before this was wired.
 	var svc *jobs.Service
+	var dash *dashboard.Handler
+	var sweepAccounts *accounts.Service
 	if dsn := os.Getenv("DATABASE_URL"); dsn == "" {
 		if backendName == backendLocal {
-			log.Error("ACCOUNTS_BACKEND=local needs DATABASE_URL: the balance lives in the job store")
+			log.Error("ACCOUNTS_BACKEND=local needs DATABASE_URL: the balance, accounts and sessions live in the job store")
 			os.Exit(1)
 		}
 		log.Warn("DATABASE_URL unset; job routes answer 501 not_implemented (dark build)", "quotas_enforced", false)
@@ -231,6 +234,19 @@ func main() {
 		log.Info("job store open", "accounts_backend", backendName, "quotas_enforced", true, "overrides", len(quotas.Owners),
 			"platform_max_active_jobs", platform.MaxActiveJobs, "platform_max_gpus", platform.MaxGPUs,
 			"max_runtime_seconds", platform.MaxRuntimeSeconds)
+		// The same switch mounts /dashboard/v1: with the console backend
+		// none of it is registered.
+		if backendName == backendLocal {
+			acc := accounts.New(st.Pool(), accounts.Config{ComputeEnabledDefault: os.Getenv("ACCOUNTS_COMPUTE_DEFAULT") == "true"})
+			dash, err = dashboard.New(dashboard.Config{Accounts: acc, Mailer: mail, AppOrigin: os.Getenv("APP_ORIGIN"), Log: log})
+			if err != nil {
+				log.Error("dashboard", "err", err)
+				os.Exit(1)
+			}
+			handler.Dashboard = dash
+			sweepAccounts = acc
+			log.Info("local accounts: /dashboard/v1 served on the app host", "app_origin", os.Getenv("APP_ORIGIN"))
+		}
 		// Before serving: a process that gets the lock now takes up every
 		// job an earlier process left live, from the ledger and SkyPilot.
 		// One that does not serves reads and submits and keeps trying.
@@ -251,6 +267,13 @@ func main() {
 			svc.Run(ctx)
 		}()
 	}
+	if sweepAccounts != nil {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			sweepAccountsHourly(ctx, log, sweepAccounts)
+		}()
+	}
 	go func() {
 		log.Info("listening", "addr", srv.Addr, "build", Build, "skus", len(cat.SKUs), "templates", len(templates.Templates))
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -262,8 +285,35 @@ func main() {
 	shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shutdown)
+	if dash != nil {
+		// Reset links and codes queued after a response still go out.
+		dash.Wait()
+	}
 	// The loops stop at their next tick boundary; a step in flight finishes.
 	workers.Wait()
+}
+
+// sweepAccountsHourly deletes expired sessions, codes, reset tokens and
+// throttle rows, and accounts never verified within 7 days (spec/accounts.md).
+// Every instance may run it: each delete is idempotent.
+func sweepAccountsHourly(ctx context.Context, log *slog.Logger, acc *accounts.Service) {
+	t := time.NewTicker(time.Hour)
+	defer t.Stop()
+	for {
+		if err := acc.PurgeExpired(ctx); err != nil && ctx.Err() == nil {
+			log.Error("accounts sweep: expired rows", "err", err)
+		}
+		if n, err := acc.PurgeUnverified(ctx); err != nil && ctx.Err() == nil {
+			log.Error("accounts sweep: unverified accounts", "err", err)
+		} else if n > 0 {
+			log.Info("accounts sweep: removed unverified accounts", "count", n)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
 }
 
 // skyPilotUser is the SkyPilot user every cluster belongs to, so any
