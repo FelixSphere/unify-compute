@@ -1,7 +1,7 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "UnifyAI Compute API",
+    "title": "Unify AI Compute API",
     "version": "v1-draft",
     "description": "Customer-facing contract for the compute job API, mirroring docs/spec/job-api.md. A build with a job store (`DATABASE_URL` set) authenticates every key and runs jobs: submit holds balance, persists the job and launches it on SkyPilot; get, list, cancel, logs, events and artifacts serve it. Which keys it accepts depends on `ACCOUNTS_BACKEND` (docs/spec/accounts.md): `console`, today's production, verifies Unify API `sk-` keys through the console bridge and holds the Unify API balance; `local` accepts only Unify Compute's own `uck_` keys and holds compute's own prepaid balance. A build without one (the dark build) checks only the key's shape and answers every authenticated job route with `501 not_implemented` after validation. Responses marked *Planned* are not returned by any build yet.",
     "license": {
