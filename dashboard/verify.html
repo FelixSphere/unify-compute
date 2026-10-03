@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <!-- @head -->
+    <title>Check your email — Unify Compute</title>
+    <link rel="stylesheet" href="/src/app.css" />
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body data-page="verify">
+    <main class="page">
+      <div class="card">
+        <!-- @brand -->
+        <h1>Check your email</h1>
+        <p class="lead" id="lead">Enter the 6-digit code we sent to your email address. It expires in 15 minutes.</p>
+        <!-- @form-error -->
+        <form id="form" method="post" novalidate>
+          <div class="field" id="email-field">
+            <label for="email">Email</label>
+            <input id="email" name="email" type="email" autocomplete="email" required aria-describedby="email-error" />
+            <p class="field-error" id="email-error" hidden></p>
+          </div>
+          <div class="field">
+            <label for="code">Verification code</label>
+            <input class="code" id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]*" required aria-describedby="code-error" />
+            <p class="field-error" id="code-error" hidden></p>
+          </div>
+          <!-- @honeypot -->
+          <button class="primary" type="submit">Verify email</button>
+        </form>
+        <p class="switch">
+          Didn't get it? <button class="link" type="button" id="resend">Resend code</button>
+        </p>
+        <p class="status" id="status" role="status"></p>
+      </div>
+      <!-- @below -->
+    </main>
+  </body>
+</html>

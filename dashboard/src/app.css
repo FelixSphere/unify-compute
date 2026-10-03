@@ -1,0 +1,420 @@
+/* UI-STANDARD "Log in / Sign up pages". Every value comes from the tokens or
+   the standard's fixed sizes; the app host's CSP allows no inline style, so
+   all of it lives here. */
+@import '../../app/unifyai-tokens.css';
+@import '@fontsource/space-grotesk/500.css';
+@import '@fontsource/space-grotesk/700.css';
+@import '@fontsource/instrument-sans/400.css';
+@import '@fontsource/instrument-sans/500.css';
+@import '@fontsource/instrument-sans/600.css';
+@import '@fontsource/ibm-plex-mono/400.css';
+@import '@fontsource/ibm-plex-mono/500.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+body {
+  margin: 0;
+  background: var(--u-bg);
+  color: var(--u-text);
+  font-family: var(--u-font-body);
+  font-size: var(--u-text-md);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--u-text);
+  font-weight: 500;
+}
+
+a:focus-visible,
+button:focus-visible {
+  outline: none;
+  box-shadow: var(--u-focus);
+  border-radius: var(--u-radius);
+}
+
+.page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+  gap: 16px;
+}
+
+.card {
+  width: 100%;
+  max-width: 400px;
+  background: var(--u-surface);
+  border: var(--u-rule);
+  border-radius: var(--u-radius);
+  padding: 32px;
+}
+
+/* The padded lockup SVG at 51px tall is 34px of visible artwork. */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: -8px 0 16px;
+}
+
+.brand img {
+  display: block;
+  height: 51px;
+  width: auto;
+}
+
+.divider {
+  flex: none;
+  width: 1px;
+  height: 22px;
+  background: var(--u-border);
+}
+
+.descriptor {
+  font-family: var(--u-font-display);
+  font-weight: 500;
+  font-size: 17px;
+}
+
+h1 {
+  font-family: var(--u-font-display);
+  font-weight: 700;
+  font-size: var(--u-h2);
+  line-height: 1.25;
+  margin: 0 0 24px;
+}
+
+h1:focus {
+  outline: none;
+}
+
+.lead {
+  margin: -12px 0 24px;
+  font-size: var(--u-text-sm);
+  color: var(--u-text-2);
+}
+
+.field {
+  margin-bottom: 20px;
+}
+
+label {
+  display: block;
+  font-size: var(--u-text-sm);
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+
+.label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.label-row label {
+  margin-bottom: 0;
+}
+
+.label-row a {
+  font-size: var(--u-text-sm);
+}
+
+input {
+  display: block;
+  width: 100%;
+  height: var(--u-btn-height);
+  padding: 0 12px;
+  background: var(--u-input-bg);
+  border: 1px solid var(--u-input-border);
+  border-radius: var(--u-radius);
+  color: var(--u-text);
+  font-family: var(--u-font-body);
+  /* 16px keeps iOS Safari from zooming the page when a field gets focus. */
+  font-size: var(--u-text-md);
+}
+
+input:focus {
+  outline: none;
+  border-color: var(--u-input-border-focus);
+  box-shadow: var(--u-focus);
+}
+
+input[aria-invalid='true'] {
+  border-color: var(--u-danger);
+}
+
+.password {
+  position: relative;
+}
+
+.password input {
+  padding-right: 48px;
+}
+
+.toggle {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--u-text-muted);
+  cursor: pointer;
+}
+
+.toggle:hover {
+  color: var(--u-text);
+}
+
+.toggle .icon-hide,
+.toggle[aria-pressed='true'] .icon-show {
+  display: none;
+}
+
+.toggle[aria-pressed='true'] .icon-hide {
+  display: block;
+}
+
+.code {
+  font-family: var(--u-font-mono);
+  font-size: var(--u-h2);
+  letter-spacing: 0.4em;
+  text-align: center;
+  height: 56px;
+}
+
+.hint {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--u-text-muted);
+}
+
+.field-error {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--u-danger);
+}
+
+.form-error {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 20px;
+  padding: 12px;
+  background: var(--u-surface);
+  border: 1px solid var(--u-danger);
+  border-radius: var(--u-radius);
+  color: var(--u-danger);
+  font-size: var(--u-text-sm);
+}
+
+.form-error:focus {
+  outline: none;
+}
+
+.form-error svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.form-error p {
+  margin: 0;
+  color: var(--u-text);
+}
+
+/* The honeypot partial (dashboard/vite.config.ts says why off-screen). */
+.hp {
+  position: absolute;
+  left: -10000px;
+  top: auto;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.primary,
+.ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--u-btn-height);
+  padding: 0 20px;
+  border-radius: var(--u-radius);
+  font-family: var(--u-font-body);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.primary {
+  width: 100%;
+  margin-top: 4px;
+  border: 0;
+  background: var(--u-btn-primary-bg);
+  color: var(--u-btn-primary-fg);
+}
+
+.primary:hover {
+  background: var(--u-accent-hover);
+}
+
+.primary:active {
+  background: var(--u-accent-active);
+}
+
+.primary[aria-busy='true'] {
+  cursor: progress;
+}
+
+.ghost {
+  background: var(--u-btn-ghost-bg);
+  color: var(--u-btn-ghost-fg);
+  border: 1px solid var(--u-btn-ghost-border);
+}
+
+.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--u-text);
+  font: inherit;
+  font-weight: 500;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.link:disabled {
+  color: var(--u-text-muted);
+  cursor: default;
+}
+
+.legal {
+  margin: 16px 0 0;
+  font-size: var(--u-text-xs);
+  color: var(--u-text-muted);
+}
+
+.legal a {
+  color: var(--u-text-muted);
+}
+
+.switch {
+  margin: 24px 0 0;
+  font-size: var(--u-text-sm);
+  color: var(--u-text-2);
+  text-align: center;
+}
+
+.status {
+  margin: 12px 0 0;
+  font-size: var(--u-text-sm);
+  color: var(--u-text-2);
+  text-align: center;
+}
+
+.status:empty {
+  margin: 0;
+}
+
+.below {
+  margin: 0;
+  font-size: var(--u-text-xs);
+  color: var(--u-text-muted);
+  text-align: center;
+}
+
+.below a {
+  color: var(--u-text-muted);
+  font-weight: 400;
+}
+
+/* The signed-in placeholder: the app shell's header (UI-STANDARD "App
+   shell"). A7c builds the sidebar and the pages. */
+.app-header {
+  height: var(--u-header-height);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 24px;
+  background: var(--u-surface);
+  border-bottom: var(--u-rule);
+}
+
+.app-header .brand {
+  margin: 0;
+}
+
+.content {
+  padding: 32px 36px;
+  max-width: 720px;
+}
+
+.content .status {
+  text-align: left;
+}
+
+.eyebrow {
+  margin: 0 0 12px;
+  font-family: var(--u-font-mono);
+  font-size: var(--u-text-xs);
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: var(--u-text-muted);
+}
+
+.content h1 {
+  overflow-wrap: anywhere;
+  margin-bottom: 12px;
+}
+
+.content .lead {
+  margin: 0;
+}
+
+@media (max-width: 480px) {
+  .app-header {
+    padding: 0 16px;
+  }
+
+  .content {
+    padding: 24px 16px;
+  }
+}
+
+.app-header .mark {
+  display: none;
+  height: 32px;
+  width: auto;
+}
+
+/* Below 581px the page header shows the mark alone; the auth card keeps the
+   full lockup (UI-STANDARD). */
+@media (max-width: 580px) {
+  .app-header .brand {
+    display: none;
+  }
+
+  .app-header .mark {
+    display: block;
+  }
+}

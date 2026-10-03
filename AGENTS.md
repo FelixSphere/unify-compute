@@ -131,7 +131,8 @@ npm ci
 npm run dev            # vinext dev server
 npm run lint           # oxlint — CI scopes this to app/ lib/ (see below)
 npm run format         # oxfmt; app/ predates the config and is not yet clean, so CI does not check it
-npm run build
+npm run build          # the vinext export (dist/client), then build:app
+npm run build:app      # app-host pages only: plain Vite, dashboard/ -> dist/app
 ```
 
 Service:

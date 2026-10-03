@@ -146,19 +146,69 @@ app_headers_clean() {
     echo "FAIL $label: the site container sets a cookie; only compute-api may"; fail=1
   fi
 }
+# The pages A7b builds (dashboard/), at the paths the mailer links to
+# (compute-api/internal/mailer/messages.go), and the title each must carry.
+app_pages=(
+  "/|Unify Compute"
+  "/signup|Sign up — Unify Compute"
+  "/login|Log in — Unify Compute"
+  "/verify|Check your email — Unify Compute"
+  "/forgot-password|Reset your password — Unify Compute"
+  "/reset-password|Reset your password — Unify Compute"
+)
 for app_host in app.compute.unifyai.us app.staging.compute.unifyai.us; do
   export CURL_ARGS="-H Host:$app_host"
-  check / 200 "Content-Type: text/html" "Cache-Control: no-cache" "${app_common[@]}"
-  app_headers_clean "$app_host /"
-  grep -q '<title>Unify Compute</title>' "$tmp/body" \
-    || { echo "FAIL $app_host /: not the app placeholder"; fail=1; }
-  if grep -q 'hs-script-loader' "$tmp/body"; then
-    echo "FAIL $app_host /: HubSpot loader on the app host"; fail=1
+  for entry in "${app_pages[@]}"; do
+    path=${entry%%|*}; title=${entry#*|}
+    check "$path" 200 "Content-Type: text/html" "Cache-Control: no-cache" "${app_common[@]}"
+    app_headers_clean "$app_host $path"
+    grep -qF "<title>$title</title>" "$tmp/body" \
+      || { echo "FAIL $app_host $path: title is not '$title'"; fail=1; }
+    if grep -q 'hs-script-loader' "$tmp/body"; then
+      echo "FAIL $app_host $path: HubSpot loader on the app host"; fail=1
+    fi
+    # The enforced CSP would block these anyway; failing here says why the
+    # page is broken instead of leaving a blank form in the browser.
+    if grep -qE '<script>|<script type="module">|<style| style="| on[a-z]+="' "$tmp/body"; then
+      echo "FAIL $app_host $path: inline script, style or event handler"; fail=1
+    fi
+    if grep -qE '<(script|link|img|iframe)[^>]+(src|href)="(https?:)?//' "$tmp/body"; then
+      echo "FAIL $app_host $path: loads something from another origin"; fail=1
+    fi
+    grep -qE '<script type="module" crossorigin src="/assets/main-[A-Za-z0-9_-]+\.js">' "$tmp/body" \
+      || { echo "FAIL $app_host $path: page script missing"; fail=1; }
+  done
+
+  # Every form compute-api checks the honeypot on (`website`: signup, resend,
+  # login, forgot; ADR-0011 D5) carries it in place of Turnstile, hidden from
+  # people and from screen readers.
+  for path in /login /verify /forgot-password /signup; do
+    check "$path" 200
+    grep -qE '<div class="hp" aria-hidden="true">' "$tmp/body" \
+      || { echo "FAIL $app_host $path: honeypot wrapper missing or not aria-hidden"; fail=1; }
+    grep -qE '<input id="website" name="website" type="text" tabindex="-1" autocomplete="off"' "$tmp/body" \
+      || { echo "FAIL $app_host $path: honeypot field missing or reachable by Tab"; fail=1; }
+    grep -q 'challenges.cloudflare.com' "$tmp/body" \
+      && { echo "FAIL $app_host $path: Turnstile is off (ADR-0011 D5)"; fail=1; }
+  done
+  [ "$(grep -o 'id="password_confirm"' "$tmp/body" | wc -l)" -eq 1 ] \
+    || { echo "FAIL $app_host /signup: no Confirm password field"; fail=1; }
+  [ "$(grep -o 'class="toggle"' "$tmp/body" | wc -l)" -eq 2 ] \
+    || { echo "FAIL $app_host /signup: not one show/hide toggle per password field"; fail=1; }
+  js=$(grep -oE '/assets/main-[A-Za-z0-9_-]+\.js' "$tmp/body" | head -1)
+  css=$(grep -oE '/assets/app-[A-Za-z0-9_-]+\.css' "$tmp/body" | head -1)
+  check "${js:-/assets/missing.js}" 200 "Content-Type: text/javascript" "Cache-Control: public, max-age=31536000, immutable" "${app_common[@]}"
+  check "${css:-/assets/missing.css}" 200 "Content-Type: text/css" "Cache-Control: public, max-age=31536000, immutable"
+  # The fonts are self-hosted from the same build (UI-STANDARD "Fonts").
+  font=$(grep -oE 'assets/instrument-sans-latin-400-normal-[A-Za-z0-9_-]+\.woff2' "$tmp/body" | head -1)
+  if [ -z "$font" ]; then
+    font=$(grep -oE '/assets/instrument-sans-latin-400-normal-[A-Za-z0-9_-]+\.woff2' <(curl -s -H "Host:$app_host" "$base$css") | head -1)
   fi
-  check /app.css 200 "Content-Type: text/css" "${app_common[@]}"
-  check /unifyai-tokens.css 200 "Content-Type: text/css"
+  check "/${font#/}" 200 "Content-Type: font/woff2"
+
   check /brand/unifyai-lockup-horizontal-black.svg 200 "Content-Type: image/svg+xml"
   check /favicon.ico 200 "Content-Type: image/x-icon"
+  check /icon-v4.svg 200 "Content-Type: image/svg+xml"
   # The marketing pages are not on this host.
   check /privacy 404 "Content-Type: text/html" "${app_common[@]}"
   app_headers_clean "$app_host /privacy"
@@ -166,7 +216,9 @@ for app_host in app.compute.unifyai.us app.staging.compute.unifyai.us; do
   app_headers_clean "$app_host 404"
   grep -q 'Page not found' "$tmp/body" \
     || { echo "FAIL $app_host 404: not the app's 404 page"; fail=1; }
-  check /index/ 308 "Location: /index"
+  check /login/ 308 "Location: /login"
+  # Build output that is not a page.
+  check /.vite/manifest.json 404
 done
 unset CURL_ARGS
 
