@@ -382,6 +382,13 @@ try {
       'menu closed after navigating',
       'menu still open after navigating',
     );
+    // The curl examples are the widest thing on the site; they must scroll
+    // inside their block, not widen the page.
+    check(
+      (await evaluate('document.documentElement.scrollWidth')) <= 375,
+      '375: /start has no horizontal scroll',
+      `375: /start is ${await evaluate('document.documentElement.scrollWidth')}px wide`,
+    );
   }
   await setViewport(1280, 900, false);
 

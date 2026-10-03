@@ -44,8 +44,8 @@ export function SiteHeader({ homeHref = '/', current }: { homeHref?: string; cur
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') close(true);
     };
-    // The panel only exists below 768px; widening the window must not leave it open and invisible.
-    const wide = window.matchMedia('(min-width: 768px)');
+    // The panel only exists below 1024px; widening the window must not leave it open and invisible.
+    const wide = window.matchMedia('(min-width: 1024px)');
     const onWide = () => wide.matches && setOpen(false);
     document.addEventListener('keydown', onKey);
     wide.addEventListener('change', onWide);
@@ -117,8 +117,10 @@ export function SiteHeader({ homeHref = '/', current }: { homeHref?: string; cur
           <Link href="/start" aria-current={current === '/start' ? 'page' : undefined} onClick={() => close(false)}>
             Quick start
           </Link>
-          <a href={CONSOLE_LOGIN}>Log in</a>
-          <a href={CONSOLE_REGISTER} className="menu-signup button primary">
+          <a href={CONSOLE_LOGIN} className="menu-account">
+            Log in
+          </a>
+          <a href={CONSOLE_REGISTER} className="menu-account menu-signup button primary">
             Sign up
           </a>
         </nav>
