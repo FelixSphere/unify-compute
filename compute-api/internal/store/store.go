@@ -47,3 +47,7 @@ func openConfig(ctx context.Context, cfg *pgxpool.Config) (*Store, error) {
 }
 
 func (s *Store) Close() { s.pool.Close() }
+
+// Pool is the connection pool, for the ledger, which keeps its own tables in
+// the same database and runs its own transactions.
+func (s *Store) Pool() *pgxpool.Pool { return s.pool }
