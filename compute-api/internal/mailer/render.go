@@ -16,7 +16,7 @@ const (
 	productURL    = "https://compute.unifyai.us"
 	productDomain = "compute.unifyai.us"
 	assetBase     = "https://compute.unifyai.us/email"
-	company       = "UnifyAI · Lebuh Bandar Utama PJU 6, 47800 Petaling Jaya, Selangor, Malaysia"
+	company       = "© UnifyAI · Operated by FelixSphere LLC · 6 Karen Ct, CA 94010, United States"
 	contactEmail  = "contactus@felixsphere.com"
 
 	reasonAccount = "You're receiving this because this address is registered for a Unify Compute account."
