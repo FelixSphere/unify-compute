@@ -1,6 +1,6 @@
 # ADR-0001 — UnifyAPI owns accounts, keys, and the balance
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR-0011 (proposed)
 - **Date:** 2026-09-10
 
 ## Context
