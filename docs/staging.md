@@ -26,9 +26,12 @@ All four are children of `compute.unifyai.us`, which stays a CNAME to OpenAI
 Sites for the marketing page until the production cutover in ADR-0009. One
 certificate covers all four names. Any other Host gets a fixed `404`.
 
-The app host is **defined, not applied** (plan task A7a, 2026-10-03). Until it
-is, the name has no DNS record; after it is, it answers with a placeholder
-page until the app pages ship (A7b). Production's equivalent is
+The app host was **applied on 2026-10-03** in both environments, and the app
+pages were released the same day (record
+`deploy/releases/2026-10-03-staging-own-accounts.md`). Staging serves them
+with compute-api on `ACCOUNTS_BACKEND=local`. Production serves the pages,
+but compute-api there is on `console` accounts, so `/dashboard/v1/*` is 404
+and the forms cannot complete. The site does not link to it. Production's equivalent is
 `app.compute.unifyai.us`, a new record that the production stack manages from
 its first apply, independent of the `compute.unifyai.us` cutover. The app
 host's pages carry an enforced CSP with no third-party origin
@@ -462,11 +465,15 @@ If `check-imds.sh` ever fails on a locked-down host, the rule was removed
 behind the unit's back. Find out how before re-running step 1. That is what
 host.sh's refusal is for.
 
-## SES identity for compute.unifyai.us (ADR-0011, not yet applied)
+## SES identity for compute.unifyai.us (ADR-0011, applied 2026-10-03)
 
 compute-api's account email (verification codes, resets) goes out through
 SES as `Unify Compute <no-reply@compute.unifyai.us>` from both environments.
-Two pieces, both **defined and not applied**:
+Two pieces, both **applied on 2026-10-03**. The identity is verified,
+DKIM SUCCESS, MAIL FROM SUCCESS, default configuration set `unify-compute`.
+The policy test passed: `no-reply@` sent bare and with the display name;
+`other@` got AccessDenied. Staging's compute-api sends through it
+(`SES_SENDER`, `SES_CONFIGURATION_SET` in the host `.env`):
 
 - `deploy/aws/shared/ses-compute`, one stack for both environments: the
   domain identity with Easy DKIM (2048-bit), MAIL FROM

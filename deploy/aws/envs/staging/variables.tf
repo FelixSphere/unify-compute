@@ -20,13 +20,13 @@ variable "region" {
 variable "compute_api_image" {
   description = "Publish with .github/workflows/publish-image.yml; pin the digest it prints, under the ECR repository of the same name."
   type        = string
-  default     = "871376691052.dkr.ecr.us-east-1.amazonaws.com/unify-compute-api@sha256:fdd7a67c1c72a94ae483df8eb4e1eab4ba3785288fb891c54506ff5ecac3fb34"
+  default     = "871376691052.dkr.ecr.us-east-1.amazonaws.com/unify-compute-api@sha256:40e08796c20704762896ecef877a2039ce8e2de9524df443db94a366556e5a7f"
 }
 
 variable "site_image" {
   description = "Marketing site image, by digest. Rebuild baseline only; releases swap it on the host."
   type        = string
-  default     = "871376691052.dkr.ecr.us-east-1.amazonaws.com/unify-compute-site@sha256:6981df3526a829868b3360d938b3240217f0e9d19790c303505b0cdcbf587f63"
+  default     = "871376691052.dkr.ecr.us-east-1.amazonaws.com/unify-compute-site@sha256:48aa37ffeca00fcbd85889d3a8d7b780eeea3d15071606ab4bf7c9bc02736146"
 }
 
 variable "console_image" {
