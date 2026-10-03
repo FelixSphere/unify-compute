@@ -18,7 +18,7 @@ const testCatalogue = `{"skus":[
   {"id":"a10g-x1","price_usd_per_hour":"1.2000","available":true,"tier":"hyperscaler","accelerator":"A10G","gpu_count":1,
    "providers":[{"cloud":"aws","instance_type":"g5.xlarge"}]},
   {"id":"a10g-x4","price_usd_per_hour":"4.8000","available":true,"tier":"hyperscaler","accelerator":"A10G","gpu_count":4,
-   "providers":[{"cloud":"aws","instance_type":"g5.12xlarge"}]},
+   "interconnect":"pcie","providers":[{"cloud":"aws","instance_type":"g5.12xlarge"}]},
   {"id":"a100-neo","price_usd_per_hour":"1.8000","available":true,"tier":"neocloud","accelerator":"A100","gpu_count":1,
    "providers":[{"cloud":"lambda","instance_type":"gpu_1x_a100"}]},
   {"id":"rtx-vast","price_usd_per_hour":"0.3000","available":true,"tier":"marketplace","accelerator":"RTX4090","gpu_count":1,

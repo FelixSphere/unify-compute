@@ -79,6 +79,47 @@ func TestPlacementValidation(t *testing.T) {
 	}
 }
 
+func TestTopologyValidation(t *testing.T) {
+	const providers = `"providers":[{"cloud":"aws","instance_type":"p4d.24xlarge","regions":["us-east-1"]}]`
+	bad := map[string]string{
+		"unknown interconnect":                     `{"skus":[{"id":"a","price_usd_per_hour":"1","gpu_count":8,"interconnect":"telepathy"}]}`,
+		"unknown network":                          `{"skus":[{"id":"a","price_usd_per_hour":"1","network":"carrier-pigeon"}]}`,
+		"interconnect on single gpu":               `{"skus":[{"id":"a","price_usd_per_hour":"1","gpu_count":1,"interconnect":"nvlink"}]}`,
+		"available multi-gpu without interconnect": `{"skus":[{"id":"a","price_usd_per_hour":"1","gpu_count":8,"available":true,"tier":"hyperscaler","accelerator":"A100-80GB",` + providers + `}]}`,
+	}
+	for name, raw := range bad {
+		if _, err := Parse([]byte(raw)); err == nil {
+			t.Errorf("%s: expected error", name)
+		}
+	}
+
+	good := map[string]string{
+		"single gpu says nothing":              `{"skus":[{"id":"a","price_usd_per_hour":"1","gpu_count":1,"available":true,"tier":"hyperscaler","accelerator":"A10G","providers":[{"cloud":"aws","instance_type":"g5.xlarge"}]}]}`,
+		"available multi-gpu nvlink":           `{"skus":[{"id":"a","price_usd_per_hour":"1","gpu_count":8,"interconnect":"nvlink","network":"infiniband","available":true,"tier":"hyperscaler","accelerator":"A100-80GB",` + providers + `}]}`,
+		"unavailable multi-gpu may be partial": `{"skus":[{"id":"a","price_usd_per_hour":"1","gpu_count":8,"available":false}]}`,
+	}
+	for name, raw := range good {
+		if _, err := Parse([]byte(raw)); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+// A multi-GPU SKU may not be sold without saying how its GPUs are wired: on
+// the same accelerator and the same price line, PCIe and NVSwitch differ by an
+// order of magnitude.
+func TestShippedCatalogueDeclaresInterconnectForMultiGPU(t *testing.T) {
+	c, err := Load("../../config/skus.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range c.SKUs {
+		if s.Available && s.GPUCount > 1 && s.Interconnect == "" {
+			t.Errorf("sku %q sells %d GPUs without an interconnect", s.ID, s.GPUCount)
+		}
+	}
+}
+
 func TestRegionsDeriveFromProviders(t *testing.T) {
 	c, err := Parse([]byte(`{"skus":[{"id":"a","price_usd_per_hour":"1","providers":[
 		{"cloud":"aws","instance_type":"g5.xlarge","regions":["us-east-1","us-west-2"]},

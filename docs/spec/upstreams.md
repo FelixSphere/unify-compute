@@ -1,7 +1,8 @@
 # Compute upstreams — functional requirements
 
-- **Status:** Requirements R1–R9 implemented in `compute-api/` (catalogue,
-  placement, validation, API exposure) and R10 (placement recorded and served).
+- **Status:** Requirements R1–R9 and R16 implemented in `compute-api/`
+  (catalogue, placement, validation, API exposure) and R10 (placement recorded
+  and served).
   R11–R15 are planned and depend on the job backend, the ledger, or a process
   outside the code. Each item says which.
 - Decision record: [ADR-0006](../adr/0006-upstreams-are-skypilot-clouds.md).
@@ -21,6 +22,7 @@ context, or an SSH node pool.
 | R3 | Every SKU names its SkyPilot accelerator (`A10G`, `L4`, `A100-80GB`) and whether it is `interruptible` (spot). Interruptible capacity is a different SKU, not a flag at submit, because it is a different price and a different failure mode. | Implemented |
 | R4 | A SKU's `regions` field is the union of its providers' regions. | Implemented, derived when omitted |
 | R5 | The catalogue is validated when the binary starts: unknown cloud, duplicate cloud within a SKU, missing instance type, missing tier, or an available SKU without providers stops the process. A bad catalogue never serves. | Implemented, `sku.Parse` |
+| R16 | Every **available** SKU with `gpu_count` > 1 declares its `interconnect` — `pcie` or `nvlink` — and all of its providers deliver it, as with the tier (R2). On the same accelerator and the same price line, eight GPUs on PCIe and eight on NVSwitch differ by an order of magnitude, so a multi-GPU SKU that says nothing is an ambiguity the customer pays for. A single-GPU SKU may not declare one: it describes GPU-to-GPU wiring and there is no pair. The node-to-node `network` (`ethernet`, `infiniband`) is validated when present but read by nothing: multi-node jobs are P3. | Implemented: `sku.Interconnect`, `sku.Network`, validated at boot |
 
 ## Placement
 
@@ -44,7 +46,7 @@ context, or an SSH node pool.
 
 ## API surface added
 
-- `GET /compute/v1/skus` — SKU objects gain `accelerator`, `tier`, `interruptible`, `providers`.
+- `GET /compute/v1/skus` — SKU objects gain `accelerator`, `tier`, `interruptible`, `providers`, and, on multi-GPU SKUs, `interconnect` (R16).
 - `GET /compute/v1/upstreams` — public; every cloud the catalogue references, whether this deployment has it enabled, and which SKUs it serves.
 - `POST /compute/v1/jobs` — validates `sku`, `providers`, and `spec.max_runtime_seconds` and returns the 400/503 errors above before anything is held; a deployment without a SkyPilot API server (`SKYPILOT_API_SERVER_URL`) is also `503 upstream_unavailable`. The dark build (no job store) still answers what passes `501 not_implemented`.
 

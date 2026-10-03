@@ -153,6 +153,13 @@ released in full.
 }
 ```
 
+A SKU with `gpu_count` > 1 also carries `interconnect` (`pcie` or `nvlink`),
+which says whether its GPUs are wired for fast multi-GPU work or merely
+present; it is absent on single-GPU SKUs, where it has no meaning. Every
+provider behind the SKU delivers it, so placement never trades it away
+(`spec/upstreams.md` R16). `network` (`ethernet`, `infiniband`) describes the
+node-to-node fabric and is informational: multi-node jobs are not in v1.
+
 Prices are per hour for display and per second for metering
 (`price_usd_per_hour / 3600`, rounded half-up to 6 decimals at settlement).
 The catalogue lives in `compute-api/config/skus.json` and ships with the
