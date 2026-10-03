@@ -5,6 +5,13 @@
 
 locals {
   reaper_name = "${var.name}-gpu-reaper"
+
+  # The platform's ceiling on max_runtime_seconds (upstreams.md R9) is read
+  # from the file compute-api enforces it from, so the reaper can never be
+  # left at an older, longer ceiling when the platform's changes (ADR-0010,
+  # "Start small": 4 h, so workers are reaped at 5 h).
+  max_runtime_hours = jsondecode(file("${path.module}/../../../../compute-api/config/platform.json")).max_runtime_seconds / 3600
+  reaper_max_age    = local.max_runtime_hours + var.reaper_margin_hours
 }
 
 data "archive_file" "reaper" {
@@ -92,7 +99,7 @@ resource "aws_iam_role_policy" "reaper" {
 
 resource "aws_lambda_function" "reaper" {
   function_name    = local.reaper_name
-  description      = "Terminates ${var.environment} GPU workers older than ${var.max_runtime_hours + var.reaper_margin_hours}h and reports"
+  description      = "Terminates ${var.environment} GPU workers older than ${local.reaper_max_age}h and reports"
   role             = aws_iam_role.reaper.arn
   runtime          = "python3.12"
   handler          = "reaper.handler"
@@ -106,7 +113,7 @@ resource "aws_lambda_function" "reaper" {
     variables = {
       PROJECT        = local.project
       ENVIRONMENT    = var.environment
-      MAX_AGE_HOURS  = tostring(var.max_runtime_hours + var.reaper_margin_hours)
+      MAX_AGE_HOURS  = tostring(local.reaper_max_age)
       MAX_CONCURRENT = tostring(var.max_concurrent_workers)
       TOPIC_ARN      = aws_sns_topic.reaper.arn
     }

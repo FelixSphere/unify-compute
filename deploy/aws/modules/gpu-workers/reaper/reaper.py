@@ -8,8 +8,10 @@ schedule, and needs nothing from either.
 
 A worker is reaped when it carries this environment's worker tags and was
 launched longer ago than the platform's maximum runtime plus a margin. No job
-can legitimately still be on it: max_runtime_seconds is capped at 24 hours
-(upstreams.md R9) and compute-api ends the attempt there.
+can legitimately still be on it: max_runtime_seconds is capped by
+compute-api/config/platform.json (upstreams.md R9; 4 hours since ADR-0010's
+"Start small"), compute-api ends the attempt there, and MAX_AGE_HOURS is
+derived from that same file.
 """
 
 import datetime

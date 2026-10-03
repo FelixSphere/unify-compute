@@ -41,6 +41,14 @@ variable "instance_types" {
     condition     = length(var.instance_types) > 0
     error_message = "At least one instance type, or there is nothing to launch."
   }
+
+  # ADR-0010, "Start small" (2026-10-03): one g5.xlarge is the whole fleet,
+  # and the AWS quota, the budget and the overshoot bound are sized for it.
+  # Widening this is an amendment to that ADR first, then this line.
+  validation {
+    condition     = alltrue([for t in var.instance_types : t == "g5.xlarge"])
+    error_message = "Only g5.xlarge may be launched while the platform starts small (ADR-0010)."
+  }
 }
 
 variable "api_server_ip" {
@@ -53,16 +61,10 @@ variable "api_server_role_arn" {
   type        = string
 }
 
-variable "max_runtime_hours" {
-  description = "The platform ceiling on max_runtime_seconds (upstreams.md R9)."
-  type        = number
-  default     = 24
-}
-
 variable "reaper_margin_hours" {
-  description = "Added to max_runtime_hours before the reaper terminates a worker: covers provisioning (not billed, but the instance exists), compute-api's own teardown, and its retries."
+  description = "Added to the platform runtime ceiling (compute-api/config/platform.json) before the reaper terminates a worker: covers provisioning (not billed, but the instance exists), compute-api's own teardown, and its retries. SkyPilot's launch-to-UP is minutes, so one hour is ample and every hour here is up to USD ~1.04 per orphaned worker."
   type        = number
-  default     = 2
+  default     = 1
 }
 
 variable "max_concurrent_workers" {
