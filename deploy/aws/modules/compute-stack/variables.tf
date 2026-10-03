@@ -91,6 +91,34 @@ variable "bridge_enabled" {
   type        = bool
 }
 
+variable "accounts_backend" {
+  description = <<-EOT
+    Whose accounts compute-api serves (ADR-0011): "local" for Compute's own
+    accounts, "console" for Unify API's. Rendered into the host's .env at first
+    boot with APP_ORIGIN (https://<app_domain>), SES_SENDER and
+    SES_CONFIGURATION_SET, so a rebuilt host comes back on the same accounts as
+    the one it replaced; every uck_ key stops working on "console". A running
+    host gets a change over SSM (docs/staging.md).
+  EOT
+  type        = string
+
+  validation {
+    condition     = contains(["local", "console"], var.accounts_backend)
+    error_message = "accounts_backend must be local or console, the two values compute-api accepts."
+  }
+}
+
+variable "stripe_enabled" {
+  description = <<-EOT
+    Whether user-data reads /<name>/stripe_secret_key and
+    /<name>/stripe_webhook_secret into the host's .env. Either one missing
+    still boots, with top-ups answering 503. False renders both empty whatever
+    exists in SSM: compute-api refuses a live key outside production, and
+    staging has no test keys.
+  EOT
+  type        = bool
+}
+
 variable "instance_type" {
   description = "arm64 (t4g). Every pinned image must publish arm64; CI's pinned-images job checks. ~USD 12/month on-demand."
   type        = string

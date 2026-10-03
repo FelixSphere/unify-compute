@@ -25,6 +25,12 @@ module "stack" {
   console_url    = "http://console:3000"
   bridge_enabled = true
 
+  # Compute's own accounts (ADR-0011), and what a rebuilt host renders into
+  # .env. The running host got the same lines over SSM.
+  accounts_backend = "local"
+  # Staging has no Stripe keys; its top-ups answer 503.
+  stripe_enabled = false
+
   compute_api_image = var.compute_api_image
   site_image        = var.site_image
   console_image     = var.console_image

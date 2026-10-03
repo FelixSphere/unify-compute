@@ -42,6 +42,10 @@ locals {
   # Signs job upload tokens (internal/artifacts). Optional: without it
   # compute-api leaves artifact uploads off.
   ssm_artifacts_token_secret = "${local.ssm_prefix}/artifacts_token_secret"
+  # Card top-ups (ADR-0011 section 4). Written out of band, like the bridge
+  # secret, and read at boot only where stripe_enabled.
+  ssm_stripe_secret_key     = "${local.ssm_prefix}/stripe_secret_key"
+  ssm_stripe_webhook_secret = "${local.ssm_prefix}/stripe_webhook_secret"
 
   skypilot_enabled            = var.skypilot != null
   ssm_skypilot_admin_password = coalesce(var.ssm_skypilot_admin_password, "${local.ssm_prefix}/skypilot_admin_password")
@@ -197,6 +201,13 @@ locals {
     artifacts_writer_role = aws_iam_role.artifacts_writer.arn
     ssm_artifacts_token   = local.ssm_artifacts_token_secret
     public_url            = "https://${var.api_domain}"
+    accounts_backend      = var.accounts_backend
+    app_origin            = "https://${var.app_domain}"
+    ses_sender            = local.ses_sender
+    ses_configuration_set = var.ses_configuration_set
+    stripe_enabled        = var.stripe_enabled
+    ssm_stripe_key        = local.ssm_stripe_secret_key
+    ssm_stripe_webhook    = local.ssm_stripe_webhook_secret
     skypilot_enabled      = local.skypilot_enabled
     skypilot_host_setup   = local.skypilot_host_setup
     imds_lockdown         = file("${path.module}/../../../../scripts/imds-lockdown.sh")
