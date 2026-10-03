@@ -68,6 +68,9 @@ account. Two consequences:
   `gpu-ready` (2026-10-03) released compute-api `9dfc652a…` and site
   `6981df35…` (e5ce490) to staging (37093005905) and production (37093737717).
   Both hosts run that pair, and `mode=rollback` works on both.
+  `own-accounts` (2026-10-03) released compute-api `40e08796…` and site
+  `48aa37ff…` (3871bb5) to staging (37142120642) and production
+  (37142414668).
   `DNS_CUTOVER=done`, and production's `PUBLIC_ORIGIN` is
   `https://compute.unifyai.us`.
 - **IMDS lockdown:** applied to both hosts on 2026-10-03 (staging, then
@@ -94,6 +97,21 @@ account. Two consequences:
   compute-api 5f964c1 (platform caps 1 job / 1 GPU, ceiling 4 h). The
   operator handles the quota case (4 vCPU now, not 8); agents do not
   request quota.
+- **Accounts (ADR-0011), 2026-10-03:** staging runs `ACCOUNTS_BACKEND=local`
+  (host `.env`, set over SSM under the ops lock; previous files in
+  `/data/backups/20261003T175222Z-manual-own-accounts-env/`). It also has
+  `APP_ORIGIN`, the quoted `SES_SENDER`, `SES_CONFIGURATION_SET` and
+  `ENVIRONMENT=staging`. The compose file must pass these through (#67); a
+  host with an older compose file ignores them silently. Production stays on
+  `console`. `app.compute.unifyai.us` is served but unlinked, and its
+  dashboard routes are 404.
+  - SES identity `compute.unifyai.us`: verified, DKIM/MAIL FROM SUCCESS.
+  - Terraform trap: the #58 certificate replacement left **deposed copies of
+    the three re-created validation records**, sharing ids with the live
+    ones. A follow-up plan proposed destroying them, which would have deleted
+    the live CNAMEs. They were removed from state and the live records
+    re-imported (both environments, plans then clean). Check for
+    `deposed object` after any certificate change.
 - **Console:** production `app.unifyapi.ai` belongs to the UnifyAPI CI/CD agent.
   Staging runs its own console container, the UnifyAPI CI/CD trial build
   `e3cef17…@sha256:c48c638b…` (#47; bridge routes on, `compute_*` tables),
