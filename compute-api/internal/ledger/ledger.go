@@ -77,6 +77,18 @@ type UsageEvent struct {
 	Final              bool
 }
 
+// Biller holds, settles, extends and releases a job's quota: the console
+// bridge (*console.Client) or compute's own local biller (*billing.Local),
+// chosen by ACCOUNTS_BACKEND. Both answer a refusal with a *console.Error
+// carrying the bridge's status and code, which is all classify reads, so the
+// engine behaves identically on either.
+type Biller interface {
+	Hold(ctx context.Context, req console.HoldRequest) (*console.HoldResult, error)
+	Settle(ctx context.Context, holdID string, req console.SettleRequest) (*console.SettleResult, error)
+	Extend(ctx context.Context, holdID string, req console.ExtendRequest) (*console.HoldResult, error)
+	Release(ctx context.Context, holdID string) (*console.ReleaseResult, error)
+}
+
 // Engine is the GPU meter's ledger and settlement loop. It assumes it is the
 // only writer of its tables' live rows: only the process holding the store's
 // worker lock runs Tick and the lifecycle calls (internal/jobs). Another
@@ -86,13 +98,13 @@ type UsageEvent struct {
 // (backend.md, "Restart", open points).
 type Engine struct {
 	db      *pgxpool.Pool
-	console *console.Client
+	console Biller
 	actions Actions
 	now     func() time.Time
 	mu      sync.Mutex
 }
 
-func New(db *pgxpool.Pool, c *console.Client, a Actions, now func() time.Time) *Engine {
+func New(db *pgxpool.Pool, c Biller, a Actions, now func() time.Time) *Engine {
 	if now == nil {
 		now = time.Now
 	}

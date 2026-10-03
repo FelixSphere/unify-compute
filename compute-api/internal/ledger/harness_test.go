@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/FelixSphere/unify-compute/compute-api/internal/billing/billingtest"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/console/consoletest"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/store"
 )
@@ -137,6 +138,11 @@ func newHarness(t *testing.T) *harness {
 	fake := consoletest.New([]byte("0123456789abcdef0123456789abcdef"))
 	t.Cleanup(fake.Close)
 	fake.SetNow(clock.Now)
+	if billingtest.Parity(t) {
+		book, local := billingtest.Book(t, db, clock.Now)
+		fake.UseBook(book)
+		t.Cleanup(func() { billingtest.AssertInvariant(t, local) })
+	}
 	fake.SeedUser(consoletest.User{ID: testUser, Quota: testBalance})
 	fake.SeedKey(consoletest.Key{Key: "sk-test", TokenID: testToken, UserID: testUser, Unlimited: true})
 
