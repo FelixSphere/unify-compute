@@ -82,8 +82,10 @@ in the email would be wrong by the next morning. The safety line says so.
 `text/plain` alternative with the same content: the eyebrow, headline, intro,
 CTA label with the full URL on its own line, every detail row as
 `Label: value`, the safety line, and the footer (product · domain, the
-reason, and the company address line). The footer carries no FelixSphere
-tagline, as UI-STANDARD requires. The plain text
+reason, and the last line "© UnifyAI · Operated by FelixSphere LLC · 6 Karen
+Ct, CA 94010, United States", as in `docs/spec/email/base.html`). FelixSphere
+LLC is the sender of record (UI-STANDARD, 2026-10-03); the footer carries no
+FelixSphere tagline or logo. The plain text
 must read correctly by itself with images blocked. The subject names the
 product and the action, and the preheader adds information the subject does
 not carry.

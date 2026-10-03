@@ -294,7 +294,7 @@ is correct: compute does not consume supplier credit lots.
 2. Staging: set the secret on both sides, run compute-api's bridge smoke.
 3. Only then does compute-api get a production console URL.
 
-Owned by the UnifyAPI CI/CD agent for step 1 and the unify-compute CI/CD agent
+Owned by the Unify API CI/CD agent for step 1 and the unify-compute CI/CD agent
 for steps 2–3.
 
 ## Revision 2026-10-01

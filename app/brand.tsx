@@ -19,10 +19,18 @@ export function BrandLockup({ tone = 'black', decorative = false, eager = false 
   );
 }
 
-export function CompanyLine() {
+// UI-STANDARD (2026-10-03): page footers carry the brand only; legal pages
+// add the legal entity, FelixSphere LLC, which is not the brand.
+export function CompanyLine({ legal = false }: { legal?: boolean }) {
   return (
     <span className="copyright">
-      © {new Date().getFullYear()} UnifyAI · Lebuh Bandar Utama PJU 6, 47800 Petaling Jaya, Selangor, Malaysia
+      © {new Date().getFullYear()} UnifyAI
+      {legal && (
+        <>
+          <br />
+          Operated by FelixSphere LLC · 6 Karen Ct, CA 94010, United States
+        </>
+      )}
     </span>
   );
 }
