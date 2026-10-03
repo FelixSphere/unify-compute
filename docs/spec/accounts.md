@@ -476,7 +476,7 @@ session, no CSRF header and no Origin check; the Host check still applies.
 The Stripe account is the one Unify API already runs production on. Compute
 has its own restricted keys and its own endpoint and must not act on, or
 fail on, anything of Unify API's. Every Stripe object compute creates
-(Customer, Checkout Session, and through `payment_intent_data` the
+(Customer, Checkout Session, its inline Product, and through `payment_intent_data` the
 PaymentIntent and its charge) carries `metadata.product = unify-compute`,
 `account_id` and `environment`.
 
