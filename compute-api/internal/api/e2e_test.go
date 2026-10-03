@@ -13,7 +13,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -48,9 +47,9 @@ import (
 // Every response a test receives is held against openapi.json as it
 // arrives: its status is documented for the route, its content type too,
 // the body fits the schema, and an error's type/code pair is listed in
-// Error.x-error-codes or Error.x-error-codes-wired. TestEndToEnd then checks
-// that every code listed under x-error-codes-wired was produced by some
-// scenario, as TestHandlerResponsesMatchOpenAPI does for x-error-codes.
+// Error.x-error-codes. TestEndToEnd then checks that every listed code was
+// produced either by some scenario or by the database-less servers of
+// TestHandlerResponsesMatchOpenAPI.
 
 const (
 	e2eSecret = "0123456789abcdef0123456789abcdef"
@@ -205,8 +204,8 @@ func (h *e2e) must(err error) {
 // --- HTTP, checked against the contract --------------------------------------
 
 var (
-	wiredSeenMu sync.Mutex
-	wiredSeen   = map[string]bool{}
+	e2eSeenMu sync.Mutex
+	e2eSeen   = map[string]bool{}
 )
 
 type resp struct {
@@ -280,38 +279,13 @@ func conformsToOpenAPI(t *testing.T, pattern, where string, rec *httptest.Respon
 	}
 	if env, ok := body.(map[string]any)["error"].(map[string]any); ok && rec.Code >= 400 {
 		pair := fmt.Sprintf("%v/%v", env["type"], env["code"])
-		codes, wired := errorCodes(t, doc), wiredErrorCodes(t, doc)
-		if !codes[pair] && !wired[pair] {
-			t.Errorf("%s -> %d: error %s is listed in neither Error.x-error-codes nor Error.x-error-codes-wired", where, rec.Code, pair)
+		if !errorCodes(t, doc)[pair] {
+			t.Errorf("%s -> %d: error %s is not listed in Error.x-error-codes", where, rec.Code, pair)
 		}
-		wiredSeenMu.Lock()
-		wiredSeen[pair] = true
-		wiredSeenMu.Unlock()
+		e2eSeenMu.Lock()
+		e2eSeen[pair] = true
+		e2eSeenMu.Unlock()
 	}
-}
-
-func wiredErrorCodes(t *testing.T, doc map[string]any) map[string]bool {
-	t.Helper()
-	schema, err := resolveRef(doc, "#/components/schemas/Error")
-	if err != nil {
-		t.Fatal(err)
-	}
-	m := schema.(map[string]any)
-	types := map[string]bool{}
-	for _, v := range m["properties"].(map[string]any)["type"].(map[string]any)["enum"].([]any) {
-		types[v.(string)] = true
-	}
-	out := map[string]bool{}
-	list, _ := m["x-error-codes-wired"].(map[string]any)
-	for typ, codes := range list {
-		if !types[typ] {
-			t.Errorf("x-error-codes-wired names type %q which is not in Error.type's enum", typ)
-		}
-		for _, c := range codes.([]any) {
-			out[typ+"/"+c.(string)] = true
-		}
-	}
-	return out
 }
 
 func (h *e2e) submit(key, body string, hdr ...string) (resp, jobView) {
@@ -499,17 +473,11 @@ func TestEndToEnd(t *testing.T) {
 	t.Run("submit refused without a SkyPilot API server", testNoSkyPilot)
 
 	doc := loadSpec(t)
-	wiredSeenMu.Lock()
-	defer wiredSeenMu.Unlock()
-	var stale []string
-	for pair := range wiredErrorCodes(t, doc) {
-		if !wiredSeen[pair] {
-			stale = append(stale, pair)
-		}
-	}
-	sort.Strings(stale)
-	if len(stale) > 0 && !t.Failed() {
-		t.Errorf("Error.x-error-codes-wired lists codes no scenario produced: %v", stale)
+	dbLess := dbLessErrorCodes(t, doc)
+	e2eSeenMu.Lock()
+	defer e2eSeenMu.Unlock()
+	if stale := unproducedErrorCodes(t, doc, dbLess, e2eSeen); len(stale) > 0 && !t.Failed() {
+		t.Errorf("Error.x-error-codes lists codes neither a scenario nor the database-less servers produced: %v", stale)
 	}
 }
 

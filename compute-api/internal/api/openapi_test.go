@@ -163,8 +163,21 @@ func TestOpenAPIExamplesMatchSchemas(t *testing.T) {
 // response against the document: the status is listed for the operation, the
 // body fits its schema with no undocumented fields, and every error
 // type/code pair the code emits is listed in Error.x-error-codes.
+//
+// The other direction, that every listed code is produced by something, needs
+// the codes only a build with a job store emits, so TestEndToEnd checks it
+// against these servers and its own scenarios together. It therefore runs
+// only where COMPUTE_TEST_DATABASE_URL is set, as it is in CI.
 func TestHandlerResponsesMatchOpenAPI(t *testing.T) {
 	doc := loadSpec(t)
+	dbLessErrorCodes(t, doc)
+}
+
+// dbLessErrorCodes drives the handlers of servers built without a job store,
+// holds every response against the document, and returns the error
+// type/code pairs they produced.
+func dbLessErrorCodes(t *testing.T, doc map[string]any) map[string]bool {
+	t.Helper()
 	ops := specOperations(t, doc)
 	codes := errorCodes(t, doc)
 
@@ -259,13 +272,26 @@ func TestHandlerResponsesMatchOpenAPI(t *testing.T) {
 		}
 	}
 
-	// Listed codes the handlers no longer emit are stale documentation. Only
-	// the ones this test can provoke are checked; planned types list none.
-	for pair := range codes {
-		if !seen[pair] && pair != "internal_error/placement_failed" {
-			t.Errorf("Error.x-error-codes lists %s but no handler produced it", pair)
+	return seen
+}
+
+// unproducedErrorCodes returns the listed codes no source produced. Listed
+// codes the handlers no longer emit are stale documentation; planned types
+// list none.
+func unproducedErrorCodes(t *testing.T, doc map[string]any, sources ...map[string]bool) []string {
+	t.Helper()
+	var stale []string
+	for pair := range errorCodes(t, doc) {
+		produced := pair == "internal_error/placement_failed"
+		for _, seen := range sources {
+			produced = produced || seen[pair]
+		}
+		if !produced {
+			stale = append(stale, pair)
 		}
 	}
+	sort.Strings(stale)
+	return stale
 }
 
 func errorCodes(t *testing.T, doc map[string]any) map[string]bool {
