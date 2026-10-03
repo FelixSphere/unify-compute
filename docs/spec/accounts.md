@@ -647,10 +647,10 @@ replacing the Malaysian company line of 2026-10-02; the brand stays UnifyAI
 - Email footers end with "© UnifyAI · Operated by FelixSphere LLC · 6 Karen
   Ct, CA 94010, United States" (`docs/spec/email/base.html`).
 
-The address has no city; it is the one published on felixsphere.com, and the
-brand owner has asked the operator for the city line before the first paid
-invoice. The standard now allows "FelixSphere LLC" in that entity line and
-the felixsphere.com Terms link, so `check-consistency.sh` no longer flags
+The address has no city; it is the one FelixSphere publishes on its legal
+pages, and the brand owner has asked the operator for the city line before
+the first paid invoice. The standard now allows "FelixSphere LLC" in that
+entity line and the Terms link, so `check-consistency.sh` no longer flags
 them.
 
 ## Open points
