@@ -138,8 +138,8 @@ Not in v1, and not built:
 | | Console | Compute API | Where |
 |---|---|---|---|
 | Local | `deploy/compose` console container, empty DB | `go run ./cmd/compute-api` or container | developer machine |
-| Staging | `console.staging.compute.unifyai.us`, own DB | `staging.compute.unifyai.us` | one t4g.small, `deploy/aws/staging/` — **not yet applied** |
-| Production | `app.unifyapi.ai` (UnifyAPI CI/CD agent's) | `api.compute.unifyai.us` — **does not exist** | to be decided |
+| Staging | `console.staging.compute.unifyai.us`, own DB | `staging.compute.unifyai.us` | one t4g.small, `deploy/aws/envs/staging/` — **not yet applied** |
+| Production | `app.unifyapi.ai` (UnifyAPI CI/CD agent's) | `api.compute.unifyai.us` — **does not exist** | one t4g.small, `deploy/aws/envs/production/` — defined, **not applied** ([ADR-0009](adr/0009-host-everything-on-aws.md), proposed) |
 
 Staging runs its own console on purpose ([ADR-0004](adr/0004-staging-environment.md)):
 the bridge endpoints do not exist in production yet, and even once they do, a

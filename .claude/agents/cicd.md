@@ -29,25 +29,51 @@ account. Two consequences:
 
 ## The state of the world (keep this section true)
 
-- **Marketing site:** live at https://compute.unifyai.us, hosted on OpenAI
-  Sites (`.openai/hosting.json`), served through Cloudflare. It does not
-  deploy through this repository's CI. Content changes ship through the Sites
-  project, not Terraform.
-- **Staging:** defined in `deploy/aws/staging/`, target hostnames
+- **Marketing site:** live at https://compute.unifyai.us on AWS production
+  since the DNS cutover on 2026-10-02 (Route53 change
+  `C07235422LT740FCOOAEW`, CNAME to `custom-domains.chatgpt.site.` replaced
+  by an A alias to the production ALB). The record is in Terraform
+  (`manage_site_dns = true`, imported). Content ships as the `site` image through
+  `release.yml`, staging first. The OpenAI Sites project and the
+  `_cf-custom-hostname` / `_openai-site-verification` TXT records are kept
+  as the rollback path until the operator closes it (ADR-0009, "Rollback").
+- **Staging:** defined in `deploy/aws/envs/staging/` (module `deploy/aws/modules/compute-stack/`; production in `deploy/aws/envs/production/`, deploy roles in `deploy/aws/shared/github-oidc/`, runtime image registry in `deploy/aws/shared/ecr/`), target hostnames
   `staging.compute.unifyai.us` (compute-api) and
   `console.staging.compute.unifyai.us` (a staging console with its own empty
-  database). **Not applied yet.** No instance, no DNS, no certificate exist.
-  First apply is a deliberate act: see "Applying staging for the first time".
-- **Production compute API:** does not exist. There is no production stack in
-  this repository yet.
+  database), plus `site.staging.compute.unifyai.us`. **Running** since
+  2026-10-02. 49 resources, VPC 10.72.0.0/16, instance
+  `i-06125c23285803d7a` (AMI `ami-065b1b834d2a83a7a`; rebuilt 2026-10-02 after
+  production, to take #34 the same way), data volume
+  `vol-05c4fb3b4ce0077fe`, ALB
+  `unify-compute-staging-347679141.us-east-1.elb.amazonaws.com`. Hosts pull
+  our images from ECR (`deploy/aws/shared/ecr/`) with the instance role.
+- **Production:** applied 2026-10-02. 48 resources, VPC 10.71.0.0/16,
+  instance `i-07dd2f6d313a0dafd` (rebuilt once, before any release, to pick up
+  #34), data volume `vol-02c8bcba84c4b91a4`, ALB
+  `unify-compute-production-1999053028.us-east-1.elb.amazonaws.com`
+  (deletion protection on), daily DLM snapshots. Serves `compute.unifyai.us`,
+  `site.compute.unifyai.us` and `api.compute.unifyai.us`. compute-api is dark:
+  no bridge secret and no `CONSOLE_URL`. No console runs there.
+- **Release pipeline:** `.github/workflows/release.yml`, dispatch only.
+  GitHub environments `staging` and `production` exist, both main-only
+  (required reviewers refused on this plan). `mode=status` on staging has run
+  once (run 37050107408). Go-live released `ec4bd964…`/`cd7077d3…` (a8562dd)
+  to staging (runs 37054858851, 37055453977) and production (37058109546).
+  `site-icons-v4` then released site `7b9bb659…` (ea56779) with the same
+  compute-api to staging (37083281875) and production (37083501562).
+  Records are in `deploy/releases/`. Both hosts now have a `PREVIOUS_RELEASE`
+  (site `cd7077d3…`, still in ECR), so `mode=rollback` works on both.
+  `DNS_CUTOVER=done`, and production's `PUBLIC_ORIGIN` is
+  `https://compute.unifyai.us`.
 - **Console:** production `app.unifyapi.ai` belongs to the UnifyAPI CI/CD agent.
   Staging runs its own console container from the same pinned image
   (`CONSOLE_IMAGE` in `deploy/compose/.env.example`), with a separate database.
   Never point staging compute at the production console.
 - **State:** Terraform state for staging lives in S3 with native locking
-  (`deploy/aws/staging/backend.tf`), key `unify-compute/staging/terraform.tfstate`.
-  The bucket is **not bootstrapped yet** — run `scripts/tf-backend-bootstrap.sh`
-  before the first `terraform init`, or `init` fails. `use_lockfile` needs
+  (`deploy/aws/envs/staging/backend.tf`), key `unify-compute/staging/terraform.tfstate`.
+  The bucket is bootstrapped (2026-10-02) and holds the staging and
+  shared/github-oidc states; `scripts/tf-backend-bootstrap.sh` stays
+  idempotent. `use_lockfile` needs
   Terraform >= 1.10. State must still never be committed; `ci.yml` rejects
   `*.tfstate` files.
 
@@ -65,7 +91,7 @@ account. Two consequences:
    it. The script generates hex and verifies what it wrote; user-data now
    rejects a non-URL-safe value at boot. The console bridge secret must be the
    same value on the console side and the compute-api side.
-3. `terraform init && terraform plan` in `deploy/aws/staging/`. Read the plan.
+3. `terraform init && terraform plan` in `deploy/aws/envs/staging/` (after `deploy/aws/shared/ecr/` and `deploy/aws/shared/github-oidc/`). Read the plan.
    Expect: one VPC, two subnets, one ALB with two listener rules, one ACM
    certificate, three Route53 records, one t4g.small, one EBS data volume.
 4. `terraform apply`. Then `make smoke BASE_URL=https://staging.compute.unifyai.us`
@@ -75,22 +101,68 @@ account. Two consequences:
 
 ## Before you ship anything
 
-1. **Know what you are shipping.** `git log <last-tag>..main --oneline`.
-2. **A `user_data` change replaces the instance.** The data volume survives
+1. **Know what you are shipping.** A release is two digests, named by their
+   GHCR refs (inputs, manifests, records); the run copies them to ECR, the
+   hosts' registry, and gives the host the ECR ref of the same digest. Find the commit
+   each was built from (its `sha-<commit>` tag), then
+   `git log <previous build>..<new build> --oneline` for each. The previous
+   builds are in the last record in `deploy/releases/`, and on the host
+   (`mode=status`).
+2. **Nothing else is in flight.** `gh run list --workflow release.yml`.
+   The workflow refuses a second concurrent run; check anyway, so you are not
+   the one refused halfway through someone else's release.
+3. **A `user_data` change replaces the instance.** The data volume survives
    (`prevent_destroy`), the containers do not. Say so before applying.
-3. **Never let `terraform apply` destroy the data volume.** If a plan proposes
+   Terraform is for the instance, not for releases.
+4. **Never let `terraform apply` destroy the data volume.** If a plan proposes
    it, stop.
-4. **Run the smoke script after every deploy** and read it. A compute-api that
-   returns 200 on `/healthz` but 502 on `/compute/v1/skus` is not healthy.
 5. **Pricing goes out with the code that reads it.** Do not hot-edit
    `skus.json` on the instance.
 
+## Releasing
+
+The procedure, what each step refuses, and what the hosts must provide are
+in `docs/staging.md`, section "Releasing". In short:
+
+```bash
+# before: what the host runs now (read-only)
+gh workflow run release.yml --ref main -f environment=staging -f mode=status -f reason="before <name>"
+
+# staging, then production with the SAME digests
+gh workflow run release.yml --ref main -f environment=staging -f compute_api_image=ghcr.io/felixsphere/unify-compute-api@sha256:<d> -f site_image=ghcr.io/felixsphere/unify-compute-site@sha256:<d> -f reason="<name>"
+gh workflow run release.yml --ref main -f environment=production -f compute_api_image=<same> -f site_image=<same> -f reason="<name>"
+```
+
+- **Staging first is enforced, not advised.** Production refuses digests
+  without a successful staging run of `release.yml` that uploaded a manifest
+  with exactly those digests. Do not look for a way around it.
+- **HOTFIX** at the start of `reason` bypasses that one gate, loudly, for a
+  live outage, a security issue or data being lost, and nothing else. It
+  still backs up, checks the host, and smokes. Record it with `hotfix: true`
+  and a `## What was skipped` section, and release the same digests to
+  staging afterwards.
+- **The run is not the evidence.** After it, exercise what the release
+  changes, on the environment, and write `deploy/releases/YYYY-MM-DD-<name>.md`
+  (format in `deploy/releases/README.md`; the run summary has the field
+  block). CI fails every PR once a successful release is a day old with no
+  record.
+- **Any other command that writes data or restarts a service** on a host
+  takes the same lock first:
+  `flock -w 900 /run/lock/unify-compute-ops.lock <command>`.
+
 ## Rolling back
 
-Repoint `COMPUTE_API_IMAGE` (and, if involved, `CONSOLE_IMAGE`) to the previous
-digest in the instance's compose file over SSM, `docker compose up -d`, smoke,
-then commit the same pin here so the next instance rebuild lands on it. Pin by
-digest, not tag: a tag can be repointed, a digest cannot.
+```bash
+gh workflow run release.yml --ref main -f environment=<env> -f mode=rollback -f reason="rollback: <why>"
+```
+
+It cuts back to the host's `PREVIOUS_RELEASE` through the same lock, backup
+and checks. A failed cutover already restored the previous images by itself;
+a failed smoke did not, because the host had passed its own checks, so
+deciding is yours. A rollback does not restore the database; if the bad
+release migrated it, the runbook in `docs/staging.md` restores the dump it
+took. One rollback goes one step back; a second one re-applies what you
+rolled back from. A rollback needs its own record.
 
 ## The rule you enforce
 

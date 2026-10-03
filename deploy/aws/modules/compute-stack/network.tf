@@ -1,6 +1,8 @@
 # Minimal dedicated VPC. Two public subnets because an ALB needs two AZs. No
 # NAT gateway: the instance sits in a public subnet, reachable only from the
-# ALB security group, with SSM for shell access instead of SSH.
+# ALB security group, with SSM for shell access instead of SSH. A NAT gateway
+# would cost more per month (~USD 33 plus per-GB) than the instance and buys
+# nothing at this size; the instance's own egress is what pulls images.
 
 data "aws_availability_zones" "available" {
   state = "available"
@@ -48,7 +50,7 @@ resource "aws_route_table_association" "public" {
 
 resource "aws_security_group" "alb" {
   name        = "${var.name}-alb"
-  description = "Public HTTPS for compute-api and the staging console"
+  description = "Public HTTPS for the ${var.environment} compute hostnames"
   vpc_id      = aws_vpc.this.id
 
   ingress {
@@ -82,20 +84,17 @@ resource "aws_security_group" "instance" {
   description = "Containers reachable only from the ALB; no SSH"
   vpc_id      = aws_vpc.this.id
 
-  ingress {
-    description     = "compute-api from the ALB"
-    from_port       = 8080
-    to_port         = 8080
-    protocol        = "tcp"
-    security_groups = [aws_security_group.alb.id]
-  }
-
-  ingress {
-    description     = "console from the ALB"
-    from_port       = 3000
-    to_port         = 3000
-    protocol        = "tcp"
-    security_groups = [aws_security_group.alb.id]
+  # One rule per app actually running here, so production's instance has no
+  # open console port for a console that is not there.
+  dynamic "ingress" {
+    for_each = local.apps
+    content {
+      description     = "${ingress.key} from the ALB"
+      from_port       = ingress.value.port
+      to_port         = ingress.value.port
+      protocol        = "tcp"
+      security_groups = [aws_security_group.alb.id]
+    }
   }
 
   egress {

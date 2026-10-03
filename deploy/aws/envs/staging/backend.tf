@@ -14,6 +14,10 @@
 #
 #     scripts/tf-backend-bootstrap.sh
 #
+# The key is unchanged from when this stack lived at deploy/aws/staging/. No
+# state has ever been written to it (the bucket was empty on 2026-10-02), so
+# the move into a module needed no `moved {}` blocks.
+#
 terraform {
   backend "s3" {
     bucket       = "unifyai-tfstate-871376691052"
