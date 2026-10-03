@@ -26,7 +26,7 @@ variable "compute_api_image" {
 variable "site_image" {
   description = "Marketing site image, by digest. Rebuild baseline only; releases swap it on the host."
   type        = string
-  default     = "871376691052.dkr.ecr.us-east-1.amazonaws.com/unify-compute-site@sha256:cd7077d3462abe68b17d33b39437e34121f3a2d7333aee04b9844f854f9bd018"
+  default     = "871376691052.dkr.ecr.us-east-1.amazonaws.com/unify-compute-site@sha256:7b9bb6596a8cba954dccd8ff8bd4922eaf23d43d54b0ea9fe8a9b7315bace4ea"
 }
 
 variable "console_image" {
