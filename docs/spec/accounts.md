@@ -429,6 +429,11 @@ something the subject does not say.
 | Storage arrears started / artifacts deletion scheduled / deleted | ADR-0008 | CTA "Top up" | `Unify Compute: storage unpaid, artifacts deleted on <date>` (and variants) |
 | Operator: top-up review request, dispute opened | limit refusal is not emailed; disputes are | — (plain operator notice to the operator address) | `[Unify Compute ops] dispute opened on tu_…` |
 
+The links open these dashboard pages on `APP_ORIGIN`: `/login`,
+`/forgot-password`, `/reset-password#token=…` and `/keys`
+(`compute-api/internal/mailer/messages.go`). A7b and A7c build the pages at
+those paths or change them there.
+
 `{{footer_reason}}` for account messages: "You're receiving this because
 this address is registered for a Unify Compute account." For the
 signup-attempt message: "You're receiving this because someone entered this
@@ -448,6 +453,7 @@ line.
 | `ACCOUNTS_COMPUTE_DEFAULT` | `compute_enabled` for new accounts; `false` while starting small |
 | `SES_SENDER` | `'Unify Compute <no-reply@compute.unifyai.us>'`, quoted. With `local` and no sender, compute-api refuses to start unless `ENVIRONMENT=development` |
 | `SES_CONFIGURATION_SET` | `unify-compute` (also the identity default; set for clarity) |
+| `MAIL_OUTBOX_DIR` | Only with `ENVIRONMENT=development` and no `SES_SENDER`: where messages are written as `.eml` files instead of sent (default `outbox`) |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET` | Cloudflare; test keys in development |
 | `STRIPE_SECRET_KEY` | `sk_test_…` until the operator approves live mode; a restricted key with Checkout Sessions write, Customers write, Refunds write, and read on Charges and Disputes |
 | `STRIPE_WEBHOOK_SECRET` | `whsec_…` of the endpoint |

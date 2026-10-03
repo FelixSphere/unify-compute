@@ -1,6 +1,6 @@
 // Package awsv4 is the small part of AWS that compute-api talks to —
-// Signature Version 4, instance-role credentials, STS AssumeRole and five S3
-// object calls — written against the standard library.
+// Signature Version 4, instance-role credentials, STS AssumeRole, five S3
+// object calls and SES v2 SendEmail — written against the standard library.
 //
 // Why not the AWS SDK for Go v2: the artifact store needs SigV4 signing and
 // presigning, one STS call and a handful of S3 calls. The SDK would bring
@@ -8,8 +8,10 @@
 // service/s3 and smithy-go (and their internal modules) for that. SigV4 is a
 // published algorithm with published test vectors, which sigv4_test.go
 // checks byte for byte, so the stdlib version is both smaller and
-// verifiable. If compute-api ever needs more of AWS than this, switch to the
-// SDK rather than growing this package.
+// verifiable. The mailer's one SES call is the same shape (a signed JSON
+// POST), so ADR-0011 added it here rather than pulling in service/sesv2. If
+// compute-api ever needs more of AWS than this, switch to the SDK rather
+// than growing this package.
 package awsv4
 
 import (
@@ -162,7 +164,8 @@ func canonicalHeaders(req *http.Request) (string, string) {
 }
 
 // canonicalURI encodes each path segment once, as S3 expects (other
-// services double-encode, but every non-S3 call here has path "/").
+// services double-encode, but no non-S3 path here has a byte that encodes:
+// STS is "/", SES is "/v2/email/outbound-emails").
 func canonicalURI(u *url.URL) string {
 	p := u.EscapedPath()
 	if p == "" {
