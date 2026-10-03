@@ -16,6 +16,9 @@ module "stack" {
   site_domain     = "site.staging.compute.unifyai.us"
   manage_site_dns = true
 
+  # The customer app (ADR-0011). A new name, so always managed.
+  app_domain = "app.staging.compute.unifyai.us"
+
   # The staging console runs on this instance and compute-api reaches it by
   # its compose service name. Never production's console (ADR-0004).
   console_domain = "console.staging.compute.unifyai.us"

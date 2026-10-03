@@ -93,4 +93,53 @@ for page in /privacy /; do
   fi
 done
 
+# The app host (ADR-0011 section 5): the same container answers it from its own
+# Caddy block, chosen by Host. Both environments' names, since one image
+# serves both. On AWS the ALB sends /dashboard/v1/* on this host to
+# compute-api, so it is not probed here; scripts/release/smoke.sh does.
+app_common=(
+  "Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'"
+  "Referrer-Policy: no-referrer"
+  "X-Content-Type-Options: nosniff"
+  "X-Frame-Options: DENY"
+  "Cross-Origin-Opener-Policy: same-origin"
+)
+# The marketing site's report-only HubSpot policy and loader must not reach
+# account pages, and the enforced policy must not have been loosened.
+app_headers_clean() {
+  local label=$1
+  if grep -qi '^content-security-policy-report-only:' "$tmp/headers"; then
+    echo "FAIL $label: sends the marketing site's report-only CSP"; fail=1
+  fi
+  if grep -i '^content-security-policy:' "$tmp/headers" | grep -qiE "unsafe-inline|unsafe-eval|hubspot|hs-scripts|cloudflare"; then
+    echo "FAIL $label: CSP allows inline script or a third party: $(grep -i '^content-security-policy:' "$tmp/headers")"; fail=1
+  fi
+  if grep -qi '^set-cookie:' "$tmp/headers"; then
+    echo "FAIL $label: the site container sets a cookie; only compute-api may"; fail=1
+  fi
+}
+for app_host in app.compute.unifyai.us app.staging.compute.unifyai.us; do
+  export CURL_ARGS="-H Host:$app_host"
+  check / 200 "Content-Type: text/html" "Cache-Control: no-cache" "${app_common[@]}"
+  app_headers_clean "$app_host /"
+  grep -q '<title>Unify Compute</title>' "$tmp/body" \
+    || { echo "FAIL $app_host /: not the app placeholder"; fail=1; }
+  if grep -q 'hs-script-loader' "$tmp/body"; then
+    echo "FAIL $app_host /: HubSpot loader on the app host"; fail=1
+  fi
+  check /app.css 200 "Content-Type: text/css" "${app_common[@]}"
+  check /unifyai-tokens.css 200 "Content-Type: text/css"
+  check /brand/unifyai-lockup-horizontal-black.svg 200 "Content-Type: image/svg+xml"
+  check /favicon.ico 200 "Content-Type: image/x-icon"
+  # The marketing pages are not on this host.
+  check /privacy 404 "Content-Type: text/html" "${app_common[@]}"
+  app_headers_clean "$app_host /privacy"
+  check /does-not-exist 404 "Content-Type: text/html" "Cache-Control: no-cache" "${app_common[@]}"
+  app_headers_clean "$app_host 404"
+  grep -q 'Page not found' "$tmp/body" \
+    || { echo "FAIL $app_host 404: not the app's 404 page"; fail=1; }
+  check /index/ 308 "Location: /index"
+done
+unset CURL_ARGS
+
 exit "$fail"

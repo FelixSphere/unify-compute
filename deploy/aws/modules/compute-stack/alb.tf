@@ -101,3 +101,32 @@ resource "aws_lb_listener_rule" "app" {
     }
   }
 }
+
+# The dashboard API on the app host goes to compute-api, so the app's pages and
+# its API share one origin: no CORS, and the session cookie can stay a
+# host-only __Host- cookie (ADR-0011 section 5). Both conditions must match,
+# and the priority sits between the API rule (10, a different host, so no
+# overlap) and the site rule (20) that would otherwise take the app host's
+# every path. Only /dashboard/v1/* crosses over: the job API stays on the API
+# host alone, where keys are accepted and cookies are not.
+resource "aws_lb_listener_rule" "dashboard_api" {
+  listener_arn = aws_lb_listener.https.arn
+  priority     = 15
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.app["api"].arn
+  }
+
+  condition {
+    host_header {
+      values = [var.app_domain]
+    }
+  }
+
+  condition {
+    path_pattern {
+      values = ["/dashboard/v1/*"]
+    }
+  }
+}

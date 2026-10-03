@@ -8,6 +8,11 @@ output "site_origin" {
   value       = module.stack.site_origin
 }
 
+output "app_origin" {
+  description = "APP_ORIGIN for the app host's smoke checks (scripts/release/smoke.sh)."
+  value       = module.stack.app_origin
+}
+
 output "github_environment" {
   description = "Variables for this GitHub environment (.github/workflows/release.yml). The AWS_DEPLOY_ROLE_ARN secret comes from deploy/aws/shared/github-oidc."
   value = {
