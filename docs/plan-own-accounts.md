@@ -51,7 +51,7 @@ on migration numbers (A1 takes `0005`, A6 takes `0006`).
 | O5 | **Legal**: terms of service, acceptable-use policy (no mining), refund policy for prepaid credit, privacy-policy processors (Stripe, Cloudflare, AWS SES), record retention; and **tax**: Malaysian service tax, US sales tax, EU/UK VAT, consumer vs business-only (D2) | O6, and C4 | Before the first live top-up |
 | O6 | **Stripe live mode**: swap in live keys and the production webhook secret | after B1, B2 on staging and O5 | The first real money |
 | O7 | Turn `compute_enabled` on, by hand, for each account allowed to run jobs (D3) | first real job | `compute-api admin account enable-compute` |
-| O8 | Ask the UnifyAPI CI/CD agent to unset `COMPUTE_BRIDGE_SECRET` on `app.unifyapi.ai` in a scheduled console release | after C1 | Check first how that host gets its secrets: a `user_data` change restarts production and rotates its egress IP |
+| O8 | Ask the Unify API CI/CD agent to unset `COMPUTE_BRIDGE_SECRET` on `app.unifyapi.ai` in a scheduled console release | after C1 | Check first how that host gets its secrets: a `user_data` change restarts production and rotates its egress IP |
 
 ## Tasks
 
