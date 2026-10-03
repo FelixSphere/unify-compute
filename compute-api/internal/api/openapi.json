@@ -160,7 +160,7 @@
           "jobs"
         ],
         "summary": "Submit a job",
-        "description": "Validated before anything is held or persisted, in this order: body parses (`malformed_body`); if `template` is set, it is offered (`unknown_template`) and available (`template_unavailable`), every field sent is overridable (`field_not_overridable`), env keys are identifiers (`invalid_env`) and inputs bind each declared mount once (`missing_input`, `unknown_input_mount`, `duplicate_input_mount`), and the resolved spec continues through the same checks as a hand-written one: `sku` present (`missing_sku`), offered (`unknown_sku`) and sold (`sku_unavailable`), `spec.max_runtime_seconds` positive (`missing_max_runtime`) and at most 86400 (`runtime_over_ceiling`), every entry of `providers` offered by the SKU (`provider_not_offered`), and at least one candidate enabled in this deployment (`503 upstream_unavailable`). A request that passes validation currently receives `501 not_implemented`. Planned flow: verify key, place a hold on the UnifyAPI balance, persist the job `queued`, hand it to SkyPilot.",
+        "description": "Validated before anything is held or persisted, in this order: body parses (`malformed_body`); if `template` is set, it is offered (`unknown_template`) and available (`template_unavailable`), every field sent is overridable (`field_not_overridable`), env keys are identifiers (`invalid_env`) and inputs bind each declared mount once (`missing_input`, `unknown_input_mount`, `duplicate_input_mount`), and the resolved spec continues through the same checks as a hand-written one: `sku` present (`missing_sku`), offered (`unknown_sku`) and sold (`sku_unavailable`), `spec.max_runtime_seconds` positive (`missing_max_runtime`) and at most 86400 (`runtime_over_ceiling`), every entry of `providers` offered by the SKU (`provider_not_offered`), at least one candidate enabled in this deployment (`503 upstream_unavailable`), and, last, the account's quotas (`403 quota_exceeded`; not enforced in a deployment until key verification and the job store are wired). A request that passes validation currently receives `501 not_implemented`. Planned flow: verify key, place a hold on the UnifyAPI balance, persist the job `queued`, hand it to SkyPilot.",
         "parameters": [
           {
             "$ref": "#/components/parameters/IdempotencyKey"
@@ -237,6 +237,9 @@
               }
             }
           },
+          "403": {
+            "$ref": "#/components/responses/QuotaExceeded"
+          },
           "409": {
             "description": "Idempotency-Key reused with a different body. *Planned:* not returned by the current build.",
             "content": {
@@ -251,7 +254,7 @@
             "$ref": "#/components/responses/RateLimited"
           },
           "500": {
-            "description": "`internal_error`/`placement_failed`: placement failed for a reason other than the two the API distinguishes; or `internal_error`/`template_resolution_failed`: a template could not be resolved for a reason that is not the submitter's. Not expected in normal operation.",
+            "description": "`internal_error`/`placement_failed`: placement failed for a reason other than the two the API distinguishes; or `internal_error`/`template_resolution_failed`: a template could not be resolved for a reason that is not the submitter's. Not expected in normal operation. With quotas enforced, also `internal_error`/`owner_unresolved` (the key was not resolved to an account) or `internal_error`/`quota_check_failed` (usage could not be read); nothing was submitted.",
             "content": {
               "application/json": {
                 "schema": {
@@ -707,19 +710,63 @@
         }
       },
       "RateLimited": {
-        "description": "Per-key rate exceeded: 60 submits/hour, 600 reads/minute. *Planned:* not returned by the current build.",
+        "description": "Per-key rate exceeded: 60 submits per hour, 600 reads per minute (`GET` on the job routes), as token buckets enforced per process. `error.type` and `error.code` are `rate_limited`. Cancel is not limited yet. Retry after the number of seconds in `Retry-After`.",
         "headers": {
           "Retry-After": {
+            "required": true,
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1
             },
-            "description": "Seconds to wait."
+            "description": "Whole seconds to wait, at least 1."
           }
         },
         "content": {
           "application/json": {
             "schema": {
               "$ref": "#/components/schemas/ErrorEnvelope"
+            },
+            "example": {
+              "error": {
+                "type": "rate_limited",
+                "code": "rate_limited",
+                "message": "Per-key rate limit reached; retry after 60 s. See docs/spec/job-api.md, Rate limits."
+              }
+            }
+          }
+        }
+      },
+      "QuotaExceeded": {
+        "description": "The submit would exceed an account quota (docs/spec/quotas.md). Refused whole, never a partial grant; `error.quotas` lists each limit exceeded with its headroom. No `Retry-After`: when a slot frees depends on other jobs' runtimes. Checked last, after every request error, on the resolved SKU (a template's default counts). Enforced only once key verification and the job store are wired; the current deployment does not return it.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            },
+            "example": {
+              "error": {
+                "type": "quota_exceeded",
+                "code": "quota_exceeded",
+                "param": "sku",
+                "message": "sku \"a10g-24gb-x1\" would exceed this account's quota (active jobs: 2 of 2 in use, this job needs 1, headroom 0; hyperscaler GPUs: 2 of 2 in use, this job needs 1, headroom 0). Nothing was submitted or held; wait for or cancel an active job, choose a smaller SKU, or ask support to raise the limit.",
+                "quotas": [
+                  {
+                    "limit": "max_active_jobs",
+                    "max": 2,
+                    "used": 2,
+                    "requested": 1,
+                    "headroom": 0
+                  },
+                  {
+                    "limit": "max_gpus",
+                    "tier": "hyperscaler",
+                    "max": 2,
+                    "used": 2,
+                    "requested": 1,
+                    "headroom": 0
+                  }
+                ]
+              }
             }
           }
         }
@@ -759,6 +806,7 @@
             "missing_key"
           ],
           "insufficient_balance": [],
+          "quota_exceeded": [],
           "not_found": [],
           "conflict": [],
           "rate_limited": [],
@@ -781,6 +829,7 @@
               "invalid_request",
               "authentication_error",
               "insufficient_balance",
+              "quota_exceeded",
               "not_found",
               "conflict",
               "rate_limited",
@@ -800,6 +849,13 @@
           "param": {
             "type": "string",
             "description": "The request field at fault, as a dotted path (e.g. `spec.max_runtime_seconds`). Omitted when not applicable."
+          },
+          "quotas": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuotaViolation"
+            },
+            "description": "Present only on `quota_exceeded`: every limit the submit would exceed, with usage and headroom, so a client never has to parse `message`."
           }
         }
       },
@@ -1548,6 +1604,52 @@
             "items": {
               "$ref": "#/components/schemas/Template"
             }
+          }
+        }
+      },
+      "QuotaViolation": {
+        "type": "object",
+        "required": [
+          "limit",
+          "max",
+          "used",
+          "requested",
+          "headroom"
+        ],
+        "description": "One account quota a submit would exceed (docs/spec/quotas.md).",
+        "properties": {
+          "limit": {
+            "type": "string",
+            "enum": [
+              "max_active_jobs",
+              "max_queued_jobs",
+              "max_gpus"
+            ]
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "hyperscaler",
+              "neocloud",
+              "marketplace"
+            ],
+            "description": "Present for `max_gpus`, which is per provider tier."
+          },
+          "max": {
+            "type": "integer",
+            "description": "The account's limit."
+          },
+          "used": {
+            "type": "integer",
+            "description": "Already in use by the account's active or queued jobs."
+          },
+          "requested": {
+            "type": "integer",
+            "description": "What this submit would add."
+          },
+          "headroom": {
+            "type": "integer",
+            "description": "`max - used`, never negative: the most a submit could ask for now."
           }
         }
       }
