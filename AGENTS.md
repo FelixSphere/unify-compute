@@ -50,11 +50,20 @@ Current status (say what exists rather than describing targets as shipped):
 
 - The marketing site is live at https://compute.unifyai.us on AWS
   production. Staging and production both run (see below).
-- `compute-api/` is a skeleton: health, SKU catalogue, and the job API routes
-  with the contract from `docs/spec/job-api.md`. Job submission returns
-  `501 not_implemented` until the SkyPilot backend and the console bridge land.
-- The console bridge in `docs/spec/console-billing-bridge.md` is a spec. The
-  console fork does not implement it yet.
+- `compute-api/` on `main` runs jobs end to end where it has a job store
+  (`DATABASE_URL`): keys verified through the console bridge, quota and a
+  console hold at submit, launch on SkyPilot, GPU metering settled every
+  300 s, job events and webhooks, get/list/cancel/logs/events/artifacts
+  (`internal/jobs`). It has run only against the fakes in its tests
+  (`internal/api/e2e_test.go`), never on a real cloud or against the real
+  console. Without a job store it is the old dark build (`501` after
+  validation); without `CONSOLE_URL` every keyed job route is
+  `503 console_unavailable`; without `SKYPILOT_API_SERVER_URL` submit is
+  `503 upstream_unavailable`. Not built: resuming live jobs after a restart
+  (`docs/spec/backend.md` open question 2), webhook registration, storage
+  and egress metering.
+- The console bridge's server half is merged in `unifyapi-console` (#225)
+  but not released (`docs/spec/console-billing-bridge.md`).
 - The AWS Terraform — one module (`deploy/aws/modules/compute-stack/`) with
   staging and production callers under `deploy/aws/envs/`, plus GitHub OIDC
   deploy roles in `deploy/aws/shared/github-oidc/` and the runtime image
@@ -66,8 +75,10 @@ Current status (say what exists rather than describing targets as shipped):
   instance `i-07dd2f6d313a0dafd`). Both run compute-api and the site at
   compute-api `ec4bd964…` (a8562dd) and site `7b9bb659…` (ea56779, v4 tab
   icons). Records are in `deploy/releases/`. Staging also runs its own console. Production's
-  compute-api is dark: no bridge secret and no `CONSOLE_URL`, and job
-  submission returns 501 there as everywhere. `compute.unifyai.us` was cut over
+  compute-api is dark: no bridge secret and no `CONSOLE_URL`. The deployed
+  builds answer job submission `501`; the build on `main` would answer
+  `503 console_unavailable` on production's configuration, as job-api.md
+  specifies for a key that cannot be verified. `compute.unifyai.us` was cut over
   from OpenAI Sites to production's ALB on 2026-10-02 (Route53 change
   `C07235422LT740FCOOAEW`). The Sites project and its two TXT records remain
   as the rollback path.
