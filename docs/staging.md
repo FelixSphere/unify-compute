@@ -247,6 +247,89 @@ Changing the SkyPilot version later: edit the digest in
 `docker-compose.skypilot.yml` and rerun step 5. Releases do not manage that
 image (host.sh changes only `COMPUTE_API_IMAGE` and `SITE_IMAGE`).
 
+## IMDS lockdown
+
+**Status: defined here, applied to neither host.** Neither running host has it
+yet: both show hop limit 2, and neither has the firewall unit. Until a host
+is locked down, `release.yml` refuses to release or roll back on it
+(`host.sh`). The decision and the reasoning are in
+[ADR-0005](adr/0005-artifact-storage.md), amendment of 2026-10-03.
+
+What it is: no container on the host reaches the instance metadata service.
+compute-api is no exception; it reads the instance role from a file the host
+refreshes. Three pieces, all installed by `scripts/imds-lockdown.sh`:
+
+| Piece | What | Survives |
+|---|---|---|
+| `unify-compute-imds-firewall.service` | `iptables -t raw` PREROUTING DROP for 169.254.169.254 (ip6tables for `fd00:ec2::254`) | reboots (enabled, `Before=docker.service`); Docker restarts (`PartOf=docker.service` re-applies it) |
+| `unify-compute-api-credentials.timer` | every 2 min, IMDS's answer for the instance role → `/run/unify-compute/compute-api-aws/credentials.json` (tmpfs, uid 65532, 0400) | reboots (rewritten before Docker starts, then every 2 min) |
+| `docker-compose.imds.yml` in `COMPOSE_FILE` | compute-api mounts that directory read-only, `INSTANCE_ROLE_CREDENTIALS_FILE` | everything; it is a file in the compose directory |
+
+The fourth piece is Terraform: `http_put_response_hop_limit = 1` in the
+module, changed in place by `ModifyInstanceMetadataOptions`, with no
+stop/start.
+
+A fresh host gets all of it from user-data (`PHASE=files`, before the stack
+first starts). A running host gets it once over SSM. Per host, staging first,
+then production, in this order:
+
+```bash
+ID=i-06125c23285803d7a          # staging; production is i-07dd2f6d313a0dafd
+
+# 1. lock down. Takes the ops lock, installs the three pieces, recreates
+#    compute-api only (a few seconds of 502 on the API host; the site and the
+#    console are not touched), and proves from compute-api's network
+#    namespace that IMDS no longer answers.
+scripts/ssm-run.sh "$ID" scripts/imds-lockdown.sh "imds lockdown <env>" 300
+#    last line: IMDS_LOCKDOWN_DONE all
+
+# 2. prove it. Read-only.
+scripts/ssm-run.sh "$ID" scripts/release/check-imds.sh "check imds <env>" 120
+#    last line: CHECK_IMDS_OK. Every container "IMDS unreachable", the host's
+#    control "IMDS token", compute-api's mount, variable and file ok.
+
+# 3. hop limit 1. Read-only plans of this branch (-lock=false), taken while
+#    writing it: production 18 to add, 1 to change, 0 to destroy, the change
+#    being aws_instance.this metadata_options.http_put_response_hop_limit
+#    2 -> 1 and nothing else (the 18 are ADR-0005's, unapplied); staging 47
+#    to add, 2 to change, 0 to destroy, where aws_instance.this ALSO changes
+#    instance_type t4g.small -> t4g.medium (ADR-0010, unapplied), which IS a
+#    stop/start. No user_data diff in either. Read the plan anyway.
+terraform -chdir=deploy/aws/envs/<env> plan -out=<env>.tfplan
+terraform -chdir=deploy/aws/envs/<env> apply <env>.tfplan
+aws ec2 describe-instances --instance-ids "$ID" \
+  --query 'Reservations[].Instances[].MetadataOptions.HttpPutResponseHopLimit'   # → 1
+
+# 4. prove it again (step 2). It must still pass.
+```
+
+What to exercise on staging, beyond step 2:
+
+- `flock -w 900 /run/lock/unify-compute-ops.lock systemctl restart docker`
+  over SSM, wait for `docker compose ps` to settle, then step 2 again. This
+  is the Docker-restart path; a few minutes of 502 on staging.
+- A reboot of staging (`reboot` over SSM, under the lock), then step 2. This
+  is the boot-ordering path: the rule before Docker, the file before
+  compute-api.
+- `docker compose exec skypilot aws sts get-caller-identity` still names the
+  launch role, if SkyPilot is installed by then (its credentials come from
+  its own file, not IMDS).
+- Once ADR-0005's `.env` lines are on the host and a compute-api with
+  `awsv4.File` (this change or later) runs: compute-api's log has `aws
+  credentials from file`, and a job's artifact upload works.
+
+Order relative to other changes: lock a host down **before** adding
+ADR-0005's artifact settings to it, and release a compute-api built from
+this change or later before those settings are used. An older compute-api
+ignores `INSTANCE_ROLE_CREDENTIALS_FILE` and, with IMDS closed, has no AWS
+credentials at all. Step 1 warns if it finds that combination. The SkyPilot
+setup (above) may run before or after; both scripts only append their
+overlay to `COMPOSE_FILE`.
+
+If `check-imds.sh` ever fails on a locked-down host, the rule was removed
+behind the unit's back. Find out how before re-running step 1. That is what
+host.sh's refusal is for.
+
 ## Acceptance
 
 Staging is healthy when all of these hold, checked by `scripts/smoke.sh`:
@@ -324,7 +407,7 @@ OIDC, only inside the GitHub environment named by `environment`):
 | `deploy`: copy to ECR (release only) | `crane copy` GHCR → ECR fails, or what ECR then serves for the digest does not hash to it, its `sha256-<digest>` tag or ECR's `DescribeImages` names another digest, it lacks linux/arm64, or a platform manifest is missing. A digest already in ECR is verified, not copied again |
 | `deploy`: find the instance | not exactly one running instance tagged `Name=unify-compute-<env>` |
 | `deploy`: `status` | — (records the before state) |
-| `deploy`: cutover on the host (`scripts/release/host.sh` via `scripts/ssm-run.sh`) | see below |
+| `deploy`: cutover on the host (`scripts/release/host.sh` via `scripts/ssm-run.sh`) | the host has no IMDS lockdown, or its rule is missing ("IMDS lockdown" above); otherwise see below |
 | `deploy`: smoke (`scripts/release/smoke.sh`) | any probe fails |
 | `deploy`: served by AWS, production only | after `DNS_CUTOVER=done`: `compute.unifyai.us` does not resolve to the ALB or does not serve compute-api |
 | `deploy`: manifest artifact, last | — (this is what makes the digests eligible for production) |
@@ -423,7 +506,7 @@ Assumptions this pipeline makes; a mismatch is a variable at the top of
 |---|---|
 | GitHub environments `staging`, `production` | secret `AWS_DEPLOY_ROLE_ARN`; variables `PUBLIC_ORIGIN` (the site origin smoke probes), `API_ORIGIN` (compute-api's origin), `AWS_REGION` (default `us-east-1`); production also `DNS_CUTOVER` (`done` after the cutover) and optionally `ALB_DNS_NAME`. Both restricted to `main`. Required reviewers were wanted on production; GitHub refused them on this repository's plan (HTTP 422, 2026-10-02), so the release owner rule is the only gate |
 | Deploy role | trusts `token.actions.githubusercontent.com` with `sub` = `repo:FelixSphere@164092079/unify-compute@1364156790:environment:<env>` (this repo issues immutable OIDC subjects; see ADR-0009); may `ec2:DescribeInstances`, `ssm:SendCommand` on `AWS-RunShellScript` and on instances tagged for its env only, `ssm:GetCommandInvocation`; ECR push and read on `unify-compute-api` and `unify-compute-site` (the copy from GHCR) |
-| Instance | tag `Name=unify-compute-<env>`; SSM agent; `docker compose`, `flock`, `aws`, `curl` |
+| Instance | tag `Name=unify-compute-<env>`; SSM agent; `docker compose`, `flock`, `aws`, `curl`, `iptables`, `nsenter`; the IMDS lockdown (`/usr/local/sbin/unify-compute-imds-firewall`) |
 | Compose | `/opt/unify-compute/compose/docker-compose.yml` and `.env`, with the systemd unit's `WorkingDirectory` set to that directory; services `compute-api` (port 8080 on the host), `site`, `postgres` (user `unify`); the image keys `COMPUTE_API_IMAGE` and `SITE_IMAGE` |
 | Data volume | mounted at `/data`; `/data/releases` and `/data/backups` are created on first use |
 | SSM | `/unify-compute-<env>/backup_bucket` (bucket name). No registry credential: nothing reads `ghcr_pull_user` / `ghcr_pull_token` any more |

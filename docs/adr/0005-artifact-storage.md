@@ -1,7 +1,8 @@
 # ADR-0005 — Job artifacts live in our S3, uploaded by the run step, served by presigned URL
 
 - **Status:** Proposed
-- **Date:** 2026-09-21 (first draft), amended 2026-10-02
+- **Date:** 2026-09-21 (first draft), amended 2026-10-02 and 2026-10-03
+  (IMDS closed to containers; see the amendment at the end)
 - **Origin:** the first draft was written in the finetune worktree
   (`unify-compute-finetune`, uncommitted, for the reference fine-tuning
   run). Its storage decision — our S3, one bucket per environment,
@@ -142,11 +143,11 @@ SecureString, `scripts/staging-secrets.sh`). Without it, compute-api leaves
 uploads off and the artifact routes answer `501`. Rotating it invalidates
 the tokens of jobs running at that moment.
 
-The instance's `http_put_response_hop_limit` is 2 so that compute-api, in a
-container, can reach IMDSv2. Both instances already ran with 2 (the AL2023
-default). The module now says so explicitly. It also means **every container
-on the host can obtain the instance role**, including staging's console. See
-open question 3.
+The instance's `http_put_response_hop_limit` was 2 so that compute-api, in a
+container, could reach IMDSv2. That meant **every container on the host
+could obtain the instance role**, including staging's console. The
+amendment of 2026-10-03 closes IMDS to every container and hands compute-api
+the role as a file instead.
 
 ### Inputs
 
@@ -245,14 +246,101 @@ Longer retention is a product decision, not a default.
    script assumes the curl it installs. An image without curl uploads
    nothing and says so in the job log. Whether to refuse such images at
    submit is open.
-3. **Containers and the instance role.** With hop limit 2, staging's console
-   container (AGPL, third-party code) can obtain the instance role and read
-   every job's artifacts. It could already do that before this change, since
-   the limit was already 2, but now there is something worth reading.
-   Options: a `DOCKER-USER` iptables rule that drops 169.254.169.254 from
-   every container but compute-api, or moving the console off the host.
-   Production runs no console.
+3. ~~**Containers and the instance role.**~~ Resolved by the amendment of
+   2026-10-03 below: no container reaches IMDS; compute-api reads the role
+   from a file only it mounts.
 4. **Upload after the cap.** A job that hits `max_runtime_seconds` is torn
    down before it can upload. A grace period would bill the customer for it
    (it is run time), and the backend's cap handling (B16) would need to
    change. For now the advice is to leave headroom.
+5. **A role for compute-api alone** (added 2026-10-03). compute-api reads
+   the instance role, which can also read the stack's SSM secrets and assume
+   the SkyPilot launch role. A host-assumed role that grants only what
+   compute-api calls (assume the writer, read `jobs/*`) would narrow that.
+   It is role chaining, so the session is capped at an hour, and downloads
+   are signed with it, so a URL could expire sooner than the hour it
+   promises.
+
+## Amendment, 2026-10-03: no container reaches IMDS
+
+Operator-approved 2026-10-03, to land before the first customer job on
+staging. It resolves open question 3 above and the matching gap in
+[ADR-0010](0010-gpu-workers-in-the-shared-account.md).
+
+**Problem.** With hop limit 2, every container on a compute host could get
+the instance role from IMDS. That role may read every job's artifacts
+(`GetObject` under `jobs/*`), assume the artifacts writer, read the stack's
+SSM secrets and, on staging, assume the SkyPilot launch role. The containers
+are staging's console (AGPL, third-party code), Postgres, Redis, the site
+(Caddy) and the SkyPilot API server, and production's Postgres and site. Of
+these, only compute-api needs the role.
+
+**Decision.** IMDS is closed to every container, compute-api included, by
+two independent layers. compute-api gets the role from a file the host
+writes. The host keeps IMDS.
+
+1. **A host firewall rule.** `iptables -t raw -I PREROUTING -d
+   169.254.169.254/32 -j DROP`, plus the IPv6 endpoint `fd00:ec2::254` where
+   ip6tables works. (IMDS over IPv6 is disabled on both instances,
+   `HttpProtocolIpv6: disabled`, read while writing this.) PREROUTING sees every
+   packet that arrives on an interface, so it sees every container's packets,
+   whatever bridge they are on. It never sees what the host sends itself
+   (that goes through OUTPUT). A oneshot unit,
+   `unify-compute-imds-firewall.service`, installs the rule. It is ordered
+   `Before=docker.service`, wanted by it and `PartOf` it, so the rule is in
+   place before Docker starts a container at boot and is re-applied on every
+   Docker restart. It never removes the rule.
+2. **Hop limit 1** (`instance.tf`). The IMDSv2 token response dies at the
+   container boundary, so a container whose packets somehow got past the rule
+   still gets no token. AWS documents this as the setting that keeps
+   containers off IMDSv2. IMDSv1 is already off (`http_tokens = required`).
+3. **compute-api's credentials from a file.** A host timer,
+   `unify-compute-api-credentials.timer`, runs every two minutes. It copies
+   IMDS's answer for the instance role to
+   `/run/unify-compute/compute-api-aws/credentials.json`: tmpfs, owned by
+   compute-api's uid 65532, mode 0400. Only compute-api mounts that
+   directory, read-only, and `INSTANCE_ROLE_CREDENTIALS_FILE` points it
+   there (`awsv4.File`). This is the pattern ADR-0010 already uses for
+   SkyPilot's launch-role session.
+
+Delivery: `scripts/imds-lockdown.sh` installs all three host pieces and the
+compose overlay `docker-compose.imds.yml`. User-data runs it at first boot,
+before the stack starts. A running host gets it once over SSM. Every release
+and rollback (`scripts/release/host.sh`) refuses a host where the rule is
+missing. `scripts/release/check-imds.sh` proves the result on a host. It
+probes the token PUT from every running container's network namespace and
+expects no answer, using the host as the control. It also checks
+compute-api's mount, variable and file.
+
+**Why not the allow-list first proposed** (a `DOCKER-USER` rule letting only
+compute-api's address through, with the hop limit left at 2):
+
+- *Identifying compute-api by source address is spoofable.* On a shared
+  bridge, any container with `NET_RAW` can ARP-spoof compute-api's address,
+  and Docker grants `NET_RAW` by default. Matching on a bridge that only
+  compute-api joins would fix that, but only if compute-api's IMDS traffic
+  leaves through that bridge. compute-api also needs `default` (Postgres,
+  the console). On a container with two non-internal networks, Docker
+  picks the default route by an internal ordering (network name as the
+  tie-break, or `gw_priority` from Engine 28). A wrong pick fails closed,
+  but it would be a correctness bet on a daemon detail.
+- *It fails open.* With hop limit 2, losing the rule (a flush, or a daemon
+  that moves to its nftables backend, where `DOCKER-USER` does not exist)
+  silently reopens IMDS to every container. With this design, losing the
+  rule still leaves hop limit 1, and the next release refuses the host.
+- *No compute-api in host networking.* That would put it beside every port
+  on the host, and it would still have to be told apart from the host.
+
+**What it costs.** The timer is a dependency: if it stops, compute-api's
+credentials expire within about six hours, its artifact routes fail, and
+`check-imds.sh` reports the file as stale. compute-api still holds the whole
+instance role. A role scoped to compute-api's own calls is a separate change
+(open question 5 above).
+
+**Exercise on each host** (CI/CD agent, staging first; the order is in
+`docs/staging.md`, "IMDS lockdown"): `check-imds.sh` ends `CHECK_IMDS_OK` with
+every container `IMDS unreachable` and the host's control ok, both before and
+after the hop-limit apply. It must still pass after `systemctl restart
+docker`. CI runs the same scripts on a runner against a fake IMDS in a
+network namespace, including a Docker restart and a removed rule. It cannot
+show the hop limit.

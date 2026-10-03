@@ -65,6 +65,16 @@ account. Two consequences:
   (site `cd7077d3…`, still in ECR), so `mode=rollback` works on both.
   `DNS_CUTOVER=done`, and production's `PUBLIC_ORIGIN` is
   `https://compute.unifyai.us`.
+- **IMDS lockdown:** defined (ADR-0005, amendment of 2026-10-03;
+  `scripts/imds-lockdown.sh`), applied to **neither** host. Both run IMDS hop
+  limit 2 with no firewall unit, so every container on them can take the
+  instance role. Until a host is locked down, `release.yml` refuses to
+  release or roll back there (`host.sh`). The steps are in
+  `docs/staging.md`, "IMDS lockdown". Per host, staging first: the lockdown
+  over `scripts/ssm-run.sh` (`IMDS_LOCKDOWN_DONE all`), then
+  `scripts/release/check-imds.sh` (`CHECK_IMDS_OK`), then the Terraform
+  apply that sets hop limit 1, then `check-imds.sh` again. Update this line
+  when each host is done.
 - **Console:** production `app.unifyapi.ai` belongs to the UnifyAPI CI/CD agent.
   Staging runs its own console container from the same pinned image
   (`CONSOLE_IMAGE` in `deploy/compose/.env.example`), with a separate database.
@@ -118,6 +128,11 @@ account. Two consequences:
    it, stop.
 5. **Pricing goes out with the code that reads it.** Do not hot-edit
    `skus.json` on the instance.
+6. **A host without the IMDS lockdown is not released to.** `host.sh`
+   refuses it. The answer is `scripts/imds-lockdown.sh` over SSM, which is
+   idempotent and safe during an outage too, never a way around the check.
+   If the rule vanished from a host that had it, find out what removed it
+   first: that is a security incident, not a flake.
 
 ## Releasing
 
