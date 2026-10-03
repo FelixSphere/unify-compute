@@ -241,8 +241,7 @@ input[aria-invalid='true'] {
   color: var(--u-text);
 }
 
-/* Off-screen rather than display:none: some bots skip fields that are not
-   rendered. aria-hidden and tabindex=-1 keep it from people. */
+/* The honeypot partial (dashboard/vite.config.ts says why off-screen). */
 .hp {
   position: absolute;
   left: -10000px;

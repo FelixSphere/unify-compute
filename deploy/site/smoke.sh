@@ -179,15 +179,18 @@ for app_host in app.compute.unifyai.us app.staging.compute.unifyai.us; do
       || { echo "FAIL $app_host $path: page script missing"; fail=1; }
   done
 
-  # Sign up carries the honeypot the spec names (`website`, ADR-0011 D5) in
-  # place of Turnstile, hidden from people and from screen readers.
-  CURL_ARGS="-H Host:$app_host" check /signup 200
-  grep -qE '<div class="hp" aria-hidden="true">' "$tmp/body" \
-    || { echo "FAIL $app_host /signup: honeypot wrapper missing or not aria-hidden"; fail=1; }
-  grep -qE '<input id="website" name="website" type="text" tabindex="-1" autocomplete="off"' "$tmp/body" \
-    || { echo "FAIL $app_host /signup: honeypot field missing or reachable by Tab"; fail=1; }
-  grep -q 'challenges.cloudflare.com' "$tmp/body" \
-    && { echo "FAIL $app_host /signup: Turnstile is off (ADR-0011 D5)"; fail=1; }
+  # Every form compute-api checks the honeypot on (`website`: signup, resend,
+  # login, forgot; ADR-0011 D5) carries it in place of Turnstile, hidden from
+  # people and from screen readers.
+  for path in /login /verify /forgot-password /signup; do
+    check "$path" 200
+    grep -qE '<div class="hp" aria-hidden="true">' "$tmp/body" \
+      || { echo "FAIL $app_host $path: honeypot wrapper missing or not aria-hidden"; fail=1; }
+    grep -qE '<input id="website" name="website" type="text" tabindex="-1" autocomplete="off"' "$tmp/body" \
+      || { echo "FAIL $app_host $path: honeypot field missing or reachable by Tab"; fail=1; }
+    grep -q 'challenges.cloudflare.com' "$tmp/body" \
+      && { echo "FAIL $app_host $path: Turnstile is off (ADR-0011 D5)"; fail=1; }
+  done
   [ "$(grep -o 'id="password_confirm"' "$tmp/body" | wc -l)" -eq 1 ] \
     || { echo "FAIL $app_host /signup: no Confirm password field"; fail=1; }
   [ "$(grep -o 'class="toggle"' "$tmp/body" | wc -l)" -eq 2 ] \

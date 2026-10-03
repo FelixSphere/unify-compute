@@ -9,6 +9,15 @@ const PENDING_EMAIL = 'uc_pending_email';
 const MIN_PASSWORD = 12;
 const GENERIC = "Something went wrong on our side. Try again in a minute.";
 
+// Same wording as compute-api's own 429 message (internal/dashboard).
+function humanWait(secs: number): string {
+  if (secs < 60) return `${secs} seconds`;
+  if (secs < 120) return 'a minute';
+  return `${Math.ceil(secs / 60)} minutes`;
+}
+
+const honeypot = () => input('website')?.value ?? '';
+
 async function call<T>(method: string, path: string, body?: unknown, csrf?: string): Promise<Result<T>> {
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -30,9 +39,9 @@ async function call<T>(method: string, path: string, body?: unknown, csrf?: stri
   const e = json?.error;
   if (e && typeof e.code === 'string') {
     let message = typeof e.message === 'string' && e.message ? e.message : GENERIC;
-    const retry = res.headers.get('Retry-After');
-    if (res.status === 429 && retry && /^\d+$/.test(retry) && !/second|minute/.test(message)) {
-      message += ` Try again in ${retry} seconds.`;
+    const retry = Number(res.headers.get('Retry-After'));
+    if (res.status === 429 && retry > 0 && !/second|minute|hour/.test(message)) {
+      message += ` Try again in ${humanWait(retry)}.`;
     }
     return { ok: false, error: { status: res.status, code: e.code, message, param: e.param || undefined } };
   }
@@ -234,7 +243,7 @@ const pages: Record<string, (form: HTMLFormElement | null) => void> = {
         email,
         password: input('password')!.value,
         password_confirm: input('password_confirm')!.value,
-        website: input('website')?.value ?? '',
+        website: honeypot(),
       });
       if (!r.ok) return showApiError(r.error);
       store.set(email);
@@ -250,7 +259,7 @@ const pages: Record<string, (form: HTMLFormElement | null) => void> = {
       if (email && !password) setFieldError('password', 'Enter your password.');
       if (!email || !password) return focusFirstInvalid(form);
       busy(form, true);
-      const r = await call('POST', '/login', { email, password });
+      const r = await call('POST', '/login', { email, password, website: honeypot() });
       if (r.ok) {
         store.clear();
         location.assign('/');
@@ -281,6 +290,8 @@ const pages: Record<string, (form: HTMLFormElement | null) => void> = {
       }
     }
     const code = input('code')!;
+    // No maxlength on the field: it would cut "123 456", pasted from the
+    // email, to "123 45" before the space is dropped here.
     code.addEventListener('input', () => {
       const digits = code.value.replace(/\D/g, '').slice(0, 6);
       if (digits !== code.value) code.value = digits;
@@ -327,7 +338,7 @@ const pages: Record<string, (form: HTMLFormElement | null) => void> = {
         return;
       }
       resend.disabled = true;
-      const r = await call('POST', '/verify/resend', { email });
+      const r = await call('POST', '/verify/resend', { email, website: honeypot() });
       if (!r.ok) {
         resend.disabled = false;
         if (r.error.param === 'email') reveal();
@@ -348,7 +359,7 @@ const pages: Record<string, (form: HTMLFormElement | null) => void> = {
       const email = checkEmail();
       if (!email) return focusFirstInvalid(form);
       busy(form, true);
-      const r = await call('POST', '/password/forgot', { email });
+      const r = await call('POST', '/password/forgot', { email, website: honeypot() });
       if (!r.ok) return showApiError(r.error);
       const sentEmail = $('sent-email');
       if (sentEmail) sentEmail.textContent = email;

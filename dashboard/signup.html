@@ -35,12 +35,7 @@
             </div>
             <p class="field-error" id="password_confirm-error" hidden></p>
           </div>
-          <!-- Honeypot (ADR-0011 D5: no Turnstile). Off-screen, out of the tab
-               order and the accessibility tree; a person never fills it. -->
-          <div class="hp" aria-hidden="true">
-            <label for="website">Website</label>
-            <input id="website" name="website" type="text" tabindex="-1" autocomplete="off" />
-          </div>
+          <!-- @honeypot -->
           <button class="primary" type="submit">Sign up</button>
         </form>
         <p class="legal">By signing up you agree to the <a href="https://compute.unifyai.us/terms">Terms</a> and <a href="https://compute.unifyai.us/privacy">Privacy Policy</a>.</p>

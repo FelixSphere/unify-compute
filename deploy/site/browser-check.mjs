@@ -343,7 +343,7 @@ listeners.add((msg) => {
       {
         requestId,
         responseCode: stub.status,
-        responseHeaders: [{ name: 'Content-Type', value: 'application/json' }],
+        responseHeaders: [{ name: 'Content-Type', value: 'application/json' }, ...(stub.headers ?? [])],
         body: Buffer.from(JSON.stringify(stub.body ?? {})).toString('base64'),
       },
       sessionId,
@@ -367,6 +367,12 @@ const text = (sel) => evaluate(`document.querySelector(${js(sel)})?.textContent 
 const isShown = (sel) =>
   evaluate(`(() => { const el = document.querySelector(${js(sel)}); return !!el && !el.closest('[hidden]') && el.getClientRects().length > 0; })()`);
 const DANGER = 'rgb(217, 45, 32)';
+// The session object login, verify and /me answer (A4's dashboard-openapi.json).
+const SESSION = {
+  user: { email: 'person@example.com', created_at: 1791000000 },
+  account: { id: 1, status: 'active', compute_enabled: false },
+  csrf_token: 'csrf-1',
+};
 const err = (code, message, param, status = 400, type = 'invalid_request') => ({
   status,
   body: { error: { type, code, message, ...(param ? { param } : {}) } },
@@ -550,8 +556,13 @@ async function appChecks() {
   );
   stubs = {
     'POST /verify': err('invalid_code', 'That code is not valid. Check the latest email or request a new code.'),
-    'POST /verify/resend': { status: 202, body: {} },
+    'POST /verify/resend': { status: 202, body: { status: 'verification_sent' } },
   };
+  // Typed through the input pipeline, so maxlength and the like apply: a
+  // code pasted as "123 456" must arrive as six digits.
+  await evaluate(`document.querySelector('#code').focus()`);
+  await page('Input.insertText', { text: '123 456' });
+  check((await evaluate(`document.querySelector('#code').value`)) === '123456', '/verify takes "123 456" as 6 digits', `/verify code field holds "${await evaluate(`document.querySelector('#code').value`)}" after "123 456"`);
   await setValue('#code', '12a3456');
   check((await evaluate(`document.querySelector('#code').value`)) === '123456', '/verify keeps digits only', '/verify code field accepts non-digits');
   await click('button[type=submit]');
@@ -561,16 +572,13 @@ async function appChecks() {
   await waitFor(`document.querySelector('#status').textContent.length > 0`, 'resend confirmation');
   const resend = apiCalls.filter((c) => c.path === '/verify/resend').at(-1);
   check(
-    resend?.body?.email === 'person@example.com' && (await evaluate(`document.querySelector('#resend').disabled`)),
-    'resend posts the address and waits before allowing another',
+    resend?.body?.email === 'person@example.com' && resend.body.website === '' && (await evaluate(`document.querySelector('#resend').disabled`)),
+    'resend posts the address and the empty honeypot, and waits before allowing another',
     `resend: ${JSON.stringify(resend?.body)}`,
   );
   stubs = {
-    'POST /verify': { status: 200, body: { user: { email: 'person@example.com' }, account: { id: 1 }, csrf_token: 'csrf-1' } },
-    'GET /me': {
-      status: 200,
-      body: { user: { email: 'person@example.com', created_at: 0 }, account: { id: 1, status: 'active', compute_enabled: false }, csrf_token: 'csrf-1' },
-    },
+    'POST /verify': { status: 200, body: SESSION },
+    'GET /me': { status: 200, body: SESSION },
     'POST /logout': { status: 204 },
   };
   await click('button[type=submit]');
@@ -607,18 +615,36 @@ async function appChecks() {
     'form-level error box border is not --u-danger',
   );
   await shot('login-error');
+  const login = apiCalls.filter((c) => c.path === '/login').at(-1);
+  check(
+    login?.body?.email === 'person@example.com' && login.body.website === '' && !('turnstile_token' in login.body),
+    'POST /login body: email, password, empty website honeypot',
+    `POST /login body: ${JSON.stringify(login?.body)}`,
+  );
+  // Keyboard only: Enter in the password field submits the form.
   stubs = { 'POST /login': err('email_unverified', 'Verify your email address before you log in.', null, 403, 'authentication_error') };
-  await click('button[type=submit]');
+  await evaluate(`document.querySelector('#password').focus()`);
+  for (const type of ['keyDown', 'keyUp'])
+    await page('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, ...(type === 'keyDown' ? { text: '\r' } : {}) });
   await waitFor(`document.querySelector('#form-error a')?.getAttribute('href') === '/verify'`, 'email_unverified to link to /verify');
-  ok('email_unverified links to /verify');
+  ok('Enter submits /login; email_unverified links to /verify');
 
   // --- Forgot password
   await appLoad('/forgot-password');
-  stubs = { 'POST /password/forgot': { status: 202, body: {} } };
+  // A 429 shows the wait from Retry-After when the message does not say it.
+  stubs = { 'POST /password/forgot': { ...err('rate_limited', 'Too many attempts.', null, 429, 'rate_limited'), headers: [{ name: 'Retry-After', value: '600' }] } };
   await setValue('#email', 'person@example.com');
   await click('button[type=submit]');
+  await formErrorShown('Too many attempts. Try again in 10 minutes.', '429 with Retry-After');
+  stubs = { 'POST /password/forgot': { status: 202, body: { status: 'reset_requested' } } };
+  await click('button[type=submit]');
   await waitFor(`!document.querySelector('#sent').hidden && document.querySelector('#sent-email').textContent === 'person@example.com'`, 'forgot-password confirmation');
-  ok('/forgot-password confirms without saying whether the account exists');
+  const forgot = apiCalls.filter((c) => c.path === '/password/forgot').at(-1);
+  check(
+    forgot?.body?.email === 'person@example.com' && forgot.body.website === '',
+    '/forgot-password confirms without saying whether the account exists; sends the empty honeypot',
+    `POST /password/forgot body: ${JSON.stringify(forgot?.body)}`,
+  );
 
   // --- Reset password: the token stays in the fragment, then in memory.
   const TOKEN = 'rT0k-3n_fragment-only-7f3a9c';
@@ -639,7 +665,7 @@ async function appChecks() {
     'invalid_token offers a new link',
     'invalid_token has no link to /forgot-password',
   );
-  stubs = { 'POST /password/reset': { status: 200, body: {} } };
+  stubs = { 'POST /password/reset': { status: 200, body: { status: 'password_reset' } } };
   await click('button[type=submit]');
   await waitFor(`!document.querySelector('#done').hidden`, 'reset confirmation');
   await shot('reset-done');

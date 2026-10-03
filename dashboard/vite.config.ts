@@ -49,6 +49,14 @@ const partials: Record<string, (arg: string) => string> = {
   'form-error': () => `<div class="form-error" id="form-error" role="alert" tabindex="-1" hidden>${ALERT}<p></p></div>`,
   toggle: (id) =>
     `<button type="button" class="toggle" aria-controls="${id}" aria-label="Show password" aria-pressed="false">${EYE}${EYE_OFF}</button>`,
+  // The honeypot the server checks on signup, resend, login and forgot
+  // (ADR-0011 D5: no Turnstile). Off-screen rather than display:none, since
+  // some bots skip fields that are not rendered; aria-hidden and tabindex=-1
+  // keep it from people and screen readers.
+  honeypot: () => `<div class="hp" aria-hidden="true">
+            <label for="website">Website</label>
+            <input id="website" name="website" type="text" tabindex="-1" autocomplete="off" />
+          </div>`,
   below: () => `<p class="below">© ${new Date().getFullYear()} UnifyAI · <a href="https://compute.unifyai.us/privacy">Privacy</a> · <a href="https://compute.unifyai.us/terms">Terms</a></p>`,
 };
 
