@@ -137,4 +137,5 @@ SSM, SecureString: `/unify-compute-staging/console_root_password`,
 - Which security group and subnet a worker gets, and that `/down` terminates it.
   That needs the quota.
 - That the GPU budget alerts anyone. `deploy/aws/shared/gpu-budget` is not
-  applied, because it requires an alert email and none was given.
+  applied, because it requires an alert email and none was given. The
+  operator has since set the limit to USD 50/month (not 300).

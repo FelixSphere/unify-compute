@@ -105,8 +105,9 @@ account. Two consequences:
   (`/unify-compute-staging/test_api_key`) is accepted and held, then fails
   `capacity_exhausted` (AWS `VcpuLimitExceeded`, quota 0). Open: SkyPilot
   attempted `CreateSecurityGroup` and was refused (by design); check which
-  group the first real worker gets. The GPU budget is not applied (no alert
-  email).
+  group the first real worker gets. The GPU budget is not applied: there is no alert
+  email, and the stack refuses a null one. The operator set it to USD 50/month,
+  not 300. The operator handles the quota case; agents do not request quota.
 - **Console:** production `app.unifyapi.ai` belongs to the UnifyAPI CI/CD agent.
   Staging runs its own console container, the UnifyAPI CI/CD trial build
   `e3cef17…@sha256:c48c638b…` (#47; bridge routes on, `compute_*` tables),

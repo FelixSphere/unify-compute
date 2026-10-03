@@ -148,7 +148,9 @@ destroyed; SkyPilot set up over SSM, ending `SKYPILOT_SETUP_DONE all`). The only
 step left is step 0, the quota (request `d81c8fcd…`, CASE_OPENED). A
 staging job fails today with `capacity_exhausted`, and AWS says
 `VcpuLimitExceeded … limit of 0`. The budget (step 3) is not applied: it
-requires `alert_email`, and none has been given. Record:
+requires `alert_email`, and none has been given. The operator set it to **USD 50/month**
+(2026-10-03, "start small"), not the stack's default 300, so apply it with
+`-var monthly_limit_usd=50`. Record:
 `deploy/releases/2026-10-03-staging-gpu-ready.md`. The design and the isolation argument are in
 [ADR-0010](adr/0010-gpu-workers-in-the-shared-account.md).
 
