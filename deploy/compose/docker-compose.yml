@@ -6,8 +6,10 @@
 #
 # Staging and local development add docker-compose.console.yml, which brings
 # the UnifyAPI console (AGPL fork) and Redis. The two deployables share
-# nothing but HTTP (ADR-0002). The instance selects the files with
-# COMPOSE_FILE in its .env; so does .env.example locally.
+# nothing but HTTP (ADR-0002). Hosts with GPU workers also add
+# docker-compose.skypilot.yml, the SkyPilot API server (ADR-0010). The
+# instance selects the files with COMPOSE_FILE in its .env; so does
+# .env.example locally.
 #
 # Two files rather than a compose profile: whether compose enforces a
 # `${CONSOLE_IMAGE:?}` guard on a service in an inactive profile has varied
@@ -73,16 +75,3 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-
-  # SkyPilot API server. Off by default (compose profile) until compute-api has
-  # a backend to drive it. The image and tag must be verified against the
-  # FelixSphere/skypilot pinned release before this profile is enabled; the
-  # value below is a placeholder that `docker compose config` accepts.
-  skypilot:
-    profiles: ["skypilot"]
-    image: ${SKYPILOT_IMAGE:-berkeleyskypilot/skypilot:0.13.0}
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:46580:46580"
-    volumes:
-      - ${DATA_DIR:-./data}/skypilot:/root/.sky

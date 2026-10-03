@@ -40,3 +40,9 @@ variable "ami_id" {
   type        = string
   default     = "ami-065b1b834d2a83a7a"
 }
+
+variable "gpu_alert_email" {
+  description = "Where the GPU reaper's reports go. Null keeps them in CloudWatch Logs only; set it before the first GPU launch (the address has to confirm the SNS subscription)."
+  type        = string
+  default     = null
+}

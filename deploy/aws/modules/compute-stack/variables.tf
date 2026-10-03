@@ -186,3 +186,23 @@ variable "ssm_bridge_secret" {
   type    = string
   default = null
 }
+
+variable "skypilot" {
+  description = <<-EOT
+    The SkyPilot API server on this host, from modules/gpu-workers through the
+    environment root (ADR-0010). Null means none: no overlay, no launch-role
+    permission, IMDS left as it is. Set, it adds docker-compose.skypilot.yml to
+    the host, lets the instance role assume launch_role_arn, and lowers the
+    IMDS hop limit to 1 so that no container can reach the instance role.
+  EOT
+  type = object({
+    config          = string
+    launch_role_arn = string
+  })
+  default = null
+}
+
+variable "ssm_skypilot_admin_password" {
+  type    = string
+  default = null
+}

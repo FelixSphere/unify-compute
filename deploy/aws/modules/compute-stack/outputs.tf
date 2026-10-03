@@ -34,3 +34,18 @@ output "alb_zone_id" {
 output "data_volume_id" {
   value = aws_ebs_volume.data.id
 }
+
+output "instance_role_arn" {
+  description = "The only principal the GPU workers' launch role trusts (modules/gpu-workers)."
+  value       = aws_iam_role.instance.arn
+}
+
+output "public_ip" {
+  description = "The Elastic IP. The only address GPU workers admit SSH from."
+  value       = aws_eip.instance.public_ip
+}
+
+output "skypilot_host_setup" {
+  description = "The SkyPilot setup payload for scripts/ssm-run.sh, for a host that booted before SkyPilot was enabled. Empty when it is not."
+  value       = local.skypilot_host_setup
+}

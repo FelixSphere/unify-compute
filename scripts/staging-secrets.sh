@@ -4,8 +4,9 @@
 #   scripts/staging-secrets.sh [--env staging|production] [--prefix /<name>] [--force]
 #
 # --env picks the prefix and the parameter set: staging runs its own console
-# and needs four; production runs no console and no Redis and keeps the
-# bridge dark (bridge_enabled = false), so it needs only postgres_password.
+# and SkyPilot and needs five; production runs no console and no Redis and
+# keeps the bridge dark (bridge_enabled = false), so it needs only
+# postgres_password.
 # Creating a production bridge_secret here would be a secret nothing reads,
 # waiting to be mistaken for the real one.
 #
@@ -46,7 +47,11 @@ done
 # which are derived from the stack's name (unify-compute-<env>). The IAM read
 # policy is scoped to the same prefix.
 case "$ENV_NAME" in
-  staging)    KEYS="postgres_password redis_password session_secret bridge_secret" ;;
+  # skypilot_admin_password: the SkyPilot API server's basic-auth admin
+  # (deploy/compose/docker-compose.skypilot.yml), used once on the host to
+  # mint compute-api's service-account token. Production adds it when
+  # gpu_workers_enabled is turned on (ADR-0010).
+  staging)    KEYS="postgres_password redis_password session_secret bridge_secret skypilot_admin_password" ;;
   production) KEYS="postgres_password" ;;
   *) echo "unknown --env: $ENV_NAME (staging or production)" >&2; exit 2 ;;
 esac

@@ -167,6 +167,17 @@ ${postgres_init_console}
 SQL
 %{ endif ~}
 
+%{ if skypilot_enabled ~}
+# The SkyPilot API server (ADR-0010): the overlay, its config, the launch-role
+# credential refresher and the admin password, before the stack first starts;
+# the compute-api service-account token once SkyPilot answers. The same
+# script a host that predates it gets over SSM.
+cat >/opt/unify-compute/skypilot-setup.sh <<'SKYPILOT_SETUP'
+${skypilot_host_setup}
+SKYPILOT_SETUP
+PHASE=files sh /opt/unify-compute/skypilot-setup.sh
+%{ endif ~}
+
 cat >/etc/systemd/system/unify-compute.service <<'UNIT'
 [Unit]
 Description=unify-compute ${environment} stack
@@ -187,4 +198,7 @@ UNIT
 
 systemctl daemon-reload
 systemctl enable --now unify-compute.service
+%{ if skypilot_enabled ~}
+PHASE=token sh /opt/unify-compute/skypilot-setup.sh
+%{ endif ~}
 echo "${name} bootstrap complete"

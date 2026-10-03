@@ -37,6 +37,23 @@ locals {
   ssm_session_secret    = coalesce(var.ssm_session_secret, "${local.ssm_prefix}/session_secret")
   ssm_bridge_secret     = coalesce(var.ssm_bridge_secret, "${local.ssm_prefix}/bridge_secret")
 
+  skypilot_enabled            = var.skypilot != null
+  ssm_skypilot_admin_password = coalesce(var.ssm_skypilot_admin_password, "${local.ssm_prefix}/skypilot_admin_password")
+
+  # scripts/skypilot-host-setup.sh with its inputs prepended, as release.yml
+  # does for host.sh. user-data runs it at first boot; on a host that booted
+  # before it existed, the same text is sent once over SSM (docs/staging.md).
+  # No secrets: the script reads the admin password from SSM on the host.
+  skypilot_host_setup = local.skypilot_enabled ? join("\n", [
+    "ENV_NAME='${var.environment}'",
+    "REGION='${var.region}'",
+    "LAUNCH_ROLE_ARN='${var.skypilot.launch_role_arn}'",
+    "SSM_ADMIN_PASSWORD='${local.ssm_skypilot_admin_password}'",
+    "OVERLAY_B64='${base64encode(file("${local.compose_dir}/docker-compose.skypilot.yml"))}'",
+    "SKY_CONFIG_B64='${base64encode(var.skypilot.config)}'",
+    file("${path.module}/../../../../scripts/skypilot-host-setup.sh"),
+  ]) : ""
+
   compose_dir = "${path.module}/../../../compose"
 
   # The runtime registry (deploy/aws/shared/ecr). Our images are pulled from
@@ -92,6 +109,18 @@ data "aws_iam_policy_document" "secrets" {
       "ecr:BatchCheckLayerAvailability",
     ]
     resources = [for r in local.ecr_repositories : "arn:aws:ecr:${var.region}:${data.aws_caller_identity.current.account_id}:repository/${r}"]
+  }
+
+  # The host assumes the SkyPilot launch role and hands the session to the
+  # SkyPilot container alone (scripts/skypilot-host-setup.sh). The launch
+  # role's trust policy names this role and nothing else.
+  dynamic "statement" {
+    for_each = local.skypilot_enabled ? [var.skypilot.launch_role_arn] : []
+    content {
+      sid       = "AssumeTheSkyPilotLaunchRole"
+      actions   = ["sts:AssumeRole"]
+      resources = [statement.value]
+    }
   }
 
   statement {
@@ -158,6 +187,8 @@ locals {
     ssm_redis_password    = local.ssm_redis_password
     ssm_session_secret    = local.ssm_session_secret
     ssm_bridge_secret     = local.ssm_bridge_secret
+    skypilot_enabled      = local.skypilot_enabled
+    skypilot_host_setup   = local.skypilot_host_setup
   })
 }
 
@@ -172,7 +203,12 @@ resource "aws_instance" "this" {
   # only decides what an explicit `-replace` does with it: render it fresh.
   user_data_replace_on_change = true
 
-  user_data = local.user_data
+  # Gzipped when SkyPilot is on: the setup script and its embedded files take
+  # the rendered script past EC2's 16 KB, and cloud-init decompresses gzip
+  # user data itself. Plain otherwise, so a stack without SkyPilot renders
+  # exactly what it always has.
+  user_data        = local.skypilot_enabled ? null : local.user_data
+  user_data_base64 = local.skypilot_enabled ? base64gzip(local.user_data) : null
 
   root_block_device {
     volume_size = 16
@@ -182,6 +218,13 @@ resource "aws_instance" "this" {
 
   metadata_options {
     http_tokens = "required" # IMDSv2 only
+    # 1 when SkyPilot runs here: an IMDSv2 token response then cannot cross
+    # the extra hop into a bridge-networked container, so no container (the
+    # console included) can obtain the instance role, and with it the right
+    # to assume the launch role. Host processes are unaffected. Null leaves
+    # the AMI's default (2 on AL2023), so a stack without SkyPilot plans no
+    # change. Changing it is an in-place ModifyInstanceMetadataOptions.
+    http_put_response_hop_limit = local.skypilot_enabled ? 1 : null
   }
 
   # Name and Project are what the GitHub deploy roles match on
@@ -210,7 +253,7 @@ resource "aws_instance" "this" {
     #      mounted filesystem otherwise);
     #   3. terraform apply -replace='module.stack.aws_instance.this'
     # and in production only after the same replace has been run on staging.
-    ignore_changes = [user_data]
+    ignore_changes = [user_data, user_data_base64]
 
     precondition {
       condition     = var.name == "unify-compute-${var.environment}"
@@ -236,8 +279,10 @@ resource "aws_instance" "this" {
     # EC2 rejects user data over 16 KB, but only at apply, after the plan
     # looked fine. The compose files are embedded verbatim, so growing them
     # grows this; staging rendered at ~12 KB on 2026-10-02.
+    # Gzipped, the limit applies to the compressed bytes: 16384 raw is 21848
+    # characters of base64.
     precondition {
-      condition     = length(local.user_data) <= 16384
+      condition     = local.skypilot_enabled ? length(base64gzip(local.user_data)) <= 21848 : length(local.user_data) <= 16384
       error_message = "Rendered user_data exceeds EC2's 16 KB limit; trim the template or the embedded compose files."
     }
   }

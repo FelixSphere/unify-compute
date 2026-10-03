@@ -22,14 +22,17 @@ image: ## build the compute-api container
 
 # Validates the compose files with placeholder values so a malformed file
 # fails here rather than on an instance whose boot then silently does nothing.
-# Both shapes: production's (base file alone, which must not need any console
-# variable) and staging's (base + console overlay, plus the skypilot profile).
+# Every shape a host runs: production's (base file alone, which must not need
+# any console or SkyPilot variable), staging's (base + console + SkyPilot), and
+# production with SkyPilot once gpu_workers_enabled (base + SkyPilot).
 compose-config:
 	cd $(COMPOSE_DIR) && COMPOSE_FILE= COMPUTE_API_IMAGE=ci SITE_IMAGE=ci POSTGRES_PASSWORD=ci \
 		docker compose -f docker-compose.yml config --quiet
 	cd $(COMPOSE_DIR) && COMPOSE_FILE= COMPUTE_API_IMAGE=ci SITE_IMAGE=ci POSTGRES_PASSWORD=ci \
-		CONSOLE_IMAGE=ci REDIS_PASSWORD=ci SESSION_SECRET=ci \
-		docker compose -f docker-compose.yml -f docker-compose.console.yml --profile skypilot config --quiet
+		CONSOLE_IMAGE=ci REDIS_PASSWORD=ci SESSION_SECRET=ci SKYPILOT_ADMIN_PASSWORD=ci \
+		docker compose -f docker-compose.yml -f docker-compose.console.yml -f docker-compose.skypilot.yml config --quiet
+	cd $(COMPOSE_DIR) && COMPOSE_FILE= COMPUTE_API_IMAGE=ci SITE_IMAGE=ci POSTGRES_PASSWORD=ci SKYPILOT_ADMIN_PASSWORD=ci \
+		docker compose -f docker-compose.yml -f docker-compose.skypilot.yml config --quiet
 
 tf-fmt:
 	terraform -chdir=$(TF_ROOT) fmt -check -diff -recursive
