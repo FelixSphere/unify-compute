@@ -2,11 +2,13 @@ package dashboard
 
 import (
 	"context"
+	"encoding/csv"
 	"errors"
 	"fmt"
 	"math/big"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/FelixSphere/unify-compute/compute-api/internal/accounts"
@@ -44,6 +46,7 @@ type JobRoutes interface {
 // Ledger is what /transactions and /usage read (billing.Local).
 type Ledger interface {
 	History(ctx context.Context, accountID int64, after string, limit int) (billing.HistoryPage, error)
+	HistoryFiltered(ctx context.Context, accountID int64, f billing.HistoryFilter) (billing.HistoryPage, error)
 	Usage(ctx context.Context, accountID int64, from, to time.Time) ([]billing.SKUUsage, error)
 	UsageByDay(ctx context.Context, accountID int64, from, to time.Time) ([]billing.DayUsage, error)
 	UsageByKey(ctx context.Context, accountID int64, from, to time.Time) ([]billing.KeyUsage, error)
@@ -174,7 +177,15 @@ func (h *Handler) transactions(w http.ResponseWriter, r *http.Request, _ account
 		}
 		limit = n
 	}
-	page, err := h.ledger.History(r.Context(), u.AccountID, q.Get("after"), limit)
+	kinds := q["kind"]
+	for _, k := range kinds {
+		if !billing.ValidKind(k) {
+			writeError(w, http.StatusBadRequest, "invalid_request", "invalid_kind",
+				"kind must be one of "+strings.Join(billing.Kinds, ", ")+".", "kind")
+			return
+		}
+	}
+	page, err := h.ledger.HistoryFiltered(r.Context(), u.AccountID, billing.HistoryFilter{After: q.Get("after"), Limit: limit, Kinds: kinds})
 	if errors.Is(err, billing.ErrInvalidCursor) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "invalid_cursor", "after must be the id of an entry in your balance history.", "after")
 		return
@@ -221,7 +232,9 @@ type keyUsageView struct {
 
 type usageView struct {
 	Object     string         `json:"object"`
-	Month      string         `json:"month"`
+	Month      string         `json:"month,omitempty"`
+	From       string         `json:"from"`
+	To         string         `json:"to"`
 	Currency   string         `json:"currency"`
 	Jobs       int64          `json:"jobs"`
 	GPUSeconds int64          `json:"gpu_seconds"`
@@ -247,20 +260,65 @@ type jobUsageView struct {
 	USD        string `json:"usd"`
 }
 
-// month reads ?month=YYYY-MM (absent: the current UTC month) and returns the
-// first instant of that month, or writes invalid_month and returns false.
-func (h *Handler) month(w http.ResponseWriter, r *http.Request) (time.Time, bool) {
-	m := r.URL.Query().Get("month")
-	if m == "" {
+// maxPeriodDays bounds a from/to range: a year and a day, so a leap year
+// still fits in one request.
+const maxPeriodDays = 366
+
+// period is the usage window a request asks for: ?month=YYYY-MM (absent:
+// the current UTC month), or ?from=YYYY-MM-DD&to=YYYY-MM-DD, both inclusive
+// UTC dates. It returns the half-open [from, to) and, for a calendar month,
+// its YYYY-MM label; on a bad request it writes the error and returns false.
+type period struct {
+	From, To time.Time
+	Month    string
+}
+
+func (h *Handler) period(w http.ResponseWriter, r *http.Request) (period, bool) {
+	q := r.URL.Query()
+	m, from, to := q.Get("month"), q.Get("from"), q.Get("to")
+	switch {
+	case from != "" || to != "":
+		if m != "" {
+			writeError(w, http.StatusBadRequest, "invalid_request", "invalid_period", "Give month, or from and to, not both.", "month")
+			return period{}, false
+		}
+		f, err1 := time.Parse("2006-01-02", from)
+		t, err2 := time.Parse("2006-01-02", to)
+		if err1 != nil || from == "" {
+			writeError(w, http.StatusBadRequest, "invalid_request", "invalid_period", "from must be a UTC date, YYYY-MM-DD.", "from")
+			return period{}, false
+		}
+		if err2 != nil || to == "" {
+			writeError(w, http.StatusBadRequest, "invalid_request", "invalid_period", "to must be a UTC date, YYYY-MM-DD.", "to")
+			return period{}, false
+		}
+		if t.Before(f) {
+			writeError(w, http.StatusBadRequest, "invalid_request", "invalid_period", "to must not be before from.", "to")
+			return period{}, false
+		}
+		if t.Sub(f) >= maxPeriodDays*24*time.Hour {
+			writeError(w, http.StatusBadRequest, "invalid_request", "invalid_period",
+				fmt.Sprintf("from and to may span at most %d days.", maxPeriodDays), "to")
+			return period{}, false
+		}
+		return period{From: f, To: t.AddDate(0, 0, 1)}, true
+	case m == "":
 		now := h.now().UTC()
-		return time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC), true
+		f := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+		return period{From: f, To: f.AddDate(0, 1, 0), Month: f.Format("2006-01")}, true
+	default:
+		f, err := time.Parse("2006-01", m)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "invalid_month", "month must be a UTC calendar month, YYYY-MM.", "month")
+			return period{}, false
+		}
+		return period{From: f, To: f.AddDate(0, 1, 0), Month: m}, true
 	}
-	t, err := time.Parse("2006-01", m)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "invalid_month", "month must be a UTC calendar month, YYYY-MM.", "month")
-		return time.Time{}, false
-	}
-	return t, true
+}
+
+// dates renders a period's inclusive from/to for a response.
+func (p period) dates() (string, string) {
+	return p.From.Format("2006-01-02"), p.To.AddDate(0, 0, -1).Format("2006-01-02")
 }
 
 // limit reads ?limit= with the history defaults, or writes invalid_limit.
@@ -293,11 +351,11 @@ func (h *Handler) usage(w http.ResponseWriter, r *http.Request, _ accounts.Sessi
 		notImplemented(w, "Usage is")
 		return
 	}
-	from, ok := h.month(w, r)
+	p, ok := h.period(w, r)
 	if !ok {
 		return
 	}
-	to := from.AddDate(0, 1, 0)
+	from, to := p.From, p.To
 	rows, err := h.ledger.Usage(r.Context(), u.AccountID, from, to)
 	if err != nil {
 		h.internal(w, "usage", err)
@@ -344,7 +402,8 @@ func (h *Handler) usage(w http.ResponseWriter, r *http.Request, _ accounts.Sessi
 			bySKU = append(bySKU, skuUsageView{SKU: row.SKU, GPUSeconds: row.GPUSeconds, USD: billing.USD(row.Quota)})
 		}
 	}
-	writeJSON(w, http.StatusOK, usageView{Object: "compute.usage", Month: from.Format("2006-01"), Currency: "USD", Jobs: jobs,
+	fromDate, toDate := p.dates()
+	writeJSON(w, http.StatusOK, usageView{Object: "compute.usage", Month: p.Month, From: fromDate, To: toDate, Currency: "USD", Jobs: jobs,
 		GPUSeconds: secs, GPUUSD: billing.USD(gpu), StorageUSD: billing.USD(storage), EgressUSD: billing.USD(egress),
 		TotalUSD: billing.USD(gpu + storage + egress), BySKU: bySKU, ByDay: byDay, ByKey: byKey})
 }
@@ -357,7 +416,7 @@ func (h *Handler) usageJobs(w http.ResponseWriter, r *http.Request, _ accounts.S
 		notImplemented(w, "Usage is")
 		return
 	}
-	from, ok := h.month(w, r)
+	p, ok := h.period(w, r)
 	if !ok {
 		return
 	}
@@ -375,7 +434,7 @@ func (h *Handler) usageJobs(w http.ResponseWriter, r *http.Request, _ accounts.S
 		}
 		f.KeyID = id
 	}
-	page, err := h.ledger.UsageJobs(r.Context(), u.AccountID, from, from.AddDate(0, 1, 0), f)
+	page, err := h.ledger.UsageJobs(r.Context(), u.AccountID, p.From, p.To, f)
 	if errors.Is(err, billing.ErrInvalidCursor) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "invalid_cursor", "after must be the id of a job in this list.", "after")
 		return
@@ -396,4 +455,78 @@ func (h *Handler) usageJobs(w http.ResponseWriter, r *http.Request, _ accounts.S
 		out["next"] = data[len(data)-1].JobID
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// exportRows caps one CSV at this many jobs; a longer period is asked for
+// in parts. Pages of exportPage are read from the ledger until done.
+const (
+	exportRows = 10_000
+	exportPage = 500
+)
+
+// focusColumns is the FOCUS 1.0 column set the export emits (product-design
+// C10: a FOCUS-shaped CSV per account and period), plus x_ custom columns
+// for what FOCUS has no slot for. One row per charged job; a job settled on
+// both sides of the period boundary contributes the part inside it.
+var focusColumns = []string{
+	"BillingAccountId", "BillingCurrency", "BillingPeriodStart", "BillingPeriodEnd",
+	"ChargeCategory", "ChargeDescription", "ChargePeriodStart", "ChargePeriodEnd",
+	"ServiceCategory", "ServiceName", "ResourceId", "ResourceType", "SkuId",
+	"ConsumedQuantity", "ConsumedUnit", "BilledCost", "EffectiveCost",
+	"x_ApiKeyId", "x_ApiKeyName", "x_JobStatus",
+}
+
+func (h *Handler) usageExport(w http.ResponseWriter, r *http.Request, _ accounts.Session, u accounts.User) {
+	if h.ledger == nil {
+		notImplemented(w, "Usage export is")
+		return
+	}
+	p, ok := h.period(w, r)
+	if !ok {
+		return
+	}
+	var rows []billing.JobUsage
+	after := ""
+	for len(rows) < exportRows {
+		page, err := h.ledger.UsageJobs(r.Context(), u.AccountID, p.From, p.To, billing.JobUsageFilter{After: after, Limit: exportPage})
+		if err != nil {
+			h.internal(w, "usage export", err)
+			return
+		}
+		rows = append(rows, page.Rows...)
+		if !page.HasMore || len(page.Rows) == 0 {
+			break
+		}
+		after = page.Rows[len(page.Rows)-1].JobID
+	}
+	if len(rows) > exportRows {
+		rows = rows[:exportRows]
+	}
+	fromDate, toDate := p.dates()
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="unify-compute-usage-%s-%s.csv"`, fromDate, toDate))
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	cw := csv.NewWriter(w)
+	_ = cw.Write(focusColumns)
+	account := strconv.FormatInt(u.AccountID, 10)
+	stamp := func(t time.Time) string { return t.UTC().Format(time.RFC3339) }
+	for _, j := range rows {
+		start, end := j.SettledAt, j.SettledAt
+		if j.StartedAt != nil {
+			start = *j.StartedAt
+		}
+		if j.FinishedAt != nil {
+			end = *j.FinishedAt
+		}
+		cost := billing.USD(j.Quota)
+		_ = cw.Write([]string{
+			account, "USD", stamp(p.From), stamp(p.To),
+			"Usage", "GPU time for job " + j.JobID + " on " + j.SKU, stamp(start), stamp(end),
+			"Compute", "Unify Compute", j.JobID, "job", j.SKU,
+			strconv.FormatInt(j.GPUSeconds, 10), "Seconds", cost, cost,
+			strconv.FormatInt(j.KeyID, 10), j.KeyName, j.Status,
+		})
+	}
+	cw.Flush()
 }

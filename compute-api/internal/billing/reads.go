@@ -36,9 +36,36 @@ type HistoryPage struct {
 	HasMore bool
 }
 
+// Kinds is every balance_entries.kind, in the order the CHECK constraint
+// lists them. A filter naming anything else is refused before the query.
+var Kinds = []string{"topup", "hold", "extend", "settle", "release", "refund", "dispute", "dispute_reversal", "admin_credit", "admin_debit", "writeoff"}
+
+func ValidKind(k string) bool {
+	for _, known := range Kinds {
+		if k == known {
+			return true
+		}
+	}
+	return false
+}
+
+// HistoryFilter narrows HistoryFiltered. Empty Kinds means every kind.
+type HistoryFilter struct {
+	After string
+	Limit int
+	Kinds []string
+}
+
 // History lists an account's entries newest first, strictly older than the
 // entry named by after (empty for the newest).
 func (l *Local) History(ctx context.Context, accountID int64, after string, limit int) (HistoryPage, error) {
+	return l.HistoryFiltered(ctx, accountID, HistoryFilter{After: after, Limit: limit})
+}
+
+// HistoryFiltered is History restricted to the given kinds: the console's
+// log-type filter, on the ledger.
+func (l *Local) HistoryFiltered(ctx context.Context, accountID int64, f HistoryFilter) (HistoryPage, error) {
+	after, limit := f.After, f.Limit
 	var before *int64
 	if after != "" {
 		var seq int64
@@ -51,14 +78,18 @@ func (l *Local) History(ctx context.Context, accountID int64, after string, limi
 		}
 		before = &seq
 	}
+	var kinds []string
+	if len(f.Kinds) > 0 {
+		kinds = f.Kinds
+	}
 	rows, err := l.db.Query(ctx, `
 		SELECT e.id, e.kind, e.available_delta, e.held_delta, e.available_after, e.held_after, e.ref_type, e.ref_id,
 			COALESCE(h.job_id, ''), COALESCE(h.sku, ''), e.created_at
 		FROM balance_entries e
 		LEFT JOIN billing_holds h ON e.ref_type = 'hold' AND h.hold_id = e.ref_id
-		WHERE e.account_id = $1 AND ($2::bigint IS NULL OR e.seq < $2)
+		WHERE e.account_id = $1 AND ($2::bigint IS NULL OR e.seq < $2) AND ($4::text[] IS NULL OR e.kind = ANY($4))
 		ORDER BY e.seq DESC
-		LIMIT $3`, accountID, before, limit+1)
+		LIMIT $3`, accountID, before, limit+1, kinds)
 	if err != nil {
 		return HistoryPage{}, err
 	}
