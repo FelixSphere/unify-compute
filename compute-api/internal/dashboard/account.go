@@ -51,6 +51,7 @@ type Ledger interface {
 	UsageByDay(ctx context.Context, accountID int64, from, to time.Time) ([]billing.DayUsage, error)
 	UsageByKey(ctx context.Context, accountID int64, from, to time.Time) ([]billing.KeyUsage, error)
 	UsageJobs(ctx context.Context, accountID int64, from, to time.Time, f billing.JobUsageFilter) (billing.JobUsagePage, error)
+	KeySpend(ctx context.Context, accountID int64, from time.Time) (map[int64]int64, error)
 }
 
 func notImplemented(w http.ResponseWriter, what string) {

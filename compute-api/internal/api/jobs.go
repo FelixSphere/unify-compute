@@ -88,6 +88,7 @@ func (s *Server) submitWired(w http.ResponseWriter, r *http.Request, sub submiss
 	})
 	var exceeded *quota.ExceededError
 	var refused *ledger.InsufficientBalanceError
+	var capped *billing.KeyCapError
 	switch {
 	case err == nil:
 	case errors.As(err, &exceeded):
@@ -99,6 +100,11 @@ func (s *Server) submitWired(w http.ResponseWriter, r *http.Request, sub submiss
 			Message: fmt.Sprintf("The Unify API balance does not cover this job's hold of USD %s (up to %d s of %s at USD %s/h; the whole job can cost at most USD %s). Nothing was submitted; top up and retry.",
 				quotaUSD(refused.HoldQuota), min(int64(sub.spec.MaxRuntimeSeconds), ledger.InitialHoldSeconds), sub.item.ID,
 				sub.item.PriceUSDPerHour, quotaUSD(refused.CeilingQuota))})
+		return
+	case errors.As(err, &capped):
+		writeError(w, http.StatusForbidden, apiError{Type: "permission_error", Code: "key_cap_exceeded", Param: "sku",
+			Message: fmt.Sprintf("This API key's monthly cap of USD %s is reached: USD %s is spent or held this month, and this job would hold USD %s. Nothing was submitted; raise the cap in the dashboard or use another key.",
+				quotaUSD(capped.Cap), quotaUSD(capped.Spent), quotaUSD(capped.Hold))})
 		return
 	case errors.Is(err, billing.ErrComputeNotEnabled):
 		writeError(w, http.StatusForbidden, apiError{Type: "permission_error", Code: "compute_not_enabled",

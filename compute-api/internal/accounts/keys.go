@@ -38,6 +38,7 @@ var (
 	ErrInvalidScope   = &Error{"invalid_scope", "scopes", "Choose the scopes jobs, read, or both."}
 	ErrInvalidExpiry  = &Error{"invalid_expires_at", "expires_at", "The expiry must be in the future."}
 	ErrKeyLimit       = &Error{"key_limit_reached", "", "This account already has 10 active API keys. Revoke one before creating another."}
+	ErrInvalidCap     = &Error{"invalid_cap", "monthly_cap_usd", "monthly_cap_usd must be dollars with at most two decimals, from 0.01 to 1000000, or null for no cap."}
 	ErrSuspended      = &Error{"account_suspended", "", "This account is suspended and cannot create API keys. Contact us."}
 )
 
@@ -58,6 +59,10 @@ type APIKey struct {
 	ExpiresAt  *time.Time
 	LastUsedAt *time.Time
 	RevokedAt  *time.Time
+	// MonthlyCap is the key's spending cap per UTC month in quota units
+	// (500000 per USD 1); nil is no cap. Enforced by the local biller when a
+	// hold is placed.
+	MonthlyCap *int64
 }
 
 // VerifiedKey is what the job API learns from a key: whose it is and what it
@@ -149,11 +154,11 @@ func NormalizeScopes(scopes []string) ([]string, error) {
 	return out, nil
 }
 
-const keyColumns = `k.id, k.account_id, k.name, k.display, k.scopes, k.created_by, k.created_at, k.expires_at, k.last_used_at, k.revoked_at`
+const keyColumns = `k.id, k.account_id, k.name, k.display, k.scopes, k.created_by, k.created_at, k.expires_at, k.last_used_at, k.revoked_at, k.monthly_cap`
 
 func scanKey(row pgx.Row) (APIKey, error) {
 	var k APIKey
-	err := row.Scan(&k.ID, &k.AccountID, &k.Name, &k.Display, &k.Scopes, &k.CreatedBy, &k.CreatedAt, &k.ExpiresAt, &k.LastUsedAt, &k.RevokedAt)
+	err := row.Scan(&k.ID, &k.AccountID, &k.Name, &k.Display, &k.Scopes, &k.CreatedBy, &k.CreatedAt, &k.ExpiresAt, &k.LastUsedAt, &k.RevokedAt, &k.MonthlyCap)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return APIKey{}, ErrNotFound
 	}
@@ -214,6 +219,17 @@ func (s *Service) CreateKey(ctx context.Context, accountID, userID int64, name s
 		return APIKey{}, "", err
 	}
 	return k, secret, nil
+}
+
+// SetKeyCap sets or clears (nil) a live key's monthly cap. A revoked key,
+// or another account's, is ErrNotFound. The cap's value is validated by the
+// caller, which knows the unit the customer typed it in.
+func (s *Service) SetKeyCap(ctx context.Context, accountID, keyID int64, capQuota *int64) (APIKey, error) {
+	if capQuota != nil && *capQuota <= 0 {
+		return APIKey{}, ErrInvalidCap
+	}
+	return scanKey(s.db.QueryRow(ctx, `UPDATE api_keys AS k SET monthly_cap = $3
+		WHERE k.id = $2 AND k.account_id = $1 AND k.revoked_at IS NULL RETURNING `+keyColumns, accountID, keyID, capQuota))
 }
 
 // ListKeys returns every key of the account, revoked and expired included,

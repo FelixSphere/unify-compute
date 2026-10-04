@@ -36,6 +36,8 @@ type Key = {
   expires_at: number | null;
   last_used_at: number | null;
   revoked_at: number | null;
+  monthly_cap_usd?: string | null;
+  spent_this_month_usd?: string | null;
 };
 type Job = {
   id: string;
@@ -112,7 +114,7 @@ async function get<T>(path: string): Promise<Result<T>> {
 // Every state-changing request carries the CSRF token fetched from GET /me
 // just before it, so a token rotated by a log-in in another tab, or a
 // session that ended, is noticed here rather than as a 403.
-async function send<T>(method: 'POST' | 'DELETE', path: string, body?: unknown): Promise<Result<T>> {
+async function send<T>(method: 'POST' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<Result<T>> {
   const m = await get<Me>('/me');
   if (!m.ok) return m;
   const r = await call<T>(method, path, body, m.data.csrf_token);
@@ -437,14 +439,25 @@ async function keys() {
       'keys-list',
       table(
         'API keys',
-        [{ text: 'Name' }, { text: 'Key' }, { text: 'Access' }, { text: 'Created' }, { text: 'Last used' }, { text: 'Status' }, { text: '' }],
+        [{ text: 'Name' }, { text: 'Key' }, { text: 'Access' }, { text: 'This month / cap (USD)', num: true }, { text: 'Created' }, { text: 'Last used' }, { text: 'Status' }, { text: '' }],
         list.map((k) => {
           const live = active(k);
           const st = k.revoked_at ? state('Revoked', 'muted') : live ? state('Active', 'success') : state('Expired', 'muted');
-          const revoke = live
-            ? h('button', { type: 'button', class: 'link', 'data-revoke': String(k.id), 'data-display': k.display, 'aria-label': `Revoke ${k.name}` }, 'Revoke')
-            : '';
-          return [k.name, mono(k.display), k.scopes.includes('jobs') ? 'Jobs' : 'Read only', when(k.created_at), when(k.last_used_at), st, revoke];
+          const spent = k.spent_this_month_usd ?? '—';
+          const capCell = h(
+            'span',
+            { class: 'mono' },
+            `${spent} / ${k.monthly_cap_usd ?? 'no cap'}`,
+          );
+          const actions = h('span', { class: 'row-actions' });
+          if (live) {
+            actions.append(
+              h('button', { type: 'button', class: 'link', 'data-cap': String(k.id), 'data-display': k.display, 'data-cap-value': k.monthly_cap_usd ?? '', 'data-spent': spent, 'aria-label': `Set the monthly cap of ${k.name}` }, 'Cap'),
+              ' ',
+              h('button', { type: 'button', class: 'link', 'data-revoke': String(k.id), 'data-display': k.display, 'aria-label': `Revoke ${k.name}` }, 'Revoke'),
+            );
+          }
+          return [k.name, mono(k.display), k.scopes.includes('jobs') ? 'Jobs' : 'Read only', capCell, when(k.created_at), when(k.last_used_at), st, actions];
         }),
       ),
     );
@@ -475,15 +488,29 @@ async function keys() {
       return focusFirstInvalid(form);
     }
     const scope = form.querySelector<HTMLInputElement>('input[name=scope]:checked')?.value ?? 'jobs';
+    const capField = input('key-cap')!;
+    const cap = capField.value.trim();
+    if (cap && cents(cap) === null) {
+      setFieldError('key-cap', 'Dollars with at most two decimals, e.g. 20 or 12.50.');
+      return capField.focus();
+    }
     busy(form, true);
     const r = await withReauth(() =>
-      send<Key & { secret: string }>('POST', '/keys', { name, scopes: scope === 'jobs' ? ['jobs', 'read'] : ['read'] }),
+      send<Key & { secret: string }>('POST', '/keys', {
+        name,
+        scopes: scope === 'jobs' ? ['jobs', 'read'] : ['read'],
+        monthly_cap_usd: cap || null,
+      }),
     );
     if (!r) return;
     if (!r.ok) {
       if (r.error.param === 'name') {
         setFieldError('key-name', r.error.message);
         return nameField.focus();
+      }
+      if (r.error.param === 'monthly_cap_usd') {
+        setFieldError('key-cap', r.error.message);
+        return capField.focus();
       }
       return showApiError(r.error);
     }
@@ -517,6 +544,43 @@ async function keys() {
     reveal.hidden = true;
     openButton.hidden = false;
     openButton.focus();
+  });
+
+  // Cap: a small dialog with one field; PATCH /keys/{id} sets or clears it.
+  const capDialog = $<HTMLDialogElement>('cap-dialog')!;
+  const capValue = input('cap-value')!;
+  let capTarget: { id: string; opener: HTMLElement } | null = null;
+  $('keys-list')!.addEventListener('click', (e) => {
+    const b = (e.target as Element).closest<HTMLButtonElement>('button[data-cap]');
+    if (!b) return;
+    capTarget = { id: b.dataset.cap!, opener: b };
+    setText('cap-display', b.dataset.display ?? '');
+    setText('cap-spent', b.dataset.spent ?? '—');
+    capValue.value = b.dataset.capValue ?? '';
+    clearFieldError('cap-value');
+    capDialog.showModal();
+    capValue.focus();
+  });
+  $<HTMLFormElement>('cap-form')!.addEventListener('submit', async (e) => {
+    if (e.submitter?.getAttribute('value') !== 'save' || !capTarget) return;
+    e.preventDefault();
+    const v = capValue.value.trim();
+    if (v && cents(v) === null) {
+      setFieldError('cap-value', 'Dollars with at most two decimals, e.g. 20 or 12.50.');
+      return capValue.focus();
+    }
+    const save = $<HTMLButtonElement>('cap-save')!;
+    save.disabled = true;
+    const r = await withReauth(() => send<Key>('PATCH', `/keys/${encodeURIComponent(capTarget!.id)}`, { monthly_cap_usd: v || null }));
+    save.disabled = false;
+    if (!r) return;
+    if (!r.ok) {
+      setFieldError('cap-value', r.error.message);
+      return capValue.focus();
+    }
+    capDialog.close();
+    await load();
+    $('keys-list')!.prepend(h('p', { class: 'status-line', role: 'status' }, v ? `Monthly cap set to USD ${r.data.monthly_cap_usd}.` : 'Monthly cap removed.'));
   });
 
   // Revoke: confirm in a dialog; errors stay inside it.

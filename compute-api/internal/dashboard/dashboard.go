@@ -130,6 +130,7 @@ func New(cfg Config) (*Handler, error) {
 	h.handle("GET /keys", h.session(h.listKeys))
 	h.handle("POST /keys", h.session(h.createKey))
 	h.handle("DELETE /keys/{id}", h.session(h.revokeKey))
+	h.handle("PATCH /keys/{id}", h.session(h.updateKey))
 	h.handle("GET /balance", h.session(h.read(h.balance)))
 	h.handle("GET /transactions", h.session(h.read(h.transactions)))
 	h.handle("GET /usage", h.session(h.read(h.usage)))
@@ -377,6 +378,7 @@ var statusOf = map[string]struct {
 	"invalid_expires_at":  {http.StatusBadRequest, "invalid_request"},
 	"account_suspended":   {http.StatusForbidden, "authentication_error"},
 	"key_limit_reached":   {http.StatusForbidden, "permission_error"},
+	"invalid_cap":         {http.StatusBadRequest, "invalid_request"},
 }
 
 func writeAccountsError(w http.ResponseWriter, e *accounts.Error) {

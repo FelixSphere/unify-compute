@@ -242,7 +242,7 @@
             }
           },
           "403": {
-            "description": "`quota_exceeded`: the submit would exceed an account quota (docs/spec/quotas.md); refused whole, never a partial grant, `error.quotas` lists each limit with its headroom, no `Retry-After`. Checked after every request error, before the hold, on the resolved SKU. Or `authentication_error`/`account_disabled` or `account_suspended`: the key is valid but its account may not spend. With `ACCOUNTS_BACKEND=local`, before any request check: `permission_error`/`scope_denied`, the key has the `read` scope only; and after the request checks, before quota and the hold: `authentication_error`/`account_suspended` (the account is suspended or closed) or `permission_error`/`compute_not_enabled` (job submission has not been turned on for the account yet; an operator does that by hand while the platform starts small).",
+            "description": "`quota_exceeded`: the submit would exceed an account quota (docs/spec/quotas.md); refused whole, never a partial grant, `error.quotas` lists each limit with its headroom, no `Retry-After`. Checked after every request error, before the hold, on the resolved SKU. Or `authentication_error`/`account_disabled` or `account_suspended`: the key is valid but its account may not spend. With `ACCOUNTS_BACKEND=local`, before any request check: `permission_error`/`scope_denied`, the key has the `read` scope only; and after the request checks, before quota and the hold: `authentication_error`/`account_suspended` (the account is suspended or closed) or `permission_error`/`compute_not_enabled` (job submission has not been turned on for the account yet; an operator does that by hand while the platform starts small). Also `permission_error`/`key_cap_exceeded` (ACCOUNTS_BACKEND=local): the key's monthly cap (dashboard, Keys) would be exceeded by this job's hold; refused whole, nothing submitted, no `Retry-After`. The message names the cap, what is spent or held this month, and the hold.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1200,7 +1200,8 @@
           ],
           "permission_error": [
             "scope_denied",
-            "compute_not_enabled"
+            "compute_not_enabled",
+            "key_cap_exceeded"
           ],
           "insufficient_balance": [
             "insufficient_balance"

@@ -1076,6 +1076,13 @@
                       "null"
                     ],
                     "description": "Unix seconds in the future; absent or null never expires."
+                  },
+                  "monthly_cap_usd": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Dollars with at most two decimals, 0.01 to 1000000; absent or null is no cap. invalid_cap (param monthly_cap_usd) otherwise."
                   }
                 }
               }
@@ -1201,6 +1208,121 @@
           },
           "404": {
             "description": "not_found: no key with this id in this account (another account's key is indistinguishable from a missing one), or Host is not the app host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateKey",
+        "summary": "Set or clear a key's monthly cap",
+        "description": "Sets monthly_cap_usd on a live key, or clears it with null. Needs a password entered within the last 10 minutes, like key creation. A revoked key, or another account's, is 404.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "monthly_cap_usd"
+                ],
+                "properties": {
+                  "monthly_cap_usd": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Dollars with at most two decimals, 0.01 to 1000000, or null for no cap."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The key, with the new cap.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Key"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "malformed_body; invalid_cap (param monthly_cap_usd).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "session_required; reauth_required (enter the password again).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "csrf_failed: Origin is not APP_ORIGIN (every non-GET), or X-CSRF-Token does not match the session (session routes).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no such live key on this account, or Host is not the app host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2988,7 +3110,9 @@
           "created_at",
           "expires_at",
           "last_used_at",
-          "revoked_at"
+          "revoked_at",
+          "monthly_cap_usd",
+          "spent_this_month_usd"
         ],
         "additionalProperties": false,
         "properties": {
@@ -3042,6 +3166,22 @@
               "null"
             ],
             "description": "Unix seconds; null while not revoked."
+          },
+          "monthly_cap_usd": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]+\\.[0-9]{4}$",
+            "description": "The key's spending cap per UTC calendar month; null is no cap. A job whose hold would take the key past it is refused with 403 key_cap_exceeded (job-api.md)."
+          },
+          "spent_this_month_usd": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]+\\.[0-9]{4}$",
+            "description": "What the key's holds this UTC month amount to: open holds at their full amount, closed ones at what they settled. The figure the cap is checked against. Null when this deployment has no local ledger."
           }
         }
       },
