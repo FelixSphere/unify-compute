@@ -72,7 +72,10 @@ export function SiteHeader({ homeHref = '/', current }: { homeHref?: string; cur
           <Image unoptimized loading="eager" src="/brand/unifyai-mark-black.svg" alt="" width={42} height={41.6} className="brand-mark" />
         </Link>
         <span className="product-divider" aria-hidden="true" />
-        <span className="product-name">Compute</span>
+        {/* Partner descriptor, like Unify Data's "Data & Realset": same type, one string. */}
+        <span className="product-name">
+          Compute <span className="product-partner">&amp; Flatkey</span>
+        </span>
       </div>
       <nav aria-label="Main navigation" className="nav-inline">
         {NAV.map((item) => (
