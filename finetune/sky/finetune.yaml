@@ -1,0 +1,77 @@
+# Reference fine-tuning task. This is the file compute-api will one day
+# generate from a job spec; finetune/README.md maps its fields to the spec.
+#
+#   sky launch -c ft-<run-id> sky/finetune.yaml --env RUN_ID=<run-id> --env BUCKET=s3://<bucket> --down -y
+#
+# One A10G on AWS is a g5.xlarge (4 vCPU, 16 GB), the shape SKU a10g-24gb-x1
+# prices. Spot, because the run checkpoints every epoch and the EXIT trap
+# syncs whatever exists.
+name: finetune-reference
+
+resources:
+  cloud: aws
+  region: us-east-1
+  accelerators: A10G:1
+  use_spot: true
+  disk_size: 100
+
+workdir: .
+
+envs:
+  RUN_ID: ""
+  BUCKET: ""
+  BASE_MODEL: Qwen/Qwen3-4B-Instruct-2507
+  MAX_RUNTIME_SECONDS: "7200"
+  FEW_SHOT_GATE: "0.95"
+  SCHEMA: ""          # optional path relative to workdir, e.g. schema.json
+  HF_TOKEN: ""        # only for gated models; Qwen3 is not
+
+setup: |
+  set -euo pipefail
+  mkdir -p ~/out ~/in
+  # First thing after the instance is ours: everything from here to
+  # t_train_start is cold start.
+  test -f ~/out/timestamps.json || echo "{\"t_instance_up\": $(date +%s)}" > ~/out/timestamps.json
+  pip install -q -r requirements.txt
+  aws s3 sync --quiet "${BUCKET}/finetune/${RUN_ID}/data" ~/in
+
+run: |
+  set -euo pipefail
+  : "${RUN_ID:?}" "${BUCKET:?}"
+  # t_process_exit and the final sync run on any exit, including a kill from
+  # `timeout` or a spot preemption that gives us the signal.
+  finish() {
+    python - <<'PY'
+  import json, time, pathlib
+  p = pathlib.Path.home() / "out/timestamps.json"
+  ts = json.loads(p.read_text()) if p.exists() else {}
+  ts["t_process_exit"] = int(time.time())
+  p.write_text(json.dumps(ts, indent=2) + "\n")
+  PY
+    aws s3 sync --quiet ~/out "${BUCKET}/finetune/${RUN_ID}/out"
+  }
+  trap finish EXIT
+
+  SCHEMA_ARG=""
+  [ -n "${SCHEMA}" ] && SCHEMA_ARG="--schema ${SCHEMA}"
+
+  # Baselines first: they decide whether training is worth running at all.
+  python eval.py --model "$BASE_MODEL" --test ~/in/test.jsonl $SCHEMA_ARG --out ~/out/eval_zero_shot.json
+  python eval.py --model "$BASE_MODEL" --test ~/in/test.jsonl --train ~/in/train.jsonl --few-shot 3 $SCHEMA_ARG --out ~/out/eval_few_shot.json
+  python - "$FEW_SHOT_GATE" <<'PY'
+  import json, sys, pathlib
+  s = json.loads((pathlib.Path.home() / "out/eval_few_shot.json").read_text())["summary"]
+  rate = s["schema_valid_rate"] if s["schema_valid_rate"] is not None else s["json_parseable_rate"]
+  if rate >= float(sys.argv[1]):
+      (pathlib.Path.home() / "out/RESULT").write_text("task_not_worth_finetuning\n")
+      print(f"few-shot already at {rate:.3f}; stopping before training")
+      sys.exit(0)
+  PY
+  if [ -f ~/out/RESULT ]; then exit 0; fi
+
+  timeout "${MAX_RUNTIME_SECONDS}" python train.py --model "$BASE_MODEL" \
+    --train ~/in/train.jsonl --val ~/in/val.jsonl \
+    --out ~/out/adapter --timestamps ~/out/timestamps.json
+
+  python eval.py --model "$BASE_MODEL" --lora ~/out/adapter --test ~/in/test.jsonl $SCHEMA_ARG --out ~/out/eval_lora.json
+  echo "completed" > ~/out/RESULT

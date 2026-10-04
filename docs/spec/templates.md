@@ -142,7 +142,8 @@ ran. *Planned:* the Job also records the template id; it does not yet.
 |---|---|---|---|
 | `batch-embed` | `vllm/vllm-openai:v0.30.0-cu129@sha256:a67f8f18…` | `a10g-24gb-x1` | yes (not yet run on a real cloud) |
 | `batch-infer-vllm` | same | `a10g-24gb-x1` | yes (same caveat) |
-| `finetune-lora` | none yet | `a10g-24gb-x1-spot` | no |
+| `batch-infer-lora` | `ghcr.io/felixsphere/unify-compute-finetune` (not yet published) | `a10g-24gb-x1` | no, until the image is pinned |
+| `finetune-lora` | same | `a10g-24gb-x1-spot` | no, until the image is pinned |
 
 ### Image provenance
 
@@ -165,10 +166,35 @@ should set `MODEL_REVISION` to that model's commit or to `""` (the command
 omits `--revision` when it is empty); leaving the old revision fails at
 download.
 
+### The finetune image
+
+`finetune/Dockerfile` builds `ghcr.io/felixsphere/unify-compute-finetune`:
+the vLLM image above as base (so eval and training share one torch), the
+exact pins in `finetune/requirements.txt` (TRL, PEFT, datasets, accelerate,
+jsonschema; all Apache-2.0 or MIT, recorded in `THIRD-PARTY-LICENSES.md`),
+and the scripts `prepare_data.py`, `train.py`, `eval.py`, `infer_lora.py`,
+`record.py` at `/app`. `publish-image.yml` (`image=finetune`, or a
+`finetune-v*` tag) builds it for `linux/amd64` only, imports every dependency
+on CPU before pushing, and prints the digest to pin. GPU workers are x86
+(g5); the Graviton hosts never run it, and the `pinned-images` CI job does not
+scan `templates.json`.
+
+Turning the two templates on is a second, small PR once the image exists: pin
+the digest as their `image`, set `image_licence`/`image_source`, make the
+GHCR package public (workers pull without credentials), flip `available`, and
+update `TestFinetuneLoraMatchesTheReferenceRun`, which pins them unavailable
+until then.
+
 ### `finetune-lora`
 
 The template form of the reference fine-tune in `finetune/` (the
-`sky/finetune.yaml` run block). It keeps that task's steps in order:
+`sky/finetune.yaml` run block). Its one input is `data.tar.gz` from
+`prepare_data.py --archive` (`train.jsonl`, `val.jsonl`, `test.jsonl`,
+optionally `schema.json`, which is used when `SCHEMA` is empty), because a
+template binds one file per input mount; the command unpacks it beside
+itself, so the reference run's paths under `/mnt/in` are unchanged. It also
+writes `adapter.tar.gz` next to `adapter/`, the hand-off to
+`batch-infer-lora`. It keeps that task's steps in order:
 zero-shot and 3-shot baselines with `eval.py`, the few-shot gate that writes
 `RESULT = task_not_worth_finetuning` and stops, `train.py` writing the adapter,
 and an eval with the adapter. Paths move from `~/in` and `~/out` to the
@@ -177,21 +203,15 @@ declared mounts `/mnt/in` and `/mnt/out`; `BASE_MODEL`, `FEW_SHOT_GATE` and
 run uses, and the default runtime is `launch.sh`'s 7200 s. A test pins these
 steps so the two cannot drift silently.
 
-It is `available: false` with no image, because the work cannot yet be
-expressed as a template. What is missing:
+It is `available: false` until the finetune image is published and pinned
+(above). Of what was missing when the placeholder was written:
 
-1. **An image.** The reference run uses SkyPilot's default VM image, installs
-   `finetune/requirements.txt` with pip in `setup`, and uploads `finetune/` as
-   its workdir. A template needs an image with those scripts at its working
-   directory and the requirements pinned (`requirements.txt` still has lower
-   bounds only). Building, publishing and pinning it is R1 in
-   `product-design.md`. No such image exists and none is named here.
-2. **Input and output transfer.** The run syncs S3 itself in `setup` and in an
-   `EXIT` trap. In a template, getting `inputs[].source` onto `/mnt/in` and
-   `/mnt/out` back to the artifact store is the backend's job (SkyPilot
-   `file_mounts`, ADR-0005 for where outputs live); none of it exists. The
-   final sync must still happen after a kill, which is what the trap gave the
-   reference run.
+1. **An image.** Now defined (`finetune/Dockerfile`, pinned requirements,
+   `publish-finetune` job); published and pinned by the follow-up PR.
+2. **Input and output transfer.** Done by the backend: https inputs are
+   fetched into the mount by the run step, outputs are uploaded by the
+   artifacts step after the command, whatever its exit status (ADR-0005).
+   The one-file-per-mount rule is why the input is an archive.
 3. **Runtime enforcement.** The reference run wraps only `train.py` in
    `timeout $MAX_RUNTIME_SECONDS`, leaving time for the last eval and sync.
    SkyPilot has no task-level timeout, so the template drops `timeout` and
@@ -207,6 +227,21 @@ expressed as a template. What is missing:
 6. **Instrumentation.** The reference run writes `t_instance_up` and
    `t_process_exit` itself to measure cold start. The template keeps only
    `train.py --timestamps`; the other two are the backend's to record.
+
+### `batch-infer-lora`
+
+`batch-infer-vllm` with an adapter. `vllm run-batch` takes the engine flags
+(`--enable-lora`, `--max-lora-rank`) but no adapter list, so the finetune
+image's `infer_lora.py` does the same job through vLLM's Python API: it reads
+the OpenAI batch file, runs every `/v1/chat/completions` line with the one
+adapter applied (`LoRARequest`), and writes result lines in the batch
+runner's shape, `model` set to `LORA_NAME`. Inputs: `/mnt/in/requests.jsonl`
+and `/mnt/adapter/adapter.tar.gz` (a PEFT adapter directory, as `finetune-lora`
+writes it; `adapter_config.json` is located wherever the archive put it). The
+base model and revision default to `batch-infer-vllm`'s, which are
+`finetune-lora`'s `BASE_MODEL`; an adapter trained on another base needs
+`MODEL`/`MODEL_REVISION` overridden to that base. `TestBatchInferLoraPairsWithFinetuneLora`
+pins the pairing.
 
 ## Open questions
 
