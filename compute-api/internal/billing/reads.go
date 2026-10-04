@@ -113,3 +113,153 @@ func (l *Local) Usage(ctx context.Context, accountID int64, from, to time.Time) 
 		return u, err
 	})
 }
+
+// settledGPU is the period-agnostic view every usage read starts from: one
+// row per settle with the seconds it added over the previous settle of the
+// same hold, plus the hold's SKU, job and key. A settle's gpu_seconds is
+// cumulative for its hold, so the delta is taken over the hold's whole
+// history before any period filter is applied.
+const settledGPU = `
+	SELECT h.sku, h.job_id, h.key_id, s.quota_delta, s.created_at,
+		s.gpu_seconds - COALESCE(lag(s.gpu_seconds) OVER (PARTITION BY s.hold_id ORDER BY s.seq), 0) AS secs
+	FROM billing_settlements s JOIN billing_holds h USING (hold_id)
+	WHERE h.account_id = $1`
+
+// DayUsage is one UTC day of GPU settles.
+type DayUsage struct {
+	Day        time.Time
+	GPUSeconds int64
+	Quota      int64
+}
+
+// UsageByDay groups the period's GPU settles by the UTC day they were
+// accepted. Days with nothing settled are absent; the caller fills them.
+// Storage and egress charges have no job and are not GPU time, so they are
+// left out here and in UsageByKey.
+func (l *Local) UsageByDay(ctx context.Context, accountID int64, from, to time.Time) ([]DayUsage, error) {
+	rows, err := l.db.Query(ctx, `
+		WITH s AS (`+settledGPU+`)
+		SELECT date_trunc('day', created_at AT TIME ZONE 'UTC') AS day,
+			COALESCE(sum(secs), 0)::bigint, COALESCE(sum(quota_delta), 0)::bigint
+		FROM s WHERE job_id IS NOT NULL AND created_at >= $2 AND created_at < $3
+		GROUP BY day ORDER BY day`, accountID, from, to)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (DayUsage, error) {
+		var u DayUsage
+		err := r.Scan(&u.Day, &u.GPUSeconds, &u.Quota)
+		u.Day = time.Date(u.Day.Year(), u.Day.Month(), u.Day.Day(), 0, 0, 0, 0, time.UTC)
+		return u, err
+	})
+}
+
+// KeyUsage is one API key's GPU settles in a period. Name and Display are
+// empty when the key row no longer exists.
+type KeyUsage struct {
+	KeyID      int64
+	Name       string
+	Display    string
+	Jobs       int64
+	GPUSeconds int64
+	Quota      int64
+}
+
+func (l *Local) UsageByKey(ctx context.Context, accountID int64, from, to time.Time) ([]KeyUsage, error) {
+	rows, err := l.db.Query(ctx, `
+		WITH s AS (`+settledGPU+`)
+		SELECT s.key_id, COALESCE(k.name, ''), COALESCE(k.display, ''),
+			count(DISTINCT s.job_id), COALESCE(sum(s.secs), 0)::bigint, COALESCE(sum(s.quota_delta), 0)::bigint
+		FROM s LEFT JOIN api_keys k ON k.id = s.key_id
+		WHERE s.job_id IS NOT NULL AND s.created_at >= $2 AND s.created_at < $3
+		GROUP BY s.key_id, k.name, k.display
+		ORDER BY sum(s.quota_delta) DESC, s.key_id`, accountID, from, to)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (KeyUsage, error) {
+		var u KeyUsage
+		err := r.Scan(&u.KeyID, &u.Name, &u.Display, &u.Jobs, &u.GPUSeconds, &u.Quota)
+		return u, err
+	})
+}
+
+// JobUsage is one job's GPU settles in a period, with what the job and key
+// tables still say about it. SettledAt is the period's last settle for the
+// job and is the list order.
+type JobUsage struct {
+	JobID      string
+	SKU        string
+	Status     string
+	KeyID      int64
+	KeyName    string
+	KeyDisplay string
+	StartedAt  *time.Time
+	FinishedAt *time.Time
+	SettledAt  time.Time
+	GPUSeconds int64
+	Quota      int64
+}
+
+type JobUsagePage struct {
+	Rows    []JobUsage
+	HasMore bool
+}
+
+// JobUsageFilter narrows UsageJobs. Zero values mean no filter; After is the
+// job id of the last row already shown.
+type JobUsageFilter struct {
+	SKU   string
+	KeyID int64
+	After string
+	Limit int
+}
+
+// UsageJobs lists the jobs charged in a period, newest settle first, keyset
+// paged on (settled_at, job_id). A cursor naming a job that was never held
+// by this account is ErrInvalidCursor.
+func (l *Local) UsageJobs(ctx context.Context, accountID int64, from, to time.Time, f JobUsageFilter) (JobUsagePage, error) {
+	if f.After != "" {
+		var ok bool
+		err := l.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM billing_holds WHERE account_id = $1 AND job_id = $2)`,
+			accountID, f.After).Scan(&ok)
+		if err != nil {
+			return JobUsagePage{}, err
+		}
+		if !ok {
+			return JobUsagePage{}, ErrInvalidCursor
+		}
+	}
+	rows, err := l.db.Query(ctx, `
+		WITH s AS (`+settledGPU+`),
+		j AS (
+			SELECT job_id, max(created_at) AS settled_at, sum(secs)::bigint AS secs, sum(quota_delta)::bigint AS quota,
+				min(key_id) AS key_id, min(sku) AS sku
+			FROM s WHERE job_id IS NOT NULL AND created_at >= $2 AND created_at < $3
+			GROUP BY job_id
+		)
+		SELECT j.job_id, j.sku, COALESCE(jb.status, ''), j.key_id, COALESCE(k.name, ''), COALESCE(k.display, ''),
+			jb.started_at, jb.finished_at, j.settled_at, j.secs, j.quota
+		FROM j LEFT JOIN jobs jb ON jb.id = j.job_id LEFT JOIN api_keys k ON k.id = j.key_id
+		WHERE ($4 = '' OR j.sku = $4) AND ($5 = 0 OR j.key_id = $5)
+			AND ($6 = '' OR (j.settled_at, j.job_id) < (SELECT settled_at, job_id FROM j WHERE job_id = $6))
+		ORDER BY j.settled_at DESC, j.job_id DESC
+		LIMIT $7`, accountID, from, to, f.SKU, f.KeyID, f.After, f.Limit+1)
+	if err != nil {
+		return JobUsagePage{}, err
+	}
+	all, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (JobUsage, error) {
+		var u JobUsage
+		err := r.Scan(&u.JobID, &u.SKU, &u.Status, &u.KeyID, &u.KeyName, &u.KeyDisplay,
+			&u.StartedAt, &u.FinishedAt, &u.SettledAt, &u.GPUSeconds, &u.Quota)
+		return u, err
+	})
+	if err != nil {
+		return JobUsagePage{}, err
+	}
+	page := JobUsagePage{Rows: all}
+	if len(all) > f.Limit {
+		page.Rows, page.HasMore = all[:f.Limit], true
+	}
+	return page, nil
+}
