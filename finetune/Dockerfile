@@ -16,7 +16,11 @@ COPY requirements.txt ./
 # different transformers under vLLM's feet; a pin that cannot coexist fails
 # the build here instead of breaking the first GPU job. requirements.lock
 # records what the image actually carries.
-RUN pip freeze > /tmp/base-constraints.txt \
+# fsspec is the one package let out of the constraints: datasets 5.0.1 wants
+# fsspec <= 2026.6.0 and the base carries 2026.9.0 (publish run 37260216800
+# failed on exactly that); nothing in vLLM pins fsspec, and the import check
+# below proves vLLM still loads with the older one.
+RUN pip freeze | grep -v -i '^fsspec==' > /tmp/base-constraints.txt \
  && pip install --no-cache-dir -c /tmp/base-constraints.txt -r requirements.txt \
  && pip freeze > /app/requirements.lock \
  && python -c "import trl, peft, datasets, accelerate, jsonschema, vllm, transformers, torch; print('trl', trl.__version__, 'peft', peft.__version__, 'transformers', transformers.__version__, 'torch', torch.__version__, 'vllm', vllm.__version__)"
