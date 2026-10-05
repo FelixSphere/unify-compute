@@ -23,7 +23,15 @@ COPY requirements.txt ./
 RUN pip freeze | grep -v -i '^fsspec==' > /tmp/base-constraints.txt \
  && pip install --no-cache-dir -c /tmp/base-constraints.txt -r requirements.txt \
  && pip freeze > /app/requirements.lock \
- && python3 -c "import trl, peft, datasets, accelerate, jsonschema, vllm, transformers, torch; print('trl', trl.__version__, 'peft', peft.__version__, 'transformers', transformers.__version__, 'torch', torch.__version__, 'vllm', vllm.__version__)"
+ && python3 -c "import importlib.metadata as m; print(' '.join(p + '=' + m.version(p) for p in ['torch', 'torchvision', 'transformers', 'vllm', 'trl', 'peft', 'datasets', 'accelerate', 'jsonschema']))" \
+ && python3 -c "import datasets, accelerate, jsonschema, peft, torch, vllm; print('imports ok: datasets accelerate jsonschema peft torch vllm')"
+# Diagnostic, not a gate: on the GPU-less build runner `import trl` pulls
+# transformers' vision stack and died with "operator torchvision::nms does
+# not exist" (publish run 37262401309), which is either a torch/torchvision
+# pairing in the base or a CPU-only artefact. Print what happens so the
+# first GPU job of finetune-lora is not the first time anyone sees it.
+RUN python3 -c "import torch, torchvision; print('torch', torch.__version__, 'torchvision', torchvision.__version__); import torchvision.ops; print('torchvision ops ok')" || echo "DIAGNOSTIC: torchvision ops do not load on this CPU-only runner" \
+ && (python3 -c "import trl; print('trl import ok', trl.__version__)" || echo "DIAGNOSTIC: trl does not import on this CPU-only runner; verify on the first GPU job")
 # The base has python3 but no `python` (publish run 37261402438: "python: not
 # found"); the templates' commands say `python`, so give them the alias.
 RUN ln -s "$(command -v python3)" /usr/local/bin/python
