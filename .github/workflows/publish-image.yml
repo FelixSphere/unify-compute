@@ -296,25 +296,29 @@ jobs:
       # every dependency and compile every script, so a separate loaded smoke
       # image was a second 10 GB copy for nothing). No GHA layer cache either:
       # it is capped at 10 GB and the base layers come from Docker Hub anyway.
-      # The vLLM base unpacks to well over the root disk's free space: the
-      # first two publishes (runs 37257555345, 37258182528) died with "no
-      # space left on device" while buildkit unpacked it, the second one with
-      # 38 GB free after dropping unused toolchains. The runner's second disk
-      # at /mnt is larger and empty, so Docker's data root moves there and the
-      # build uses the daemon's storage (driver: docker) instead of a separate
-      # buildkit container with its own copy. No GHA layer cache: capped at
-      # 10 GB, and the base layers come from Docker Hub anyway.
-      - name: Put Docker's storage on the big disk
+      # The vLLM base unpacks to more than the runner's free space: three
+      # publishes (37257555345, 37258182528, 37259130251) died with "no space
+      # left on device" while the daemon registered its layers, the last one
+      # with 32 GB free. ubuntu-latest has one 72 GB disk (no separate /mnt),
+      # about 40 GB of it preinstalled toolchains this job never touches. So:
+      # remove them, drop the swap file, and build with the daemon's storage
+      # (driver: docker) so there is one copy of every layer, not two. No GHA
+      # layer cache either: capped at 10 GB, and the base comes from Docker Hub.
+      - name: Free the disk for the base image
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL 2>/dev/null || true
-          sudo systemctl stop docker
-          sudo mkdir -p /mnt/docker
-          sudo rsync -a /var/lib/docker/ /mnt/docker/ 2>/dev/null || true
-          sudo rm -rf /var/lib/docker
-          sudo ln -s /mnt/docker /var/lib/docker
-          sudo systemctl start docker
-          docker info --format 'docker root: {{.DockerRootDir}}'
-          df -h / /mnt | tail -n 2
+          echo "before:"; df -h / | tail -n 1
+          sudo swapoff -a || true
+          sudo rm -f /mnt/swapfile /swapfile || true
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache /usr/lib/jvm /usr/share/swift /usr/local/julia* /opt/az \
+            /usr/lib/google-cloud-sdk /usr/share/miniconda /opt/microsoft /usr/lib/firefox \
+            /opt/google /usr/local/share/chromium /usr/local/share/powershell /usr/local/lib/heroku \
+            /usr/local/lib/node_modules /usr/share/sbt /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" 2>/dev/null || true
+          sudo apt-get purge -y --auto-remove '^llvm-.*' '^dotnet-.*' '^temurin-.*' '^mongodb-.*' '^mysql-.*' '^postgresql-.*' \
+            azure-cli google-chrome-stable firefox powershell mono-devel libgl1-mesa-dri 2>/dev/null || true
+          sudo apt-get clean || true
+          sudo docker system prune -af --volumes >/dev/null 2>&1 || true
+          echo "after:"; df -h / | tail -n 1
 
       - uses: docker/setup-buildx-action@v3
         with:
