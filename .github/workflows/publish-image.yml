@@ -1,4 +1,5 @@
-# Publishes compute-api, or the marketing site's `site` image, to GHCR.
+# Publishes compute-api, the marketing site's `site` image, or the `finetune`
+# workload image, to GHCR.
 #
 # This exists because `ci.yml` builds the container and throws it away, while
 # `deploy/aws/staging` pins `ghcr.io/felixsphere/unify-compute-api`. On
@@ -18,18 +19,18 @@
 # matches; run-name says which image a run published.
 name: Publish compute-api image
 run-name: >-
-  Publish ${{ github.event_name == 'push' && (startsWith(github.ref_name, 'site-v') && 'site' || 'compute-api') || inputs.image }}
+  Publish ${{ github.event_name == 'push' && (startsWith(github.ref_name, 'site-v') && 'site' || startsWith(github.ref_name, 'finetune-v') && 'finetune' || 'compute-api') || inputs.image }}
   ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
 
 on:
   push:
-    tags: ["compute-api-v*", "site-v*"]
+    tags: ["compute-api-v*", "site-v*", "finetune-v*"]
   workflow_dispatch:
     inputs:
       image:
         description: "Which image to publish"
         type: choice
-        options: [compute-api, site]
+        options: [compute-api, site, finetune]
         default: compute-api
       tag:
         description: "Image tag to publish (e.g. dev, compute-api-v0.1.0, site-v0.1.0)"
@@ -50,6 +51,7 @@ permissions:
 env:
   IMAGE: ghcr.io/felixsphere/unify-compute-api
   SITE_IMAGE: ghcr.io/felixsphere/unify-compute-site
+  FINETUNE_IMAGE: ghcr.io/felixsphere/unify-compute-finetune
 
 jobs:
   publish:
@@ -255,4 +257,94 @@ jobs:
             echo "\`\`\`"
             echo "${{ env.SITE_IMAGE }}@${{ steps.build.outputs.digest }}"
             echo "\`\`\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # The finetune workload image (finetune/Dockerfile): the reference run's
+  # scripts and pinned TRL/PEFT on top of the vLLM image the batch templates
+  # use. amd64 only, because it runs on x86 GPU workers (g5), never on the
+  # Graviton hosts; the pinned-images job does not check templates.json. It
+  # is pinned by digest in compute-api/config/templates.json (finetune-lora,
+  # batch-infer-lora) by a follow-up PR, and the GHCR package must be public
+  # for workers to pull it without credentials.
+  publish-finetune:
+    if: >-
+      (github.event_name == 'push' && startsWith(github.ref_name, 'finetune-v')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.image == 'finetune')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve the tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "value=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Scripts compile before building
+        run: python3 -m py_compile finetune/*.py
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Build once, load it, and import everything a template runs before
+      # anything is pushed: a dependency that does not import on CPU would
+      # fail every job at start, after the GPU was already paid for.
+      - name: Build for the smoke test
+        uses: docker/build-push-action@v6
+        with:
+          context: finetune
+          file: finetune/Dockerfile
+          platforms: linux/amd64
+          load: true
+          push: false
+          provenance: false
+          tags: unify-compute-finetune:smoke
+          cache-from: type=gha,scope=finetune
+          cache-to: type=gha,scope=finetune,mode=max
+      - name: Smoke before publishing
+        run: |
+          docker run --rm unify-compute-finetune:smoke python -c "import trl, peft, datasets, accelerate, jsonschema, transformers; print('ok', trl.__version__, peft.__version__)"
+          docker run --rm unify-compute-finetune:smoke python prepare_data.py --help >/dev/null
+          docker run --rm unify-compute-finetune:smoke python train.py --help >/dev/null
+          docker run --rm unify-compute-finetune:smoke test -f eval.py -a -f infer_lora.py -a -f record.py
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push (amd64)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: finetune
+          file: finetune/Dockerfile
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: |
+            ${{ env.FINETUNE_IMAGE }}:${{ steps.tag.outputs.value }}
+            ${{ env.FINETUNE_IMAGE }}:sha-${{ github.sha }}
+          cache-from: type=gha,scope=finetune
+          cache-to: type=gha,scope=finetune,mode=max
+
+      - name: Report the digest to pin
+        run: |
+          REF="${{ env.FINETUNE_IMAGE }}@${{ steps.build.outputs.digest }}"
+          docker buildx imagetools inspect "$REF" --raw > manifest.json
+          {
+            echo "## Published finetune image"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| tag | \`${{ env.FINETUNE_IMAGE }}:${{ steps.tag.outputs.value }}\` |"
+            echo "| digest | \`${{ steps.build.outputs.digest }}\` |"
+            echo
+            echo "Pin \`$REF\` as \`image\` of \`finetune-lora\` and \`batch-infer-lora\` in \`compute-api/config/templates.json\`, record the licences in THIRD-PARTY-LICENSES.md, set the GHCR package public, and flip \`available\`."
           } >> "$GITHUB_STEP_SUMMARY"

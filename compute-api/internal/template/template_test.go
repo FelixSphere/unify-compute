@@ -67,7 +67,7 @@ func TestShippedTemplatesParseAgainstShippedCatalogue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"batch-embed", "batch-infer-vllm", "finetune-lora"}
+	want := []string{"batch-embed", "batch-infer-lora", "batch-infer-vllm", "finetune-lora"}
 	if len(s.Templates) != len(want) {
 		t.Fatalf("got %d templates, want %v", len(s.Templates), want)
 	}

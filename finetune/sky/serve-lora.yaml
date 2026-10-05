@@ -1,0 +1,30 @@
+# vLLM with the adapter mounted as a named model. Step 7 of the reference run:
+# proves the fine-tune is servable on the same platform, and gives the staging
+# console an OpenAI-compatible upstream to register as a channel.
+#
+#   sky launch -c serve-lora sky/serve-lora.yaml --env ADAPTER_URI=s3://<bucket>/finetune/<run-id>/out/adapter -y
+name: serve-lora
+
+resources:
+  cloud: aws
+  region: us-east-1
+  accelerators: A10G:1
+  ports: 8000
+
+envs:
+  BASE_MODEL: Qwen/Qwen3-4B-Instruct-2507
+  ADAPTER_URI: ""
+  ADAPTER_NAME: job-spec
+
+setup: |
+  set -euo pipefail
+  pip install -q "vllm>=0.10"
+  mkdir -p ~/adapter
+  aws s3 sync --quiet "${ADAPTER_URI}" ~/adapter
+
+run: |
+  : "${ADAPTER_URI:?}"
+  vllm serve "$BASE_MODEL" --host 0.0.0.0 --port 8000 \
+    --dtype bfloat16 --max-model-len 4096 \
+    --enable-lora --max-lora-rank 64 \
+    --lora-modules "${ADAPTER_NAME}=$HOME/adapter"

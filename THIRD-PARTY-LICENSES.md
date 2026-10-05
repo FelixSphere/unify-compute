@@ -77,3 +77,19 @@ clients do not load self-hosted fonts reliably.
 `public/og-image-v3.png` are UnifyAI's own artwork from the Option 01 "Inward
 hex" logo package and the UnifyAI brand kit. They are proprietary and are not
 third-party material.
+
+## Workload images
+
+Images jobs run in. Not linked into `compute-api/`; listed because we build
+and publish this one (ADR-0002 keeps the permissive-only rule for anything we
+ship). The base image is the vLLM image recorded above for the batch templates.
+
+| Component | Licence | Relationship |
+|---|---|---|
+| `vllm/vllm-openai:v0.30.0-cu129@sha256:a67f8f18…` | Apache-2.0 | Base of `finetune/Dockerfile`; carries torch, transformers and vLLM. |
+| [TRL](https://github.com/huggingface/trl) 1.14.1 | Apache-2.0 | `train.py`: `SFTTrainer`. |
+| [PEFT](https://github.com/huggingface/peft) 0.21.2 | Apache-2.0 | `train.py`: LoRA (`LoraConfig`); vLLM loads the resulting adapter. |
+| [datasets](https://github.com/huggingface/datasets) 5.0.1 | Apache-2.0 | `train.py`: JSONL loading. |
+| [accelerate](https://github.com/huggingface/accelerate) 1.15.0 | Apache-2.0 | Required by TRL's trainer. |
+| [jsonschema](https://github.com/python-jsonschema/jsonschema) 4.26.0 | MIT | `eval.py`: schema validity metric. |
+| Qwen3-4B-Instruct-2507 (default base model, downloaded at run time) | Apache-2.0 | Not in the image; pinned by revision in the templates' env. |

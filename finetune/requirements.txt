@@ -1,0 +1,9 @@
+# Workload dependencies of the finetune image (finetune/Dockerfile), on top of
+# vllm/vllm-openai (torch, transformers, vllm). Exact pins so the image is
+# reproducible; bump them together and rebuild. Licences in
+# THIRD-PARTY-LICENSES.md ("Workload images").
+trl==1.14.1
+peft==0.21.2
+datasets==5.0.1
+accelerate==1.15.0
+jsonschema==4.26.0
