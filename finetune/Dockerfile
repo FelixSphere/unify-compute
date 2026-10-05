@@ -23,10 +23,13 @@ COPY requirements.txt ./
 RUN pip freeze | grep -v -i '^fsspec==' > /tmp/base-constraints.txt \
  && pip install --no-cache-dir -c /tmp/base-constraints.txt -r requirements.txt \
  && pip freeze > /app/requirements.lock \
- && python -c "import trl, peft, datasets, accelerate, jsonschema, vllm, transformers, torch; print('trl', trl.__version__, 'peft', peft.__version__, 'transformers', transformers.__version__, 'torch', torch.__version__, 'vllm', vllm.__version__)"
+ && python3 -c "import trl, peft, datasets, accelerate, jsonschema, vllm, transformers, torch; print('trl', trl.__version__, 'peft', peft.__version__, 'transformers', transformers.__version__, 'torch', torch.__version__, 'vllm', vllm.__version__)"
+# The base has python3 but no `python` (publish run 37261402438: "python: not
+# found"); the templates' commands say `python`, so give them the alias.
+RUN ln -s "$(command -v python3)" /usr/local/bin/python
 COPY prepare_data.py train.py eval.py infer_lora.py record.py ./
 RUN python -m py_compile prepare_data.py train.py eval.py infer_lora.py record.py
 
 # Templates give the full argv; the vLLM image's own entrypoint must not wrap it.
 ENTRYPOINT []
-CMD ["python", "-c", "print('unify-compute finetune image: run a template command')"]
+CMD ["python3", "-c", "print('unify-compute finetune image: run a template command')"]
