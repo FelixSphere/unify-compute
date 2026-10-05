@@ -1061,7 +1061,7 @@ dialog code {
     padding: 24px 16px 40px;
   }
 
-  .card {
+  body.app .card {
     padding: 20px 16px;
   }
 }
