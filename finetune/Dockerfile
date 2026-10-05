@@ -11,8 +11,15 @@ FROM vllm/vllm-openai:v0.30.0-cu129@sha256:a67f8f186d4567612ac37a55bd82295006002
 
 WORKDIR /app
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt \
- && python -c "import trl, peft, datasets, accelerate, jsonschema, vllm, transformers; print('trl', trl.__version__, 'peft', peft.__version__, 'vllm', vllm.__version__)"
+# The base's own packages (torch 2.13, transformers >= 5.10, vLLM) are frozen
+# into a constraints file first, so nothing here can pull a second torch or a
+# different transformers under vLLM's feet; a pin that cannot coexist fails
+# the build here instead of breaking the first GPU job. requirements.lock
+# records what the image actually carries.
+RUN pip freeze > /tmp/base-constraints.txt \
+ && pip install --no-cache-dir -c /tmp/base-constraints.txt -r requirements.txt \
+ && pip freeze > /app/requirements.lock \
+ && python -c "import trl, peft, datasets, accelerate, jsonschema, vllm, transformers, torch; print('trl', trl.__version__, 'peft', peft.__version__, 'transformers', transformers.__version__, 'torch', torch.__version__, 'vllm', vllm.__version__)"
 COPY prepare_data.py train.py eval.py infer_lora.py record.py ./
 RUN python -m py_compile prepare_data.py train.py eval.py infer_lora.py record.py
 
