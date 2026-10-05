@@ -18,20 +18,20 @@ COPY requirements.txt ./
 # records what the image actually carries.
 # fsspec is the one package let out of the constraints: datasets 5.0.1 wants
 # fsspec <= 2026.6.0 and the base carries 2026.9.0 (publish run 37260216800
-# failed on exactly that); nothing in vLLM pins fsspec, and the import check
-# below proves vLLM still loads with the older one.
-RUN pip freeze | grep -v -i '^fsspec==' > /tmp/base-constraints.txt \
+# failed on exactly that); nothing in vLLM pins fsspec.
+#
+# torchvision is reinstalled to match torch. The base carries torch 2.14.0
+# with torchvision 0.28.0+cu129 (publish run 37263815010), a pair that does
+# not load ("operator torchvision::nms does not exist"), which breaks every
+# transformers import that touches vision and so `import trl`. torch 2.14
+# pairs with torchvision 0.29 and exists only as a CUDA 13 build, which is
+# what the base's nvidia/cu13 libraries are for.
+RUN pip freeze | grep -v -i -E '^(fsspec|torchvision)==' > /tmp/base-constraints.txt \
  && pip install --no-cache-dir -c /tmp/base-constraints.txt -r requirements.txt \
+ && pip install --no-cache-dir --no-deps --index-url https://download.pytorch.org/whl/cu130 "torchvision==0.29.0" \
  && pip freeze > /app/requirements.lock \
- && python3 -c "import importlib.metadata as m; print(' '.join(p + '=' + m.version(p) for p in ['torch', 'torchvision', 'transformers', 'vllm', 'trl', 'peft', 'datasets', 'accelerate', 'jsonschema']))" \
- && python3 -c "import datasets, accelerate, jsonschema, peft, torch, vllm; print('imports ok: datasets accelerate jsonschema peft torch vllm')"
-# Diagnostic, not a gate: on the GPU-less build runner `import trl` pulls
-# transformers' vision stack and died with "operator torchvision::nms does
-# not exist" (publish run 37262401309), which is either a torch/torchvision
-# pairing in the base or a CPU-only artefact. Print what happens so the
-# first GPU job of finetune-lora is not the first time anyone sees it.
-RUN python3 -c "import torch, torchvision; print('torch', torch.__version__, 'torchvision', torchvision.__version__); import torchvision.ops; print('torchvision ops ok')" || echo "DIAGNOSTIC: torchvision ops do not load on this CPU-only runner" \
- && (python3 -c "import trl; print('trl import ok', trl.__version__)" || echo "DIAGNOSTIC: trl does not import on this CPU-only runner; verify on the first GPU job")
+ && python3 -c "import importlib.metadata as m, torch; print(' '.join(p + '=' + m.version(p) for p in ['torch', 'torchvision', 'transformers', 'vllm', 'trl', 'peft', 'datasets', 'accelerate', 'jsonschema']), 'torch.cuda', torch.version.cuda)" \
+ && python3 -c "import torchvision.ops, trl, peft, datasets, accelerate, jsonschema, vllm; from vllm import LLM; print('imports ok: torchvision.ops trl peft datasets accelerate jsonschema vllm')"
 # The base has python3 but no `python` (publish run 37261402438: "python: not
 # found"); the templates' commands say `python`, so give them the alias.
 RUN ln -s "$(command -v python3)" /usr/local/bin/python
