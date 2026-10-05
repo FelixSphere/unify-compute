@@ -21,15 +21,25 @@ COPY requirements.txt ./
 # failed on exactly that); nothing in vLLM pins fsspec.
 #
 # torchvision is reinstalled to match torch. The base carries torch 2.14.0
-# with torchvision 0.28.0+cu129 (publish run 37263815010), a pair that does
-# not load ("operator torchvision::nms does not exist"), which breaks every
-# transformers import that touches vision and so `import trl`. torch 2.14
-# pairs with torchvision 0.29 and exists only as a CUDA 13 build, which is
-# what the base's nvidia/cu13 libraries are for.
+# (CUDA 13.0) with torchvision 0.28.0+cu129 (publish run 37263815010), a pair
+# that does not load ("operator torchvision::nms does not exist"), which
+# breaks every transformers import that touches vision and so `import trl`.
+# torch 2.14 pairs with torchvision 0.29 and exists only as a CUDA 13 build,
+# which is what the base's nvidia/cu13 libraries are for.
+#
+# torchaudio is removed. The base's 2.11.0+cu129 is compiled against CUDA
+# 12.9 and refuses to load next to the CUDA 13.0 torch (publish run
+# 37265125567: "PyTorch and TorchAudio were compiled with different CUDA
+# versions"), transformers imports it whenever it is installed, and no
+# matching build exists (torchaudio 2.11 is the newest). Nothing here does
+# audio; vLLM touches it only for audio models, which these templates never
+# load. The gate below has to construct-import vLLM's LLM without it.
 RUN pip freeze | grep -v -i -E '^(fsspec|torchvision)==' > /tmp/base-constraints.txt \
  && pip install --no-cache-dir -c /tmp/base-constraints.txt -r requirements.txt \
  && pip install --no-cache-dir --no-deps --index-url https://download.pytorch.org/whl/cu130 "torchvision==0.29.0" \
+ && pip uninstall -y torchaudio \
  && pip freeze > /app/requirements.lock \
+ && echo "torch-family and CUDA packages:" && grep -i -E '^(torch|nvidia-|triton|flashinfer|xformers)' /app/requirements.lock | tr '\n' ' ' && echo \
  && python3 -c "import importlib.metadata as m, torch; print(' '.join(p + '=' + m.version(p) for p in ['torch', 'torchvision', 'transformers', 'vllm', 'trl', 'peft', 'datasets', 'accelerate', 'jsonschema']), 'torch.cuda', torch.version.cuda)" \
  && python3 -c "import torchvision.ops, trl, peft, datasets, accelerate, jsonschema, vllm; from vllm import LLM; print('imports ok: torchvision.ops trl peft datasets accelerate jsonschema vllm')"
 # The base has python3 but no `python` (publish run 37261402438: "python: not
