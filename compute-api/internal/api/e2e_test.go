@@ -988,7 +988,8 @@ func testRefusedRequests(t *testing.T) {
 		{"relative mount", aliceKey, `{"sku":"a10g-24gb-x1","spec":{"image":"x","command":["true"],"outputs":[{"mount":"out"}],"max_runtime_seconds":60}}`, 400, "invalid_mount"},
 		{"too much metadata", aliceKey, `{"sku":"a10g-24gb-x1","spec":{"image":"x","command":["true"],"max_runtime_seconds":60},"metadata":{` + metadataPairs(17) + `}}`, 400, "invalid_metadata"},
 		{"unknown template", aliceKey, `{"template":"nope"}`, 400, "unknown_template"},
-		{"unavailable template", aliceKey, `{"template":"finetune-lora"}`, 400, "template_unavailable"},
+		// template_unavailable: every shipped template is available now; the
+		// code is produced by templates_test.go against its own template set.
 		{"field not overridable", aliceKey, `{"template":"batch-infer-vllm","spec":{"image":"x"}}`, 400, "field_not_overridable"},
 		{"missing input", aliceKey, `{"template":"batch-infer-vllm"}`, 400, "missing_input"},
 	} {
