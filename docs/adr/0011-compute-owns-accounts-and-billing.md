@@ -574,3 +574,4 @@ differ from the recommendations above, these win.
 | D6 | Legal review still required before the first live top-up (unchanged). |
 | D7 | Job links in emails move to `app.compute.unifyai.us/jobs/{id}` (as proposed). |
 | D8 | Sessions: 12 h idle, 7 days absolute (as proposed). |
+| D9 | **The account is the tenant: one account has one or more users, each with one email.** (Operator, 2026-10-03, correcting an earlier reading of `accounts.md` as single-user.) The schema already separates `accounts` (balance, keys, jobs) from `users` (logins); what D9 adds is roles (`owner`, `admin`, `member`), invitations and member management, specified in `accounts.md` "Members and roles" and planned as task A5b, required before the production cutover. Organisations above accounts and membership in several accounts are not planned. |

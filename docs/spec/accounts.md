@@ -62,6 +62,7 @@ marked **append-only** get the same refusing trigger as `usage_events`.
 | Column | Type | Notes |
 |---|---|---|
 | `id` | `bigint` identity PK | Fits the existing `holds.user_id` / `jobs.owner` scheme; owner string is `account:<id>` |
+| `name` | `text` | 1–64 chars, how the tenant appears in the dashboard and in member emails. Defaults to the first user's email at signup; owners and admins rename it (`PATCH /account`) |
 | `status` | `text` | `active`, `suspended`, `closed` |
 | `compute_enabled` | `boolean` | Default from `ACCOUNTS_COMPUTE_DEFAULT` (`false` while starting small; ADR-0011 D3) |
 | `available` | `bigint` | Quota units. `CHECK (available >= 0 OR status = 'suspended')`; only a chargeback drives it negative |
@@ -76,12 +77,24 @@ marked **append-only** get the same refusing trigger as `usage_events`.
 | Column | Type | Notes |
 |---|---|---|
 | `id` | `bigint` identity PK | |
-| `account_id` | `bigint` FK → accounts | Exactly one user per account today |
-| `role` | `text` | `owner` only, for now |
+| `account_id` | `bigint` FK → accounts | The account is the tenant: one or more users, each with one email (ADR-0011 D9). The user who signs up is its first `owner`; the rest arrive by invitation |
+| `role` | `text` | `owner`, `admin`, `member`; see [Members and roles](#members-and-roles) |
 | `email` | `text` | Stored NFC-normalised, trimmed, lower-cased; unique. Replaced by `closed+<id>@invalid` at closing |
 | `password_hash` | `text` | argon2id PHC string |
 | `status` | `text` | `pending`, `active`, `disabled`, `closed` |
 | `email_verified_at`, `last_login_at`, `password_changed_at`, `created_at` | `timestamptz` | |
+
+### `invitations`
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `text` PK | `inv_` + ULID |
+| `account_id` | `bigint` FK → accounts | |
+| `email` | `text` | Normalised like `users.email`. At most one live invitation per `(account_id, email)`; a new one supersedes the old |
+| `role` | `text` | `admin` or `member`; `owner` is granted by `PATCH /members/{id}`, never by invitation |
+| `token_digest` | `bytea` unique | SHA-256 of a 32-byte random token; the token travels only in the email link's fragment |
+| `invited_by` | `bigint` FK → users | |
+| `created_at`, `expires_at` (7 days), `accepted_at`, `revoked_at`, `superseded_at` | `timestamptz` | |
 
 ### `sessions`
 
@@ -220,7 +233,9 @@ Only compute's own events are stored; see [Stripe webhook](#stripe-webhook-post-
 `stripe`), `actor_id`, `account_id`, `action`, `ip`, `user_agent`, `reason`
 (required for `admin`), `detail jsonb`. Actions: `signup`, `verify`,
 `login`, `login_failed`, `logout`, `reset_requested`, `password_reset`,
-`password_changed`, `key_created`, `key_revoked`, `topup_created`,
+`password_changed`, `key_created`, `key_revoked`, `invited`,
+`invite_accepted`, `invite_revoked`, `member_removed`, `role_changed`,
+`account_renamed`, `topup_created`,
 `topup_credited`, `refund`, `dispute_opened`, `dispute_closed`,
 `account_suspended`, `account_reinstated`, `compute_enabled`,
 `limits_changed`, `admin_credit`, `admin_debit`, `export`, `account_closed`.
@@ -410,12 +425,14 @@ after the response, so neither the status nor the time depends on it.
 | `POST /login` | `{ email, password, website }` | `200 { user, account, csrf_token }` + `Set-Cookie` | Rotates any existing session |
 | `POST /password/forgot` | `{ email, website }` | `202 { status: "reset_requested" }` | Always `202` |
 | `POST /password/reset` | `{ token, password, password_confirm }` | `200 { status: "password_reset" }`, cookie cleared | Ends every session; does not log in |
+| `GET /invitations/{token}` | — | `200 { account_name, email, role, invited_by_email, expires_at }` | What the accept page shows. Expired, revoked or used is `404 not_found` |
+| `POST /invitations/accept` | `{ token, password, password_confirm }` | `200 { user, account, csrf_token }` + `Set-Cookie` | Creates an `active` user (the link proves the address) and logs in. An address that already belongs to a user is `409 email_in_use`: a user belongs to exactly one account, and the person logs in instead. Counts against the signup throttles |
 
 ### Session (cookie `__Host-uc_session` + `X-CSRF-Token`)
 
 | Route | Body | Success |
 |---|---|---|
-| `GET /me` | — | `{ user: { email, created_at }, account: { id, status, compute_enabled }, csrf_token }` |
+| `GET /me` | — | `{ user: { email, role, created_at }, account: { id, name, status, compute_enabled }, csrf_token }` |
 | `POST /logout` | — | `204`, cookie cleared |
 | `POST /password` | `{ current_password, password, password_confirm }` | `204`; other sessions ended. `current_password` is the recent-password check and counts as a reauth; wrong is `401 invalid_credentials` with `param: current_password` |
 | `POST /reauth` | `{ password }` | `204`; sets `reauth_at` |
@@ -437,8 +454,15 @@ after the response, so neither the status nor the time depends on it.
 | `POST /stripe/webhook` | Stripe event | Not for the pages: see [Stripe webhook](#stripe-webhook-post-dashboardv1stripewebhook). Built (B1) |
 | `GET /usage/jobs?month=|from=&to=&sku=&key=&after=&limit=` | — | The per-job view of the same settles: `{ object: "list", data: [{ object: "compute.job_usage", job_id, sku, status, key: { id, name, display }, started_at, finished_at, settled_at, gpu_seconds, usd }], has_more, next? }`, newest settle first, keyset on `(settled_at, job_id)`, `limit` 1–100 (default 20). `sku` and `key` (an API key id) filter; the page's `usd` values sum to `/usage`'s `gpu_usd` when unfiltered. Errors: `invalid_month`, `invalid_key`, `invalid_limit`, `invalid_cursor`. The console's per-request log, at the job grain |
 | `GET /usage/export?month=|from=&to=` | — | The same rows as `/usage/jobs`, unfiltered, as a CSV attachment named `unify-compute-usage-<from>-<to>.csv` with FOCUS 1.0 column names (`BillingAccountId`, `BillingPeriodStart/End`, `ChargePeriodStart/End`, `ChargeCategory`, `ServiceName`, `ResourceId`, `SkuId`, `ConsumedQuantity`, `ConsumedUnit`, `BilledCost`, `EffectiveCost`, …) plus `x_ApiKeyId`, `x_ApiKeyName`, `x_JobStatus`. At most 10 000 rows. Product-design C10 |
-| `GET /account/export` | — | `200` JSON attachment: user, account, keys (metadata), jobs, balance entries, top-ups |
-| `POST /account/close` | `{ password }` | `202`; jobs cancelled, keys revoked, artifacts deleted, sessions ended, address tombstoned |
+| `PATCH /account` | `{ name }` | `200 { account }`; owner or admin |
+| `GET /members` | — | `[{ user_id, email, role, status, created_at, last_login_at }]`, oldest first; any role may read |
+| `GET /members/invitations` | — | `[{ id, email, role, invited_by_email, created_at, expires_at }]`, live invitations only; owner or admin |
+| `POST /members/invitations` | `{ email, role }` | `201 { id, email, role, expires_at }`; owner or admin; `role` is `admin` or `member`. Needs reauth after 10 min. Emails the invitation. An address that is already a member is `409 already_member`; the 21st member (live invitations counted) is `403 member_limit_reached` |
+| `DELETE /members/invitations/{id}` | — | `204`; owner or admin |
+| `PATCH /members/{user_id}` | `{ role }` | `200`; owner only. Demoting the last `owner` is `409 last_owner`. Needs reauth after 10 min |
+| `DELETE /members/{user_id}` | — | `204`; owner removes anyone, admin removes members, anyone removes themself. Removing the last `owner` is `409 last_owner`. The user's sessions end and the user is `closed` with its address tombstoned; keys it created stay, because they belong to the account. Emails the removed address. Needs reauth after 10 min |
+| `GET /account/export` | — | `200` JSON attachment: account, members (metadata), keys (metadata), jobs, balance entries, top-ups; owner or admin |
+| `POST /account/close` | `{ password }` | `202`; owner only. Jobs cancelled, keys revoked, artifacts deleted, every member's sessions ended and every address tombstoned |
 
 Submitting jobs from the dashboard is not in the first version: customers
 submit with a key.
@@ -456,6 +480,43 @@ A deployment without a job service or ledger answers those routes `501
 not_implemented` (main always wires both with `ACCOUNTS_BACKEND=local`). A
 page section still says what will appear there when its route answers `404
 not_found` or `501`, so the pages also work against an older compute-api.
+
+## Members and roles
+
+The account is the tenant (ADR-0011 D9). Everything that costs or earns
+money belongs to it, never to a user: the balance, top-ups, API keys, jobs,
+artifacts, quotas. Users are logins with a role in exactly one account.
+
+| Can | owner | admin | member |
+|---|---|---|---|
+| See balance, transactions, usage, jobs, logs, artifacts, members | yes | yes | yes |
+| Create keys; revoke keys they created | yes | yes | yes |
+| Revoke any key | yes | yes | no |
+| Invite `admin`/`member`, revoke invitations, remove members | yes | yes (members only) | no |
+| Rename the account | yes | yes | no |
+| Top up | yes | yes | no |
+| Change roles, grant or take `owner` | yes | no | no |
+| Export, close the account | yes (export: admin too) | export only | no |
+
+Rules:
+
+- Signing up creates an account with its first `owner`. There is always at
+  least one `owner`; the last one cannot be demoted or removed (`409
+  last_owner`). Ownership changes hands by promoting another member first.
+- A member cap of 20 per account (live invitations included), raised by the
+  operator on request like the top-up limits (`admin account limits`).
+- An email belongs to at most one user, and a user to exactly one account.
+  Membership in several accounts, and organisations above accounts, are not
+  planned; a person who needs two tenants uses two addresses.
+- Invitations expire after 7 days, are single-use, and carry the role they
+  were sent with. The accept link proves the address, so no verification
+  code is sent. Throttle: 20 invitations per account per day.
+- Member actions (invite, role change, removal, rename) require a reauth
+  within 10 minutes, like key creation, and are audited with the acting
+  user as `actor_id`.
+- Job API keys carry no user identity: the job's owner is `account:<id>`
+  and `created_by` on the key is for the dashboard's key list and the audit
+  log. Per-user attribution of spend is not in scope.
 
 ## Job API changes (`/compute/v1`)
 
@@ -577,12 +638,16 @@ something the subject does not say.
 | Refund issued | admin refund | CTA "View balance" | `Unify Compute: refund of USD 20.00 issued` |
 | Account suspended | dispute or admin | CTA "Contact us" (mailto `contactus@felixsphere.com`, per UI-STANDARD) | `Your Unify Compute account is suspended` |
 | Compute enabled | admin `enable-compute` | CTA "Create an API key" | `Your Unify Compute account can now run jobs` |
+| Invitation | `POST /members/invitations` | CTA "Accept invitation" (link with token in the fragment); details: account name, inviter, role | `<inviter> invited you to <account> on Unify Compute` |
+| Invitation accepted | `POST /invitations/accept` (to the inviter) | CTA "View members" | `<email> joined <account> on Unify Compute` |
+| Removed from account | `DELETE /members/{id}` (to the removed address) | none (safety line names the account and who to contact) | `You were removed from <account> on Unify Compute` |
 | Job finished / failed / billing stopped | as `notifications.md` | as `notifications.md` | as `notifications.md`; the safety lines' "Unify API console" becomes the Unify Compute dashboard |
 | Storage arrears started / artifacts deletion scheduled / deleted | ADR-0008 | CTA "Top up" | `Unify Compute: storage unpaid, artifacts deleted on <date>` (and variants) |
 | Operator: top-up review request, dispute opened | limit refusal is not emailed; disputes are | — (plain operator notice to the operator address) | `[Unify Compute ops] dispute opened on tu_…` |
 
 The links open these dashboard pages on `APP_ORIGIN`: `/login`,
-`/forgot-password`, `/reset-password#token=…` and `/keys`
+`/forgot-password`, `/reset-password#token=…`, `/keys`, `/members` and
+`/accept-invitation#token=…`
 (`compute-api/internal/mailer/messages.go`). A7b and A7c build the pages at
 those paths or change them there.
 
@@ -662,5 +727,7 @@ them.
 1. Decisions D1–D8 in ADR-0011.
 2. Whether `pending` users can be purged earlier than 7 days under abuse.
 3. ~~A per-key monthly spend cap~~ Built: `api_keys.monthly_cap`, `PATCH /keys/{id}`, `403 key_cap_exceeded`.
-4. Breached-password checking, TOTP, organisations and invitations: later.
+4. Breached-password checking and TOTP: later. Organisations above accounts:
+   not planned; the account is the tenant and invitations are specified in
+   [Members and roles](#members-and-roles) (D9).
 5. The Terms and Conditions' refund and acceptable-use gaps (above).
