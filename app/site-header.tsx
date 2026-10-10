@@ -28,7 +28,7 @@ function useCurrentHash() {
   return hash;
 }
 
-export function SiteHeader({ homeHref = '/', current }: { homeHref?: string; current?: '/start' }) {
+export function SiteHeader({ homeHref = '/', current }: { homeHref?: string; current?: '/start' | '/marketplace' }) {
   const [open, setOpen] = useState(false);
   const hash = useCurrentHash();
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -45,8 +45,8 @@ export function SiteHeader({ homeHref = '/', current }: { homeHref?: string; cur
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') close(true);
     };
-    // The panel only exists below 1024px; widening the window must not leave it open and invisible.
-    const wide = window.matchMedia('(min-width: 1024px)');
+    // The panel only exists below 1152px; widening the window must not leave it open and invisible.
+    const wide = window.matchMedia('(min-width: 1152px)');
     const onWide = () => wide.matches && setOpen(false);
     document.addEventListener('keydown', onKey);
     wide.addEventListener('change', onWide);
@@ -83,6 +83,9 @@ export function SiteHeader({ homeHref = '/', current }: { homeHref?: string; cur
             {item.label}
           </a>
         ))}
+        <Link href="/marketplace" aria-current={current === '/marketplace' ? 'page' : undefined}>
+          Marketplace
+        </Link>
         <Link href="/start" aria-current={current === '/start' ? 'page' : undefined}>
           Quick start
         </Link>
@@ -118,6 +121,9 @@ export function SiteHeader({ homeHref = '/', current }: { homeHref?: string; cur
               {item.label}
             </a>
           ))}
+          <Link href="/marketplace" aria-current={current === '/marketplace' ? 'page' : undefined} onClick={() => close(false)}>
+            Marketplace
+          </Link>
           <Link href="/start" aria-current={current === '/start' ? 'page' : undefined} onClick={() => close(false)}>
             Quick start
           </Link>

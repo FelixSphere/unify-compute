@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { COMPUTE_API, CONTACT_EMAIL, EARLY_ACCESS_MAILTO, SIGN_UP_URL } from '../links';
 import { SiteFooter } from '../site-footer';
 import { SiteHeader } from '../site-header';
@@ -51,6 +52,10 @@ export default function Start() {
             </p>
             <Code label="List SKUs">{LIST_SKUS}</Code>
             <Code label="List templates">{LIST_TEMPLATES}</Code>
+            <p>
+              Or browse the templates, and the call that runs each one, in the{' '}
+              <Link href="/marketplace">marketplace</Link>.
+            </p>
           </li>
           <li id="account">
             <span className="step-number">02</span>

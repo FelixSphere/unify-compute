@@ -58,12 +58,42 @@ grep -q '<title>Get started — Unify Compute</title>' "$tmp/body" \
   || { echo "FAIL /start: title missing"; fail=1; }
 check /start/ 308 "Location: /start"
 
+# The template marketplace (ADR-0012), generated from compute-api/config at
+# build time. It must name no price while skus.json prices are placeholders
+# (AGENTS.md), and its publisher is always Unify Compute.
+check /marketplace 200 "Content-Type: text/html" "Cache-Control: no-cache" "${common[@]}"
+grep -q '<title>Marketplace — Unify Compute</title>' "$tmp/body" \
+  || { echo "FAIL /marketplace: title missing"; fail=1; }
+for id in $(sed -n 's/^      "id": "\([a-z0-9-]*\)",$/\1/p' "$(dirname "$0")/../../compute-api/config/templates.json"); do
+  grep -q "href=\"/marketplace/$id\"" "$tmp/body" \
+    || { echo "FAIL /marketplace: no card for template $id"; fail=1; }
+done
+check /marketplace/ 308 "Location: /marketplace"
+check /marketplace/batch-embed 200 "Content-Type: text/html" "Cache-Control: no-cache" "${common[@]}"
+grep -q '<title>Batch embeddings with vLLM — Unify Compute Marketplace</title>' "$tmp/body" \
+  || { echo "FAIL /marketplace/batch-embed: title missing"; fail=1; }
+grep -q 'compute/v1/jobs' "$tmp/body" \
+  || { echo "FAIL /marketplace/batch-embed: no run example"; fail=1; }
+check /marketplace/no-such-template 404
+# Each SKU price as skus.json writes it ("1.2000") and as copy would ("$1.20").
+# A bare "$7" is not a price: the export's flight data is full of them.
+prices=$(sed -n 's/.*"price_usd_per_hour": "\([0-9]*\)\.\([0-9][0-9]\)\([0-9]*\)".*/\1\\.\2\3|\\$\1\\.\2/p' \
+  "$(dirname "$0")/../../compute-api/config/skus.json" | paste -sd'|' -)
+for page in /marketplace /marketplace/batch-embed; do
+  curl -s "$base$page" > "$tmp/market"
+  if grep -qE "$prices|USD|per hour|/hour" "$tmp/market"; then
+    echo "FAIL $page: names a price: $(grep -oE ".{0,40}($prices|USD|per hour|/hour).{0,40}" "$tmp/market" | head -1)"; fail=1
+  fi
+  grep -q 'Unify Compute</dd>\|published by <!-- -->Unify Compute\|published by Unify Compute' "$tmp/market" \
+    || { echo "FAIL $page: publisher is not Unify Compute"; fail=1; }
+done
+
 # Log in / Sign up point at Compute's own account pages on production's app
 # host (app/links.ts; ADR-0011), on staging too, because the image is shared.
 # They must not point at the Unify API console, whose accounts Compute no
 # longer uses.
 links_ok=1
-for page in / /start /privacy; do
+for page in / /start /privacy /marketplace; do
   curl -s "$base$page" > "$tmp/links"
   for href in 'https://app.compute.unifyai.us/signup' 'https://app.compute.unifyai.us/login' '/start'; do
     grep -q "href=\"$href\"" "$tmp/links" \
@@ -138,7 +168,7 @@ check /brand 404
 # into 404s and every link click into a full page load. The payload must come
 # from the same build as the HTML, or the router discards it.
 privacy_version=$(curl -s "$base/privacy" | grep -oE 'deploymentVersion\\?":\\?"[0-9a-f-]+' | grep -oE '[0-9a-f-]{36}' | head -1)
-for page in /privacy /start /; do
+for page in /privacy /start /marketplace /marketplace/batch-embed /; do
   payload=$page.txt; [ "$page" = / ] && payload=/index.txt
   CURL_ARGS="-H RSC:1" check "$payload" 200 \
     "Content-Type: text/plain" "Cache-Control: no-cache" "${common[@]}"
