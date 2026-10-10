@@ -190,6 +190,10 @@ func dbLessErrorCodes(t *testing.T, doc map[string]any) map[string]bool {
 		"test catalogue":    newTestServer(t, "aws"),
 		"empty registry":    newTestServer(t, ""),
 		"shipped catalogue": New("test", real, reg, slog.New(slog.NewTextHandler(io.Discard, nil))),
+		// Every shipped template is available, so template_unavailable can
+		// only be produced against a set that still has a placeholder and a
+		// template on an unsold SKU (templates_test.go's).
+		"template set": newTemplateServer(t, "aws"),
 	}
 
 	type call struct{ method, path, key, body string }
@@ -208,6 +212,8 @@ func dbLessErrorCodes(t *testing.T, doc map[string]any) map[string]bool {
 		`{"sku":"a10g-24gb-x1","providers":["azure"],"spec":{"max_runtime_seconds":10}}`,
 		`{"sku":"a10g-24gb-x1","providers":["gcp"],"spec":{"max_runtime_seconds":10}}`,
 		validSubmit,
+		`{"template":"placeholder"}`,
+		`{"template":"on-unsold-sku"}`,
 	} {
 		calls = append(calls, call{"POST", "/compute/v1/jobs", "sk-abcdefghij", body})
 	}

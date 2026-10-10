@@ -87,6 +87,9 @@ ship). The base image is the vLLM image recorded above for the batch templates.
 | Component | Licence | Relationship |
 |---|---|---|
 | `vllm/vllm-openai:v0.30.0-cu129@sha256:a67f8f18…` | Apache-2.0 | Base of `finetune/Dockerfile`; carries torch, transformers and vLLM. |
+| `ghcr.io/felixsphere/unify-compute-finetune:finetune-2026-10-04@sha256:6d426175…` | Apache-2.0 (base) plus the rows below | Our image, built by `publish-image.yml` run 37266527011 from main `150de552`. Pinned in `templates.json` (`finetune-lora`, `batch-infer-lora`). linux/amd64 only. |
+| [torchvision](https://github.com/pytorch/vision) 0.29.0+cu130 | BSD-3-Clause | Reinstalled over the base's 0.28.0+cu129, which does not load beside the base's torch 2.14.0 (CUDA 13.0). |
+| torchaudio | — | Removed from the image: the base's 2.11.0+cu129 refuses to load beside CUDA 13.0 torch, and nothing here does audio. |
 | [TRL](https://github.com/huggingface/trl) 1.14.1 | Apache-2.0 | `train.py`: `SFTTrainer`. |
 | [PEFT](https://github.com/huggingface/peft) 0.21.2 | Apache-2.0 | `train.py`: LoRA (`LoraConfig`); vLLM loads the resulting adapter. |
 | [datasets](https://github.com/huggingface/datasets) 5.0.1 | Apache-2.0 | `train.py`: JSONL loading. |

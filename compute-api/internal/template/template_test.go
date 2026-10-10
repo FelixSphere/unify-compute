@@ -97,11 +97,14 @@ func TestFinetuneLoraMatchesTheReferenceRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ft.Available || ft.Image != "" {
-		t.Fatalf("finetune-lora has no published image yet and must stay unavailable: %+v", ft)
+	if !ft.Available || !strings.HasPrefix(ft.Image, "ghcr.io/felixsphere/unify-compute-finetune:") || !strings.Contains(ft.Image, "@sha256:") {
+		t.Fatalf("finetune-lora runs the published finetune image, pinned by digest: %+v", ft)
 	}
-	if ft.SKU != "a10g-24gb-x1-spot" || ft.MaxRuntimeSeconds != 7200 {
-		t.Fatalf("reference run is one A10G spot for 7200 s by default, got %s / %d", ft.SKU, ft.MaxRuntimeSeconds)
+	// The reference run used spot; the template defaults to the on-demand
+	// A10G because the catalogue does not sell the spot SKU yet (templates.md,
+	// open questions). Same 7200 s.
+	if ft.SKU != "a10g-24gb-x1" || ft.MaxRuntimeSeconds != 7200 {
+		t.Fatalf("one A10G for 7200 s by default, got %s / %d", ft.SKU, ft.MaxRuntimeSeconds)
 	}
 	if ft.Env["BASE_MODEL"] != "Qwen/Qwen3-4B-Instruct-2507" || ft.Env["FEW_SHOT_GATE"] != "0.95" {
 		t.Fatalf("env defaults drifted from finetune.yaml: %v", ft.Env)

@@ -43,7 +43,9 @@
       "id": "batch-infer-lora",
       "title": "Batch chat completions with your LoRA adapter",
       "description": "Runs an OpenAI batch file of /v1/chat/completions requests through vLLM with a LoRA adapter applied (for example the adapter.tar.gz a finetune-lora job produced) and writes one result line per request, like batch-infer-vllm. Default base model Qwen3-4B-Instruct-2507 (Apache-2.0); the adapter must have been trained on the same base.",
-      "image": "",
+      "image": "ghcr.io/felixsphere/unify-compute-finetune:finetune-2026-10-04@sha256:6d426175dcd0e2443df6da9cf68e96c079abe5a8b80d9f488d09019536272ac1",
+      "image_licence": "Apache-2.0",
+      "image_source": "ghcr.io/felixsphere/unify-compute-finetune, built by publish-image.yml run 37266527011 from main 150de552 (finetune/Dockerfile on vllm/vllm-openai:v0.30.0-cu129@sha256:a67f8f18…, Apache-2.0; adds TRL 1.14.1, PEFT 0.21.2, datasets 5.0.1, accelerate 1.15.0, jsonschema 4.26.0 and torchvision 0.29.0+cu130, removes torchaudio; linux/amd64 only; licences in THIRD-PARTY-LICENSES.md, Workload images)",
       "command": [
         "bash",
         "-c",
@@ -80,8 +82,7 @@
         "spec.env",
         "spec.max_runtime_seconds"
       ],
-      "available": false,
-      "unavailable_reason": "The finetune image (finetune/Dockerfile, ghcr.io/felixsphere/unify-compute-finetune) is built and published by publish-image.yml (image=finetune) but has not been published and pinned yet. After the first publish: pin its digest here, set the GHCR package public so workers can pull it, flip available, and release. See docs/spec/templates.md, finetune-lora."
+      "available": true
     },
     {
       "id": "batch-infer-vllm",
@@ -125,8 +126,10 @@
     {
       "id": "finetune-lora",
       "title": "LoRA fine-tune with evaluation",
-      "description": "The reference fine-tune: zero-shot and 3-shot baselines, a gate that stops if few-shot is already good enough, LoRA SFT with TRL and PEFT, and an eval with the adapter. Default base model Qwen3-4B-Instruct-2507 (Apache-2.0). Input is one data.tar.gz from finetune/prepare_data.py --archive; the adapter comes back as adapter.tar.gz, which batch-infer-lora takes as its input.",
-      "image": "",
+      "description": "The reference fine-tune: zero-shot and 3-shot baselines, a gate that stops if few-shot is already good enough, LoRA SFT with TRL and PEFT, and an eval with the adapter. Default base model Qwen3-4B-Instruct-2507 (Apache-2.0); on-demand A10G by default (override sku to a10g-24gb-x1-spot once the catalogue sells it). Input is one data.tar.gz from finetune/prepare_data.py --archive; the adapter comes back as adapter.tar.gz, which batch-infer-lora takes as its input.",
+      "image": "ghcr.io/felixsphere/unify-compute-finetune:finetune-2026-10-04@sha256:6d426175dcd0e2443df6da9cf68e96c079abe5a8b80d9f488d09019536272ac1",
+      "image_licence": "Apache-2.0",
+      "image_source": "ghcr.io/felixsphere/unify-compute-finetune, built by publish-image.yml run 37266527011 from main 150de552 (finetune/Dockerfile on vllm/vllm-openai:v0.30.0-cu129@sha256:a67f8f18…, Apache-2.0; adds TRL 1.14.1, PEFT 0.21.2, datasets 5.0.1, accelerate 1.15.0, jsonschema 4.26.0 and torchvision 0.29.0+cu130, removes torchaudio; linux/amd64 only; licences in THIRD-PARTY-LICENSES.md, Workload images)",
       "command": [
         "bash",
         "-c",
@@ -137,7 +140,7 @@
         "FEW_SHOT_GATE": "0.95",
         "SCHEMA": ""
       },
-      "sku": "a10g-24gb-x1-spot",
+      "sku": "a10g-24gb-x1",
       "max_runtime_seconds": 7200,
       "inputs": [
         {
@@ -157,8 +160,7 @@
         "spec.env",
         "spec.max_runtime_seconds"
       ],
-      "available": false,
-      "unavailable_reason": "The finetune image (finetune/Dockerfile, ghcr.io/felixsphere/unify-compute-finetune) is built and published by publish-image.yml (image=finetune) but has not been published and pinned yet. After the first publish: pin its digest here, set the GHCR package public so workers can pull it, flip available, and release. See docs/spec/templates.md, finetune-lora."
+      "available": true
     }
   ]
 }

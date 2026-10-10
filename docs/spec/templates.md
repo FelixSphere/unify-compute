@@ -142,8 +142,8 @@ ran. *Planned:* the Job also records the template id; it does not yet.
 |---|---|---|---|
 | `batch-embed` | `vllm/vllm-openai:v0.30.0-cu129@sha256:a67f8f18…` | `a10g-24gb-x1` | yes (not yet run on a real cloud) |
 | `batch-infer-vllm` | same | `a10g-24gb-x1` | yes (same caveat) |
-| `batch-infer-lora` | `ghcr.io/felixsphere/unify-compute-finetune` (not yet published) | `a10g-24gb-x1` | no, until the image is pinned |
-| `finetune-lora` | same | `a10g-24gb-x1-spot` | no, until the image is pinned |
+| `batch-infer-lora` | `ghcr.io/felixsphere/unify-compute-finetune:finetune-2026-10-04@sha256:6d426175…` | `a10g-24gb-x1` | yes (not yet run on a real cloud) |
+| `finetune-lora` | same | `a10g-24gb-x1` | yes (same caveat) |
 
 ### Image provenance
 
@@ -174,16 +174,25 @@ exact pins in `finetune/requirements.txt` (TRL, PEFT, datasets, accelerate,
 jsonschema; all Apache-2.0 or MIT, recorded in `THIRD-PARTY-LICENSES.md`),
 and the scripts `prepare_data.py`, `train.py`, `eval.py`, `infer_lora.py`,
 `record.py` at `/app`. `publish-image.yml` (`image=finetune`, or a
-`finetune-v*` tag) builds it for `linux/amd64` only, imports every dependency
-on CPU before pushing, and prints the digest to pin. GPU workers are x86
-(g5); the Graviton hosts never run it, and the `pinned-images` CI job does not
-scan `templates.json`.
+`finetune-v*` tag) builds it for `linux/amd64` only, frees the runner's disk
+first (the base unpacks to more than the 72 GB runner has free), constrains
+pip to the base's packages, and gates the push on importing `torchvision.ops`,
+`trl`, `peft`, `datasets`, `accelerate`, `jsonschema` and vLLM's `LLM`. GPU
+workers are x86 (g5); the Graviton hosts never run it, and the `pinned-images`
+CI job does not scan `templates.json`.
 
-Turning the two templates on is a second, small PR once the image exists: pin
-the digest as their `image`, set `image_licence`/`image_source`, make the
-GHCR package public (workers pull without credentials), flip `available`, and
-update `TestFinetuneLoraMatchesTheReferenceRun`, which pins them unavailable
-until then.
+The base's own torch family is not consistent: torch 2.14.0 (CUDA 13.0) ships
+beside torchvision 0.28.0+cu129 and torchaudio 2.11.0+cu129, which vLLM never
+loads but transformers does the moment a training import touches vision or
+audio. The image therefore reinstalls torchvision as 0.29.0+cu130 and removes
+torchaudio (no matching build exists; nothing here does audio). The first
+publish took nine runs to get there (37257555345 … 37266527011); the
+Dockerfile's comments carry the reasons.
+
+Published 2026-10-05 as digest `6d426175…` (run 37266527011, from main
+`150de552`) and pinned in both templates. The GHCR package must be **public**
+for workers to pull it without credentials; that is a package setting the
+operator changes once.
 
 ### `finetune-lora`
 
@@ -203,11 +212,11 @@ declared mounts `/mnt/in` and `/mnt/out`; `BASE_MODEL`, `FEW_SHOT_GATE` and
 run uses, and the default runtime is `launch.sh`'s 7200 s. A test pins these
 steps so the two cannot drift silently.
 
-It is `available: false` until the finetune image is published and pinned
-(above). Of what was missing when the placeholder was written:
+It is available since the image was pinned (above); it has not yet run on a
+real cloud. Of what was missing when the placeholder was written:
 
-1. **An image.** Now defined (`finetune/Dockerfile`, pinned requirements,
-   `publish-finetune` job); published and pinned by the follow-up PR.
+1. **An image.** Built, published and pinned (`finetune/Dockerfile`,
+   `publish-finetune`).
 2. **Input and output transfer.** Done by the backend: https inputs are
    fetched into the mount by the run step, outputs are uploaded by the
    artifacts step after the command, whatever its exit status (ADR-0005).
@@ -246,10 +255,10 @@ pins the pairing.
 ## Open questions
 
 - Default SKU for `finetune-lora`: the reference task runs spot
-  (`use_spot: true`), so the template defaults to `a10g-24gb-x1-spot`, which
-  the catalogue does not sell yet. `finetune/README.md` names `a10g-24gb-x1` in
-  its recipe table. If the first customers should fine-tune on-demand, change
-  the default; it is overridable either way.
+  (`use_spot: true`), but the catalogue does not sell `a10g-24gb-x1-spot`, and
+  a template whose default SKU is unsold is itself unavailable. The default is
+  therefore the on-demand `a10g-24gb-x1` (what `finetune/README.md`'s recipe
+  table names); customers override `sku` to the spot SKU the day it is sold.
 - Whether SkyPilot pulls a digest reference through `image_id: docker:<ref>`
   unchanged has not been tried.
 - Whether a customer may define their own templates (per account, not

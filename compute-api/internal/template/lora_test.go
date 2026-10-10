@@ -21,12 +21,13 @@ func TestBatchInferLoraPairsWithFinetuneLora(t *testing.T) {
 	ft, _ := s.Get("finetune-lora")
 	base, _ := s.Get("batch-infer-vllm")
 
-	// Both wait on the same image; the reason names the publish step.
-	if li.Available || li.Image != "" || ft.Available || ft.Image != "" {
-		t.Fatalf("the finetune image is not published yet; both templates must stay unavailable: %v %v", li.Available, ft.Available)
+	// Both run the same published image, so an adapter trained by one is
+	// loaded by a vLLM built from the same torch.
+	if !li.Available || !ft.Available || li.Image != ft.Image || !strings.Contains(li.Image, "unify-compute-finetune:") || !strings.Contains(li.Image, "@sha256:") {
+		t.Fatalf("both templates run the same digest-pinned finetune image: %q vs %q", li.Image, ft.Image)
 	}
-	if li.UnavailableReason != ft.UnavailableReason || !strings.Contains(li.UnavailableReason, "unify-compute-finetune") {
-		t.Fatalf("unavailable reasons should be the same image story: %q", li.UnavailableReason)
+	if li.ImageLicence == "" || li.ImageSource == "" || ft.ImageLicence == "" || ft.ImageSource == "" {
+		t.Fatal("available templates record their image licence and source")
 	}
 	// Same base model and revision as the plain batch template, so an
 	// adapter trained with finetune-lora's default base is served on it.
