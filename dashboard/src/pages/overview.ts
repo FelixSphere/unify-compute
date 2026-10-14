@@ -4,6 +4,7 @@ import {
   CONTACT,
   type Child,
   duration,
+  empty,
   fill,
   get,
   h,
@@ -19,6 +20,7 @@ import {
   setText,
   shell,
   showBalance,
+  usd,
   when,
 } from '../shell';
 
@@ -84,7 +86,7 @@ async function showSpend() {
     return;
   }
   const u = r.data;
-  setText('spend-total', u.total_usd);
+  setText('spend-total', usd(u.total_usd));
   fill(
     'spend-sub',
     u.jobs === 0
@@ -102,7 +104,7 @@ async function showRunning() {
   }
   const [j, ...rest] = r.data.data;
   if (!j) {
-    fill('running', muted('Nothing is running. ', h('a', { href: '/jobs' }, 'All jobs')));
+    fill('running', h('p', { class: 'stat-value' }, '0'), muted('Nothing is running. ', h('a', { href: '/jobs' }, 'All jobs')));
     return;
   }
   const now = Date.now() / 1000;
@@ -117,7 +119,7 @@ async function showRunning() {
       j.started_at
         ? h('div', {}, h('dt', {}, 'Running for'), h('dd', {}, mono(duration(now - j.started_at))))
         : h('div', {}, h('dt', {}, 'Submitted'), h('dd', {}, when(j.created_at))),
-      est ? h('div', {}, h('dt', {}, 'Estimated so far'), h('dd', {}, mono('USD ' + est))) : null,
+      est ? h('div', {}, h('dt', {}, 'Estimated so far'), h('dd', {}, mono('USD ' + usd(est)))) : null,
     ),
     rest.length || r.data.has_more ? muted('Other jobs are queued or running too. ', h('a', { href: '/jobs' }, 'All jobs')) : null,
   );
@@ -197,7 +199,7 @@ export async function overview() {
     return;
   }
   if (r.data.data.length === 0) {
-    fill('recent-jobs', muted('No jobs yet. Run a template from the ', h('a', { href: '/marketplace' }, 'Marketplace'), ', or create an ', h('a', { href: '/keys' }, 'API key'), ' and follow the ', h('a', { href: QUICK_START }, 'quick start'), '.'));
+    fill('recent-jobs', empty('No jobs yet', 'Run a template from the ', h('a', { href: '/marketplace' }, 'Marketplace'), ', or create an ', h('a', { href: '/keys' }, 'API key'), ' and follow the ', h('a', { href: QUICK_START }, 'quick start'), '.'));
     return;
   }
   fill('recent-jobs', jobsTable('Recent jobs', r.data.data));

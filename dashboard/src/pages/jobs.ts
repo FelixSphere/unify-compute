@@ -1,5 +1,5 @@
 import { $ } from '../lib';
-import { fill, get, type Job, jobsTable, type List, muted, notBuilt, setText, shell } from '../shell';
+import { empty, fill, get, h, type Job, jobsTable, type List, muted, notBuilt, setText, shell } from '../shell';
 
 function chipsInit(onChange: (status: string) => void) {
   const chips = Array.from(document.querySelectorAll<HTMLButtonElement>('#filters .chip'));
@@ -38,7 +38,14 @@ export async function jobs() {
     shown = append ? shown.concat(r.data.data) : r.data.data;
     cursor = r.data.has_more ? r.data.next : undefined;
     more.hidden = !cursor;
-    fill('jobs-list', shown.length ? jobsTable('Jobs', shown) : muted(filter ? 'No jobs with this status.' : 'No jobs yet.'));
+    fill(
+      'jobs-list',
+      shown.length
+        ? jobsTable('Jobs', shown)
+        : filter
+          ? empty('No jobs with this status')
+          : empty('No jobs yet', 'Run a template from the ', h('a', { href: '/marketplace' }, 'Marketplace'), ', or submit one with an ', h('a', { href: '/keys' }, 'API key'), '.'),
+    );
   }
 
   chipsInit((s) => {

@@ -1,5 +1,5 @@
 import { $, setFormError } from '../lib';
-import { type Child, duration, fill, get, getText, h, type Job, jobState, type List, mono, muted, notBuilt, send, setText, shell, table, when } from '../shell';
+import { type Child, duration, fill, get, getText, h, type Job, jobState, type List, mono, muted, notBuilt, send, setText, shell, table, usd, when } from '../shell';
 
 type JobEvent = { id: string; type: string; created_at: number; data: Record<string, unknown> };
 type Artifact = { path: string; size: number; sha256: string; url: string; expires_at: number };
@@ -38,11 +38,11 @@ export async function job() {
 
   function render(j: Job) {
     const u = j.usage;
-    setText('job-settled', u?.settled_cost_usd ?? '—');
+    setText('job-settled', usd(u?.settled_cost_usd));
     fill(
       'job-sub',
       jobState(j.status),
-      u ? ` · USD ${u.hold_usd} held · ceiling USD ${u.estimated_cost_usd}` : '',
+      u ? ` · USD ${usd(u.hold_usd)} held · ceiling USD ${usd(u.estimated_cost_usd)}` : '',
     );
     cancelButton.hidden = TERMINAL.has(j.status) || me!.account.status !== 'active';
     facts('job-details', [

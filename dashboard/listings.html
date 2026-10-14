@@ -9,16 +9,14 @@
   <body class="app" data-page="listings">
     <!-- @shell:listings -->
     <main class="content" id="main" tabindex="-1">
-      <h1 class="sr-only">My listings</h1>
       <!-- @form-error -->
-      <section class="focal" aria-labelledby="focal-label">
+      <div class="page-head">
         <div>
-          <p class="eyebrow" id="focal-label">Templates you publish</p>
-          <p class="metric" id="lst-count" aria-live="polite">—</p>
-          <p class="sub">Submit a template for review. Once approved it appears in the marketplace under the publisher Unify Compute; nothing about your account is shown. Any change asks for review again, and you can take it off the market at any time.</p>
+          <h1>My listings</h1>
+          <p class="page-desc">Submit a template for review. Once approved it appears in the marketplace under the publisher Unify Compute; nothing about your account is shown. Any change asks for review again, and you can take it off the market at any time.</p>
         </div>
         <button class="primary" type="button" id="new-open">New listing</button>
-      </section>
+      </div>
 
       <p class="warning" id="closed-note" role="note" hidden>This deployment doesn't serve account listings to buyers yet. You can submit and edit listings; approved ones wait until it does.</p>
 
@@ -39,7 +37,10 @@
       </section>
 
       <section class="section" aria-labelledby="list-title">
-        <h2 id="list-title">Listings</h2>
+        <div class="section-head">
+          <h2 id="list-title">Listings</h2>
+          <p class="muted"><span id="lst-count">—</span> on the market</p>
+        </div>
         <p class="status-line" id="lst-status" role="status"></p>
         <div id="lst-list" aria-live="polite"><p class="muted">Loading listings…</p></div>
       </section>

@@ -1,5 +1,5 @@
 import { $, busy, clearFieldError, focusFirstInvalid, input, onSubmit, setFieldError, showApiError } from '../lib';
-import { cents, fill, get, h, type List, listOf, mono, muted, notBuilt, send, setText, shell, state, table, when, withReauth } from '../shell';
+import { cents, empty, fill, get, h, type List, listOf, mono, muted, notBuilt, send, setText, shell, state, table, usd, when, withReauth } from '../shell';
 
 type Key = {
   id: number | string;
@@ -38,30 +38,28 @@ export async function keys() {
   async function load() {
     const r = await get<Key[] | List<Key>>('/keys');
     if (!r.ok) {
-      setText('keys-count', '—');
+      setText('keys-count', '');
       fill('keys-list', muted(notBuilt(r.error) ? 'Your API keys will be listed here once keys are live in the dashboard.' : r.error.message));
       return;
     }
     const list = listOf(r.data).data;
-    setText('keys-count', String(list.filter(active).length));
+    const n = list.filter(active).length;
+    setText('keys-count', `${n} active of 10`);
     if (list.length === 0) {
-      fill('keys-list', muted('No keys yet. Create one to submit jobs.'));
+      fill('keys-list', empty('No keys yet', 'Create a key to submit jobs from your own code.'));
       return;
     }
     fill(
       'keys-list',
       table(
         'API keys',
-        [{ text: 'Name' }, { text: 'Key' }, { text: 'Access' }, { text: 'This month / cap (USD)', num: true }, { text: 'Created' }, { text: 'Expires' }, { text: 'Last used' }, { text: 'Status' }, { text: '' }],
+        [{ text: 'Key' }, { text: 'Access' }, { text: 'This month / cap (USD)', num: true }, { text: 'Expires' }, { text: 'Last used' }, { text: 'Status' }, { text: '' }],
         list.map((k) => {
           const live = active(k);
           const st = k.revoked_at ? state('Revoked', 'muted') : live ? state('Active', 'success') : state('Expired', 'muted');
           const spent = k.spent_this_month_usd ?? '—';
-          const capCell = h(
-            'span',
-            { class: 'mono' },
-            `${spent} / ${k.monthly_cap_usd ?? 'no cap'}`,
-          );
+          const capCell = h('span', { class: 'mono' }, `${usd(spent)} / ${k.monthly_cap_usd ? usd(k.monthly_cap_usd) : 'no cap'}`);
+          const nameCell = h('span', { class: 'cell-stack' }, h('strong', {}, k.name), mono(k.display));
           const actions = h('span', { class: 'row-actions' });
           if (live) {
             actions.append(
@@ -70,7 +68,7 @@ export async function keys() {
               h('button', { type: 'button', class: 'link', 'data-revoke': String(k.id), 'data-display': k.display, 'aria-label': `Revoke ${k.name}` }, 'Revoke'),
             );
           }
-          return [k.name, mono(k.display), k.scopes.includes('jobs') ? 'Jobs' : 'Read only', capCell, when(k.created_at), k.expires_at ? when(k.expires_at) : 'Never', when(k.last_used_at), st, actions];
+          return [nameCell, k.scopes.includes('jobs') ? 'Jobs' : 'Read only', capCell, k.expires_at ? when(k.expires_at) : 'Never', k.last_used_at ? when(k.last_used_at) : 'Never', st, actions];
         }),
       ),
     );

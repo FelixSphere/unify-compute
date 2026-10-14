@@ -9,56 +9,76 @@
   <body class="app" data-page="usage">
     <!-- @shell:usage -->
     <main class="content" id="main" tabindex="-1">
-      <h1 class="sr-only">Usage</h1>
       <!-- @form-error -->
-      <section class="focal" aria-labelledby="focal-label">
+      <div class="page-head">
         <div>
+          <h1>Usage</h1>
+          <p class="page-desc">Settled charges for GPU time, artifact storage and egress: by meter, by day, by API key and by job.</p>
+        </div>
+        <div class="toolbar" role="group" aria-label="Period">
+          <select id="usage-range" aria-label="Period">
+            <option value="month" selected>Calendar month</option>
+            <option value="7d">Last 7 days</option>
+            <option value="30d">Last 30 days</option>
+            <option value="custom">Custom dates</option>
+          </select>
+          <span class="toolbar-group" id="month-controls">
+            <button class="icon-button" type="button" id="month-prev" aria-label="Previous month"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m15 18-6-6 6-6"/></svg></button>
+            <button class="icon-button" type="button" id="month-next" aria-label="Next month"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m9 18 6-6-6-6"/></svg></button>
+          </span>
+          <span class="toolbar-group" id="custom-controls" hidden>
+            <input type="date" id="usage-from" aria-label="From" />
+            <span class="muted">to</span>
+            <input type="date" id="usage-to" aria-label="To" />
+            <button class="ghost small" type="button" id="usage-apply">Apply</button>
+          </span>
+          <a class="ghost small" id="usage-export" href="#" download>Export CSV</a>
+        </div>
+      </div>
+
+      <div class="stats">
+        <section class="card stat-card hero" aria-labelledby="focal-label">
           <p class="eyebrow" id="focal-label">Spent in <span id="usage-month-label"></span> · USD</p>
-          <p class="metric" id="usage-total" aria-live="polite">—</p>
-          <p class="sub" id="usage-sub">Settled charges for GPU time, storage and egress.</p>
-        </div>
-        <div class="period-nav" role="group" aria-label="Period">
-          <label>Period
-            <select id="usage-range">
-              <option value="month" selected>Calendar month</option>
-              <option value="7d">Last 7 days</option>
-              <option value="30d">Last 30 days</option>
-              <option value="custom">Custom dates</option>
-            </select>
-          </label>
-          <span class="month-nav" id="month-controls">
-            <button class="ghost" type="button" id="month-prev">Previous month</button>
-            <button class="ghost" type="button" id="month-next">Next month</button>
-          </span>
-          <span class="month-nav" id="custom-controls" hidden>
-            <label>From <input type="date" id="usage-from" /></label>
-            <label>To <input type="date" id="usage-to" /></label>
-            <button class="ghost" type="button" id="usage-apply">Apply</button>
-          </span>
-          <a class="ghost" id="usage-export" href="#" download>Export CSV</a>
-        </div>
-      </section>
-      <section class="section" aria-labelledby="breakdown-title">
-        <h2 id="breakdown-title">Breakdown</h2>
-        <div id="usage-breakdown" aria-live="polite"><p class="muted">Loading usage…</p></div>
-      </section>
-      <section class="section" aria-labelledby="days-title">
-        <h2 id="days-title">By day</h2>
-        <div id="usage-days" aria-live="polite"></div>
-      </section>
-      <section class="section" aria-labelledby="keys-title">
-        <h2 id="keys-title">By API key</h2>
-        <div id="usage-keys" aria-live="polite"></div>
-      </section>
-      <section class="section" aria-labelledby="jobs-title">
-        <h2 id="jobs-title">Charged jobs</h2>
-        <div class="filters" role="group" aria-label="Filter charged jobs">
-          <label>SKU <select id="usage-sku"><option value="">All</option></select></label>
-          <label>API key <select id="usage-key"><option value="">All</option></select></label>
-        </div>
-        <div id="usage-jobs" aria-live="polite"></div>
-        <button class="ghost" type="button" id="usage-jobs-more" hidden>Load more</button>
-      </section>
+          <p class="stat-value" id="usage-total" aria-live="polite">—</p>
+          <p class="muted" id="usage-sub">Loading usage…</p>
+        </section>
+        <section class="card stat-card" aria-labelledby="gpu-label">
+          <p class="eyebrow" id="gpu-label">GPU time</p>
+          <p class="stat-value" id="usage-gpu-time" aria-live="polite">—</p>
+          <p class="muted" id="usage-gpu-sub"></p>
+        </section>
+      </div>
+
+      <div class="empty" id="usage-empty" hidden>
+        <h3>Nothing charged in <span id="usage-empty-label"></span></h3>
+        <p>Charges appear here as jobs finish. Run a template from the <a href="/marketplace">Marketplace</a> to get started.</p>
+      </div>
+
+      <div id="usage-detail">
+        <section class="section" aria-labelledby="breakdown-title">
+          <h2 id="breakdown-title">Breakdown</h2>
+          <div id="usage-breakdown" aria-live="polite"><p class="muted">Loading usage…</p></div>
+        </section>
+        <section class="section" aria-labelledby="days-title">
+          <h2 id="days-title">By day</h2>
+          <div id="usage-days" aria-live="polite"></div>
+        </section>
+        <section class="section" aria-labelledby="keys-title">
+          <h2 id="keys-title">By API key</h2>
+          <div id="usage-keys" aria-live="polite"></div>
+        </section>
+        <section class="section" aria-labelledby="jobs-title">
+          <div class="section-head">
+            <h2 id="jobs-title">Charged jobs</h2>
+            <div class="filters" role="group" aria-label="Filter charged jobs">
+              <label>SKU <select id="usage-sku"><option value="">All</option></select></label>
+              <label>API key <select id="usage-key"><option value="">All</option></select></label>
+            </div>
+          </div>
+          <div id="usage-jobs" aria-live="polite"></div>
+          <button class="ghost more" type="button" id="usage-jobs-more" hidden>Load more</button>
+        </section>
+      </div>
     </main>
   </body>
 </html>

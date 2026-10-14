@@ -9,19 +9,24 @@
   <body class="app" data-page="billing">
     <!-- @shell:billing -->
     <main class="content" id="main" tabindex="-1">
-      <h1 class="sr-only">Billing</h1>
       <!-- @form-error -->
-      <section class="focal" aria-labelledby="focal-label">
+      <div class="page-head">
         <div>
-          <p class="eyebrow" id="focal-label">Available balance · USD</p>
-          <p class="metric" id="balance-available" aria-live="polite">—</p>
-          <p class="sub" id="balance-sub">Loading your balance…</p>
+          <h1>Billing</h1>
+          <p class="page-desc">Jobs are paid from a prepaid balance in USD. A job holds an estimate when it starts and settles what it used when it finishes.</p>
         </div>
         <a class="primary" id="contact-primary" href="mailto:contactus@felixsphere.com?subject=Unify%20Compute%20credit">Contact us</a>
         <button class="primary" type="button" id="topup-open" hidden>Add credit</button>
-      </section>
+      </div>
       <p class="status-line" id="topup-status" role="status" tabindex="-1"></p>
-      <section class="card" id="topup-off" aria-labelledby="topup-off-title">
+      <div class="stats one">
+        <section class="card stat-card hero" aria-labelledby="focal-label">
+          <p class="eyebrow" id="focal-label">Available balance · USD</p>
+          <p class="stat-value" id="balance-available" aria-live="polite">—</p>
+          <p class="muted" id="balance-sub">Loading your balance…</p>
+        </section>
+      </div>
+      <section class="card narrow" id="topup-off" aria-labelledby="topup-off-title">
         <h2 id="topup-off-title">Adding credit</h2>
         <p class="muted">Card top-ups are coming. Until then, contact us and we'll add credit to your balance by hand.</p>
       </section>
@@ -62,17 +67,19 @@
         <div id="topups" aria-live="polite"></div>
       </section>
       <section class="section" aria-labelledby="history-title">
-        <h2 id="history-title">Balance history</h2>
-        <div class="filters" role="group" aria-label="Filter balance history">
-          <label>Show
-            <select id="history-kind">
-              <option value="" selected>Everything</option>
-              <option value="settle">Charges</option>
-              <option value="topup,refund">Top-ups and refunds</option>
-              <option value="hold,extend,release">Holds and releases</option>
-              <option value="admin_credit,admin_debit,writeoff,dispute,dispute_reversal">Adjustments and disputes</option>
-            </select>
-          </label>
+        <div class="section-head">
+          <h2 id="history-title">Balance history</h2>
+          <div class="filters" role="group" aria-label="Filter balance history">
+            <label>Show
+              <select id="history-kind">
+                <option value="" selected>Everything</option>
+                <option value="settle">Charges</option>
+                <option value="topup,refund">Top-ups and refunds</option>
+                <option value="hold,extend,release">Holds and releases</option>
+                <option value="admin_credit,admin_debit,writeoff,dispute,dispute_reversal">Adjustments and disputes</option>
+              </select>
+            </label>
+          </div>
         </div>
         <div id="history" aria-live="polite"><p class="muted">Loading balance history…</p></div>
         <button class="ghost more" type="button" id="history-more" hidden>Load more</button>

@@ -579,13 +579,13 @@ async function dashboardChecks() {
 
   // --- Overview: the shell, the focal balance, compute access, recent jobs.
   await appLoad('/');
-  await waitFor(`document.querySelector('#balance-available')?.textContent === '12.5000'`, 'overview balance');
+  await waitFor(`document.querySelector('#balance-available')?.textContent === '12.50'`, 'overview balance');
   const shellBox = await evaluate(`(() => {
     const r = (s) => document.querySelector(s).getBoundingClientRect();
     const cur = document.querySelector('.app-nav a[aria-current="page"]');
     return { header: r('.app-header').height, nav: r('.app-nav').width, cur: cur?.getAttribute('href'), curBg: getComputedStyle(cur).backgroundColor,
       avatar: r('#account-button').width, initials: document.querySelector('#account-initials').textContent,
-      metric: getComputedStyle(document.querySelector('.metric')).fontSize, metricFont: getComputedStyle(document.querySelector('.metric')).fontFamily };
+      metric: getComputedStyle(document.querySelector('.stat-card.hero .stat-value')).fontSize, metricFont: getComputedStyle(document.querySelector('.stat-card.hero .stat-value')).fontFamily };
   })()`);
   check(
     shellBox.header === 64 && shellBox.nav === 216 && shellBox.cur === '/' && shellBox.curBg === 'rgb(14, 14, 14)' && shellBox.avatar === 36 && shellBox.initials === 'JD',
@@ -593,12 +593,12 @@ async function dashboardChecks() {
     `app shell: ${JSON.stringify(shellBox)}`,
   );
   check(
-    shellBox.metric === '64px' && shellBox.metricFont.includes('Space Grotesk'),
-    'focal number in Space Grotesk 64px',
+    shellBox.metric === '40px' && shellBox.metricFont.includes('Space Grotesk'),
+    'focal number in Space Grotesk 40px (W8: the first stat card, not a 64px hero)',
     `focal number is ${shellBox.metric} ${shellBox.metricFont}`,
   );
   check(
-    (await text('#balance-sub')).includes('2.5400'),
+    (await text('#balance-sub')).includes('2.54'),
     'overview shows the held amount under the balance',
     `overview balance sub-line: ${await text('#balance-sub')}`,
   );
@@ -649,7 +649,7 @@ async function dashboardChecks() {
   // --- API keys: create (reauth first), the key shown once, revoke.
   await appLoad('/keys');
   await waitFor(`document.querySelector('#keys-list')?.textContent.includes('uck_AbCd1234')`, 'keys list');
-  check((await text('#keys-count')) === '1', 'keys: focal count of active keys', `keys count: ${await text('#keys-count')}`);
+  check((await text('#keys-count')) === '1 active of 10', 'keys: count of active keys beside the list', `keys count: ${await text('#keys-count')}`);
   await onePrimary('/keys');
   await click('#create-open');
   check(
@@ -738,7 +738,7 @@ async function dashboardChecks() {
   await appLoad(`/jobs/${JOB_ID}`);
   await waitFor(`!document.querySelector('#job').hidden`, 'job detail');
   check(
-    (await text('#job-settled')) === '0.8600' && (await text('#job-sub')).includes('Running') && (await text('#job-usage')).includes('2.5400') && (await text('#job-details')).includes('a10g-24gb-x1'),
+    (await text('#job-settled')) === '0.86' && (await text('#job-sub')).includes('Running') && (await text('#job-usage')).includes('2.5400') && (await text('#job-details')).includes('a10g-24gb-x1'),
     'job detail: charged so far, status, hold and SKU',
     `job detail: ${await text('#job-settled')} / ${await text('#job-sub')}`,
   );
@@ -779,7 +779,7 @@ async function dashboardChecks() {
   // --- Usage and Billing.
   stubs = baseStubs();
   await appLoad('/usage');
-  await waitFor(`document.querySelector('#usage-total')?.textContent === '3.4000'`, 'usage total');
+  await waitFor(`document.querySelector('#usage-total')?.textContent === '3.40'`, 'usage total');
   const now = new Date();
   const month = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
   check(new URL(apiCalls.filter((c) => c.path === '/usage').at(-1).url).searchParams.get('month') === month, `usage asks for ${month}`, 'usage month parameter wrong');
@@ -791,7 +791,7 @@ async function dashboardChecks() {
   await appLoad('/billing');
   await waitFor(`document.querySelector('#history')?.textContent.includes('Charge')`, 'balance history');
   check(
-    (await text('#balance-available')) === '12.5000' && (await evaluate(`!!document.querySelector('#history a[href="/jobs/${JOB_ID}"]')`)),
+    (await text('#balance-available')) === '12.50' && (await evaluate(`!!document.querySelector('#history a[href="/jobs/${JOB_ID}"]')`)),
     'billing: balance, history with job links',
     'billing: balance or history wrong',
   );
@@ -867,7 +867,7 @@ async function dashboardChecks() {
   await appLoad('/billing');
   await waitFor(`document.querySelector('#history')?.textContent.includes('Charge')`, 'balance history without top-ups');
   check(
-    (await evaluate(`document.querySelector('.focal a.primary')?.getAttribute('href')`))?.startsWith('mailto:contactus@felixsphere.com') &&
+    (await evaluate(`document.querySelector('.page-head a.primary')?.getAttribute('href')`))?.startsWith('mailto:contactus@felixsphere.com') &&
       (await isShown('#topup-off')) && !(await isShown('#topup-open')) && !(await isShown('#topups-section')),
     'billing without top-ups: the one primary is "Contact us"',
     'billing without top-ups: no contact primary',
@@ -919,7 +919,9 @@ async function dashboardChecks() {
   await onePrimary('/account');
   await shot('account-desktop');
   const outFrom = apiCalls.length;
-  await click('#logout-main');
+  // W8 dropped the Account page's own Log out: the header menu has it.
+  await evaluate(`document.querySelector('#account-button').click()`);
+  await click('#logout');
   await waitFor(`location.pathname === '/login'`, 'log out from /account');
   csrfChecked('log out', outFrom);
 

@@ -9,15 +9,13 @@
   <body class="app" data-page="marketplace">
     <!-- @shell:marketplace -->
     <main class="content" id="main" tabindex="-1">
-      <h1 class="sr-only">Marketplace</h1>
       <!-- @form-error -->
-      <section class="focal" aria-labelledby="focal-label">
+      <div class="page-head">
         <div>
-          <p class="eyebrow" id="focal-label">Templates, ready to run</p>
-          <p class="metric" id="tpl-count" aria-live="polite">—</p>
-          <p class="sub">Each template is a reviewed image, command and GPU under one name. Point it at your data and submit it here; you pay for the GPU time the job uses, nothing more.</p>
+          <h1>Marketplace</h1>
+          <p class="page-desc">Each template is a reviewed image, command and GPU under one name. Point it at your data and submit it here; you pay for the GPU time the job uses, nothing more.</p>
         </div>
-      </section>
+      </div>
 
       <p class="warning" id="access-note" role="note" hidden>Running a template needs an account with compute enabled. Yours isn't yet: a submit will be refused until it is. To ask for access, <a href="mailto:contactus@felixsphere.com?subject=Unify%20Compute%20access">contact us</a>.</p>
 
@@ -35,7 +33,10 @@
       </section>
 
       <section class="section" aria-labelledby="list-title">
-        <h2 id="list-title">Templates</h2>
+        <div class="section-head">
+          <h2 id="list-title">Templates</h2>
+          <p class="muted"><span id="tpl-count">—</span> ready to run</p>
+        </div>
         <div id="tpl-list" aria-live="polite"><p class="muted">Loading templates…</p></div>
       </section>
     </main>

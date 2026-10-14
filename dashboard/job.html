@@ -9,20 +9,25 @@
   <body class="app" data-page="job">
     <!-- @shell:jobs -->
     <main class="content" id="main" tabindex="-1">
-      <h1 class="sr-only" id="job-h1">Job</h1>
-      <p class="crumb"><a href="/jobs">Jobs</a> / <span class="mono" id="job-id"></span></p>
       <!-- @form-error -->
       <p class="muted" id="job-loading" role="status">Loading the job…</p>
       <div id="job" hidden>
-        <section class="focal" aria-labelledby="focal-label">
+        <div class="page-head">
           <div>
-            <p class="eyebrow" id="focal-label">Charged so far · USD</p>
-            <p class="metric" id="job-settled">—</p>
-            <p class="sub" id="job-sub"></p>
+            <p class="crumb"><a href="/jobs">Jobs</a> / <span class="mono" id="job-id"></span></p>
+            <h1 class="sr-only" id="job-h1">Job</h1>
+            <p class="page-desc" id="job-sub"></p>
           </div>
           <button class="ghost" type="button" id="job-cancel" hidden>Cancel job</button>
-        </section>
+        </div>
         <p class="status-line" id="job-status-line" role="status"></p>
+
+        <div class="stats one">
+          <section class="card stat-card hero" aria-labelledby="focal-label">
+            <p class="eyebrow" id="focal-label">Charged so far · USD</p>
+            <p class="stat-value" id="job-settled">—</p>
+          </section>
+        </div>
 
         <div class="grid">
           <section class="card" aria-labelledby="details-title">
