@@ -2,7 +2,7 @@
 
 - **Status:** M1 built (public browse pages). M2 and M3 are design, not code.
 - Decided by [ADR-0012](../adr/0012-a-brokered-template-marketplace.md)
-  (Proposed). A listing is a template as [`templates.md`](templates.md)
+  (Accepted 2026-10-13). A listing is a template as [`templates.md`](templates.md)
   defines it. Running one is a job ([`job-api.md`](job-api.md)), billed like
   any other ([`metering.md`](metering.md)).
 

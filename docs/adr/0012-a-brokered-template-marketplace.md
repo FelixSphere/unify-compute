@@ -1,8 +1,8 @@
 # ADR-0012 — A brokered template marketplace
 
-- **Status:** Proposed
+- **Status:** Accepted (operator, 2026-10-13)
 - **Date:** 2026-10-10
-- **Amends, once accepted:** [ADR-0007](0007-product-surfaces-and-phasing.md),
+- **Amends:** [ADR-0007](0007-product-surfaces-and-phasing.md),
   the "Anything two-sided" line under *Left*, for templates only. Its
   exclusion of a two-sided **supply** market (host onboarding, bidding, host
   reliability) stands unchanged.
@@ -117,9 +117,8 @@ being placeholders. AGENTS.md forbids site copy that promises pricing.
 
 ## Consequences
 
-- ADR-0007's *Left* section is amended for templates only, once this ADR is
-  accepted. Per AGENTS.md, ADR-0007's status line records that; its reasoning
-  is not edited.
+- ADR-0007's *Left* section is amended for templates only. Per AGENTS.md,
+  ADR-0007's status line records that; its reasoning is not edited.
 - **The site's browse pages are generated at build time**, not fetched at
   runtime. The pages need no CORS, no CSP `connect-src` and no JavaScript.
   The cost: `release.yml` ships a set of image digests, and either image may

@@ -2,7 +2,7 @@
 
 - **Status:** Proposed. The *Left* line "Anything two-sided" is amended for
   templates only by [ADR-0012](0012-a-brokered-template-marketplace.md)
-  (Proposed); a two-sided supply market stays excluded.
+  (Accepted 2026-10-13); a two-sided supply market stays excluded.
 - **Date:** 2026-10-01 (condenses `docs/product-design.md`)
 
 ## Context
