@@ -24,14 +24,16 @@ This repository holds three things, and they have different rules:
 | Path | What it is | Rules |
 |---|---|---|
 | `app/`, `components/`, `public/` | Marketing site at **compute.unifyai.us** (vinext static export, served by the `deploy/site/` container on AWS production since 2026-10-02; `.openai/hosting.json` stays as the DNS rollback target) | Site conventions below |
-| `compute-api/` | The compute service: authenticated job API in front of SkyPilot, billed through UnifyAPI | Go, stdlib-only so far, permissive licences only |
-| `deploy/`, `docs/` | Compose profile, AWS staging stack, ADRs and specs | Terraform validated in CI, never applied by CI |
+| `compute-api/` | The compute service: authenticated job API in front of SkyPilot, with its own accounts, balance and card top-ups (ADR-0011) | Go; direct dependencies are pgx, `golang.org/x/crypto` and `golang.org/x/text`; permissive licences only |
+| `deploy/`, `docs/` | Compose profiles, the AWS staging and production stacks, release records, ADRs and specs | Terraform validated in CI, never applied by CI |
 
 ## What is decided (do not re-litigate without a new ADR)
 
-- **UnifyAPI owns accounts, API keys, and the balance.** Compute does not get
-  its own users or wallet. One key, one balance, two kinds of spend.
-  [ADR-0001](docs/adr/0001-unifyapi-owns-accounts-and-billing.md)
+- **Compute owns its accounts, API keys, balance and payments**, as Unify
+  Data does: its own sign-up, `uck_` keys, ledger, and Stripe Checkout
+  top-ups on FelixSphere LLC's Stripe account. It supersedes ADR-0001
+  (UnifyAPI owning accounts), which stays in `docs/adr/` as history.
+  [ADR-0011](docs/adr/0011-compute-owns-accounts-and-billing.md)
 - **The compute service is a separate, proprietary process** that talks to the
   AGPL console over HTTP only. No code, schema, or component crosses that line.
   [ADR-0002](docs/adr/0002-compute-service-is-separate-and-proprietary.md)
@@ -45,77 +47,64 @@ This repository holds three things, and they have different rules:
   its trust tier is a SKU attribute, and the deployment's `UPSTREAMS` says
   what it may launch into. No provider abstraction of our own.
   [ADR-0006](docs/adr/0006-upstreams-are-skypilot-clouds.md)
+- **Templates are sold through a brokered marketplace**: UnifyAI is the
+  seller of record, account listings are reviewed before they are served,
+  and public pages show no prices.
+  [ADR-0012](docs/adr/0012-a-brokered-template-marketplace.md)
 
-Current status (say what exists rather than describing targets as shipped):
+Current status (say what exists rather than describing targets as shipped).
+What each host runs right now is the newest record in `deploy/releases/`;
+this list does not repeat image digests, because they go stale here first.
 
-- The marketing site is live at https://compute.unifyai.us on AWS
-  production. Staging and production both run (see below).
-- **Production runs Compute's own accounts (C1, 2026-10-03).** Sign-up and
-  login are open at https://app.compute.unifyai.us, and the site's Log in /
-  Sign up link there. The job API takes `uck_` keys only (`sk-` keys from
-  Unify API are `401 missing_key`). New accounts cannot run jobs until an
-  operator enables compute and credits a balance (D3), and GPUs are off in
-  production (no SkyPilot), so a submit ends at `403 compute_not_enabled` or
-  `503`. Card top-ups are live on Unify API's Stripe account (live key, own
-  webhook endpoint). No top-up has run yet.
-- `compute-api/` on `main` runs jobs end to end where it has a job store
-  (`DATABASE_URL`): keys verified through the console bridge, quota and a
-  console hold at submit, launch on SkyPilot, GPU metering settled every
-  300 s, job events and webhooks, get/list/cancel/logs/events/artifacts
-  (`internal/jobs`). It has run only against the fakes in its tests
-  (`internal/api/e2e_test.go`), never on a real cloud or against the real
-  console. Without a job store it is the old dark build (`501` after
-  validation); without `CONSOLE_URL` every keyed job route is
-  `503 console_unavailable`; without `SKYPILOT_API_SERVER_URL` submit is
-  `503 upstream_unavailable`. Not built: resuming live jobs after a restart
-  (`docs/spec/backend.md` open question 2), webhook registration, storage
-  and egress metering.
+- **Staging and production both run on AWS** (ADR-0009, **Proposed**, but
+  applied): one module, `deploy/aws/modules/compute-stack/`, with callers in
+  `deploy/aws/envs/staging` (VPC 10.72/16, `i-06125c23285803d7a`,
+  `staging.compute.unifyai.us`) and `deploy/aws/envs/production` (VPC
+  10.71/16, `i-07dd2f6d313a0dafd`), plus `shared/ecr`, `shared/github-oidc`,
+  `shared/ses-compute` and `shared/gpu-budget`. Both hosts are IMDS-locked
+  (hop limit 1). The marketing site has been served from production's ALB
+  since 2026-10-02 (Route53 change `C07235422LT740FCOOAEW`); the OpenAI Sites
+  project and its TXT records are kept only as the DNS rollback path.
+- **Both hosts run Compute's own accounts** (ADR-0011,
+  `ACCOUNTS_BACKEND=local`). Since #76 first boot writes it, together with
+  `APP_ORIGIN`, SES and Stripe settings, so a rebuilt host comes back the
+  same. Sign-up and login are open at https://app.compute.unifyai.us. The job
+  API takes `uck_` keys only; an `sk-` key from Unify API is
+  `401 missing_key`. A new account cannot run jobs until an operator enables
+  compute and credits it (D3), so a submit from a fresh account ends at
+  `403 compute_not_enabled`. Card top-ups are live in production (Stripe
+  Checkout, own webhook endpoint); staging has no Stripe keys.
+- **The console bridge is retired from the request path.** The console's
+  bridge half (`unifyapi-console` #225) is still deployed on app.unifyapi.ai,
+  and production's `.env` still holds `CONSOLE_URL` and the bridge secret,
+  ignored in local mode and kept for rollback. Staging's console container
+  still runs but nothing calls it.
+- `compute-api/` on `main`, with a job store (`DATABASE_URL`): quota, platform
+  caps and a ledger hold at submit, launch on SkyPilot, GPU metering settled
+  every 300 s, job events and outbound webhooks, get/list/cancel/logs/events/
+  artifacts, resuming live jobs after a restart (#42), templates and the
+  marketplace (M1–M3), and the session dashboard API under `/dashboard/v1`.
+  It has run jobs only against the fakes in its tests
+  (`internal/api/e2e_test.go`), never to completion on a real GPU. Without
+  `SKYPILOT_API_SERVER_URL` submit is `503 upstream_unavailable`. Not built:
+  customer webhook registration, storage and egress metering, applying Stripe
+  refunds and disputes (the webhook only logs them; in progress as W3 of
+  the 2026-10-14 UX wave).
+- **No GPU has run a job yet.** GPU workers and the SkyPilot API server
+  (ADR-0010, **Proposed**, applied on staging 2026-10-03: workers VPC
+  10.73/16, launch role, reaper) run on staging only; production has the
+  module behind `gpu_workers_enabled = false` and no SkyPilot. The account's
+  G/VT vCPU quota was still 0 at the 2026-10-09 release, so a staging job
+  fails `capacity_exhausted`; the request is open and "Start small" asks for 4.
 - GPU spend is capped while there are no customers (ADR-0010, "Start small"):
   one GPU job across all accounts and a 4 h runtime ceiling
   (`compute-api/config/platform.json`), workers reaped at 5 h, and a USD 50
-  monthly budget whose action denies new launches at 100%
-  (`deploy/aws/shared/gpu-budget`, applied 2026-10-03: action `b4302f8f-c1df-40b6-8157-d71a203ae18a`, STANDBY, automatic, on `unify-compute-staging-skypilot`; alerts to the operator's address, pending its email confirmation). Both
-  hosts run compute-api 5f964c1 with these caps. The G-instance quota to
-  request is 4 vCPU; it is 0 today, so nothing can launch.
-- The console bridge's server half (`unifyapi-console` #225) is live on
-  production `app.unifyapi.ai` since 2026-10-03 (v0.1.144, which lacks
-  console #233 and #243). Production compute-api calls it, so **production
-  compute is connected to the Unify API account system**: an `sk-` key from
-  app.unifyapi.ai is verified there, and a made-up one is `401 invalid_key`.
-  GPUs are still off in production, so a valid submit ends at
-  `503 upstream_unavailable` before any hold. Record:
-  `deploy/releases/2026-10-03-production-console-bridge.md`.
-- The AWS Terraform — one module (`deploy/aws/modules/compute-stack/`) with
-  staging and production callers under `deploy/aws/envs/`, plus GitHub OIDC
-  deploy roles in `deploy/aws/shared/github-oidc/` and the runtime image
-  registry (ECR) in `deploy/aws/shared/ecr/`. Moving the site and
-  everything else onto it is
-  [ADR-0009](docs/adr/0009-host-everything-on-aws.md), **Proposed**.
-  Applied on 2026-10-02: `shared/ecr`, `shared/github-oidc`, staging (VPC
-  10.72/16, instance `i-06125c23285803d7a`) and production (VPC 10.71/16,
-  instance `i-07dd2f6d313a0dafd`). Both run compute-api `d5344254…` (6c1d796) and site `ca42d6f6…`
-  (ec3fb28); records are in `deploy/releases/`. **Both run Compute's own
-  accounts** (ADR-0011, `ACCOUNTS_BACKEND=local`, set in each host's `.env`
-  over SSM; user-data does not render it, so a rebuild would come back on
-  console accounts). Staging has no Stripe keys. Staging also runs SkyPilot and artifact storage. Its console container
-  (UnifyAPI trial build `e3cef17`) still runs, but compute-api no longer
-  calls it. Production's `.env` still holds
-  `CONSOLE_URL` and the bridge secret, ignored in local mode and kept for
-  rollback. Production has no SkyPilot. Both hosts are IMDS-locked (hop limit 1). `compute.unifyai.us` was cut over
-  from OpenAI Sites to production's ALB on 2026-10-02 (Route53 change
-  `C07235422LT740FCOOAEW`). The Sites project and its two TXT records remain
-  as the rollback path.
-- GPU workers and the SkyPilot API server
-  ([ADR-0010](docs/adr/0010-gpu-workers-in-the-shared-account.md),
-  **Proposed**): `deploy/aws/modules/gpu-workers/`, called by staging, and
-  `deploy/compose/docker-compose.skypilot.yml`. **Applied on staging
-  2026-10-03**: workers VPC 10.73/16, launch role, reaper, and SkyPilot on the
-  host. A staging job reaches SkyPilot and fails with `capacity_exhausted`,
-  because the account's G/VT quota is 0 vCPU (AWS: `VcpuLimitExceeded`). The
-  request for 8 is open (`d81c8fcd…`); 4 is what "Start small" asks for.
-  Production has the module behind `gpu_workers_enabled = false`. The GPU
-  budget (`deploy/aws/shared/gpu-budget`) is applied: USD 50/month, and it stops
-  new launches by itself at 100% (dry run proven on 2026-10-03).
+  monthly budget (`deploy/aws/shared/gpu-budget`, action
+  `b4302f8f-c1df-40b6-8157-d71a203ae18a`) that denies new launches at 100%
+  by itself (dry run proven 2026-10-03).
+- Marketplace: M2 is released on both hosts (2026-10-14); on production
+  account listings are closed (`ENVIRONMENT=production`, ADR-0012 §4). M3
+  (the dashboard Marketplace and My listings pages) is merged, not released.
 
 ## Licence boundary — the expensive mistake
 
@@ -191,10 +180,8 @@ one you used when you hand off.
 significant ones. Adopted 16 Sep 2026, after twelve consecutive console releases
 went straight to production unverified.
 
-For unify-compute the rule is not yet load-bearing: the staging stack under
-`deploy/aws/envs/staging/` is **defined and CI-validated but has never been applied**,
-and nothing is in production either. When that changes, staging comes first —
-do not let the first production deployment also be the first time the stack runs.
+For unify-compute both stacks exist, and `release.yml` refuses a
+production release of digests that have not run on staging first.
 
 When you hand a change over, say:
 
@@ -226,8 +213,11 @@ lost). Then ship it, mark it `HOTFIX`, and tell the CI/CD agent immediately.
 Wanting a feature live is not a hotfix.
 
 Terraform is validated in CI and applied by a person or the CI/CD agent from a
-machine with credentials. CI has no AWS credentials and must stay that way until
-remote state with locking exists.
+machine with credentials; state is in S3 with a lockfile. CI never applies
+Terraform. `release.yml` assumes a GitHub OIDC role
+(`deploy/aws/shared/github-oidc`) that can push to ECR and send the SSM
+cutover command to the tagged instances, nothing more; widening it is a
+reviewed change.
 
 ## Before you hand off
 
