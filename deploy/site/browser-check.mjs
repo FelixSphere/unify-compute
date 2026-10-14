@@ -584,7 +584,7 @@ async function dashboardChecks() {
     const r = (s) => document.querySelector(s).getBoundingClientRect();
     const cur = document.querySelector('.app-nav a[aria-current="page"]');
     return { header: r('.app-header').height, nav: r('.app-nav').width, cur: cur?.getAttribute('href'), curBg: getComputedStyle(cur).backgroundColor,
-      avatar: r('#account-button').width, initials: document.querySelector('#account-initials').textContent,
+      avatar: r('.identity .avatar').width, initials: document.querySelector('#account-initials').textContent,
       metric: getComputedStyle(document.querySelector('.stat-card.hero .stat-value')).fontSize, metricFont: getComputedStyle(document.querySelector('.stat-card.hero .stat-value')).fontFamily };
   })()`);
   check(
@@ -629,15 +629,17 @@ async function dashboardChecks() {
   check(!inline.ran && inline.violated, 'overview: CSP blocks inline script', `overview: inline script ran=${inline.ran} violation=${inline.violated}`);
   await shot('overview-desktop');
 
-  // Account menu by keyboard: opens, Escape closes and returns focus.
-  await evaluate(`document.querySelector('#account-button').focus()`);
-  await pressKey('Enter', 'Enter', 13);
-  const opened = await isShown('#account-panel');
-  await pressKey('Escape', 'Escape', 27);
+  // W9: the header shows who is signed in (a link to Account), Log out in
+  // the open, and the language picker with UI-STANDARD's ten languages.
+  const header = await evaluate(`(() => ({
+    account: document.querySelector('#account-button')?.getAttribute('href'),
+    email: document.querySelector('#account-email')?.textContent,
+    logout: document.querySelector('#logout')?.getClientRects().length,
+    langs: [...document.querySelectorAll('#locale-picker option')].map((o) => o.value) }))()`);
   check(
-    opened && !(await isShown('#account-panel')) && (await evaluate(`document.activeElement?.id`)) === 'account-button',
-    'account menu opens from the keyboard; Escape closes it and returns focus',
-    `account menu: opened=${opened}, still shown=${await isShown('#account-panel')}`,
+    header.account === '/account' && header.email === ME.user.email && header.logout > 0 && header.langs.length === 10 && header.langs[0] === 'en' && header.langs[9] === 'ar',
+    'header: identity links to /account, Log out visible, ten languages in the picker',
+    `header: ${JSON.stringify(header)}`,
   );
 
   stubs['GET /me'] = okBody({ ...ME, account: { ...ME.account, compute_enabled: true } });
@@ -919,8 +921,7 @@ async function dashboardChecks() {
   await onePrimary('/account');
   await shot('account-desktop');
   const outFrom = apiCalls.length;
-  // W8 dropped the Account page's own Log out: the header menu has it.
-  await evaluate(`document.querySelector('#account-button').click()`);
+  // W8 dropped the Account page's own Log out; W9 put it in the header.
   await click('#logout');
   await waitFor(`location.pathname === '/login'`, 'log out from /account');
   csrfChecked('log out', outFrom);
@@ -1075,8 +1076,9 @@ async function appChecks() {
   );
 
   // Keyboard-only: Tab walks the form in reading order and never lands on the honeypot.
-  const order = await tabOrder(7);
-  const want = ['#email', '#password', 'toggle:password', '#password_confirm', 'toggle:password_confirm', 'button:Sign up'];
+  // W9: the signed-out top bar (brand, language picker, the other auth link) comes first.
+  const order = await tabOrder(10);
+  const want = ['#topbar-brand', '#locale-picker', '#topbar-login', '#email', '#password', 'toggle:password', '#password_confirm', 'toggle:password_confirm', 'button:Sign up'];
   check(
     want.every((w, i) => order[i] === w) && !order.includes('#website'),
     `/signup tab order: ${want.join(' → ')}`,

@@ -84,6 +84,7 @@ export function picker(target: HTMLElement | null) {
   if (!target) return;
   const select = document.createElement('select');
   select.className = 'locale-picker';
+  select.id = 'locale-picker';
   select.setAttribute('aria-label', t('nav.language'));
   for (const l of LOCALES) {
     const o = document.createElement('option');

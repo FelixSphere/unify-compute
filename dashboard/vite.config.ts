@@ -150,7 +150,7 @@ const partials: Record<string, (arg: string) => string> = {
   // the language picker, and Log in / Sign up at the right (UI-STANDARD
   // "Marketing header"), minus the link to the page you are on.
   topbar: (page) => `<header class="app-header topbar">
-      <a class="brand" href="https://compute.unifyai.us/" aria-label="Unify Compute" data-i18n-attr="aria-label:common.site-link">
+      <a class="brand" id="topbar-brand" href="https://compute.unifyai.us/" aria-label="Unify Compute" data-i18n-attr="aria-label:common.site-link">
         <img src="/brand/unifyai-lockup-horizontal-black.svg" alt="UnifyAI" width="148" height="51" loading="eager" />
         <span class="divider" aria-hidden="true"></span>
         <span class="descriptor">Compute <span class="partner">&amp; Flatkey</span></span>
@@ -158,8 +158,8 @@ const partials: Record<string, (arg: string) => string> = {
       <a class="mark" href="https://compute.unifyai.us/" aria-label="Unify Compute" data-i18n-attr="aria-label:common.site-link"><img src="/brand/unifyai-mark-black.svg" alt="UnifyAI" width="32" height="32" loading="eager" /></a>
       <div class="header-actions">
         <div class="locale" id="locale"></div>
-        ${page === 'login' ? '' : '<a class="topbar-login" href="/login" data-i18n="common.log-in">Log in</a>'}
-        ${page === 'signup' ? '' : '<a class="primary topbar-signup" href="/signup" data-i18n="common.sign-up">Sign up</a>'}
+        ${page === 'login' ? '' : '<a class="topbar-link" id="topbar-login" href="/login" data-i18n="common.log-in">Log in</a>'}
+        ${page === 'signup' ? '' : '<a class="topbar-link" id="topbar-signup" href="/signup" data-i18n="common.sign-up">Sign up</a>'}
       </div>
     </header>`,
 };

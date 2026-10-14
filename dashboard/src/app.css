@@ -1891,8 +1891,8 @@ body.app .card.settings {
 }
 
 .identity .avatar {
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1953,22 +1953,17 @@ body.app .card.settings {
   padding-top: 56px;
 }
 
-.topbar-login {
+/* Text links, as Unify Data's signed-out bar: the card below holds the
+   page's one primary button. */
+.topbar-link {
   font-size: var(--u-text-sm);
+  font-weight: 500;
   text-decoration: none;
   padding: 0 8px;
 }
 
-.topbar-login:hover {
+.topbar-link:hover {
   text-decoration: underline;
-}
-
-a.primary.topbar-signup {
-  width: auto;
-  height: 40px;
-  margin: 0;
-  padding: 0 16px;
-  font-size: var(--u-text-sm);
 }
 
 @media (max-width: 767px) {
