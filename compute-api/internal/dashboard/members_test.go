@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/FelixSphere/unify-compute/compute-api/internal/accounts"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/mailer"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/notify"
 )
 
 // The acceptance list of docs/plan-own-accounts.md A5b and spec/accounts.md
@@ -544,5 +546,68 @@ func TestInvitationLinksDoNotCrossAccounts(t *testing.T) {
 	wantErr(t, f.do(f.sessionReq(http.MethodDelete, "/members/"+strconv.FormatInt(f.userID("one@example.com"), 10), two, nil)), 404, "not_found", "not_found")
 	if n := len(f.listInvitations(two)); n != 0 {
 		t.Fatalf("account two sees %d invitations", n)
+	}
+}
+
+// With the notifier wired (as main does), each member email is recorded in
+// notifications and goes out once.
+func TestMemberEmailsAreRecordedAndSentOnce(t *testing.T) {
+	f := newFixture(t)
+	f.h.notes = notify.New(f.db, nil, f.clock.now)
+	ctx := context.Background()
+	owner := f.activeUser("owner@example.com")
+	acct := f.accountOf("owner@example.com")
+	inv := f.invite(owner, "m@example.com", "member")
+	n := f.h.notes
+	if ok, err := n.Sent(ctx, notify.Key{AccountID: acct, Subject: "invitation", SubjectID: inv.ID, Message: mailer.KindInvitation}); err != nil || !ok {
+		t.Fatalf("invitation not recorded: %v %v", ok, err)
+	}
+	rec := f.do(post("/invitations/accept", acceptBody(f.latestInviteToken("m@example.com"))))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("accept %d %s", rec.Code, rec.Body)
+	}
+	f.h.Wait()
+	if ok, _ := n.Sent(ctx, notify.Key{AccountID: acct, Subject: "invitation", SubjectID: inv.ID, Message: mailer.KindInvitationAccepted}); !ok {
+		t.Fatal("accepted email not recorded")
+	}
+	id := f.userID("m@example.com")
+	if rec := f.do(f.sessionReq(http.MethodDelete, "/members/"+strconv.FormatInt(id, 10), owner, nil)); rec.Code != http.StatusNoContent {
+		t.Fatalf("remove %d", rec.Code)
+	}
+	f.h.Wait()
+	if ok, _ := n.Sent(ctx, notify.Key{AccountID: acct, Subject: "member", SubjectID: strconv.FormatInt(id, 10), Message: mailer.KindMemberRemoved}); !ok {
+		t.Fatal("removal email not recorded")
+	}
+	removals := 0
+	for _, m := range f.mail.to("m@example.com") {
+		if m.kind == mailer.KindMemberRemoved {
+			removals++
+		}
+	}
+	if removals != 1 {
+		t.Fatalf("%d removal emails", removals)
+	}
+}
+
+// When SES refuses the invitation, the inviter is told and the invitation
+// stays, so "Send again" can deliver it.
+func TestInvitationEmailRefusedThenSentAgain(t *testing.T) {
+	f := newFixture(t)
+	f.h.notes = notify.New(f.db, nil, f.clock.now)
+	owner := f.activeUser("owner@example.com")
+	f.mail.fail.Store(true)
+	wantErr(t, f.do(f.sessionReq(http.MethodPost, "/members/invitations", owner, map[string]string{"email": "m@example.com", "role": "member"})),
+		503, "email_unavailable", "email_unavailable")
+	f.mail.fail.Store(false)
+	list := f.listInvitations(owner)
+	if len(list) != 1 {
+		t.Fatalf("%d invitations after a refused email", len(list))
+	}
+	rec := f.do(f.sessionReq(http.MethodPost, "/members/invitations/"+list[0].ID+"/resend", owner, nil))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("resend %d %s", rec.Code, rec.Body)
+	}
+	if rec := f.do(post("/invitations/accept", acceptBody(f.latestInviteToken("m@example.com")))); rec.Code != http.StatusOK {
+		t.Fatalf("accept %d %s", rec.Code, rec.Body)
 	}
 }

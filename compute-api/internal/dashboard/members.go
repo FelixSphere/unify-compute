@@ -8,6 +8,7 @@ import (
 
 	"github.com/FelixSphere/unify-compute/compute-api/internal/accounts"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/mailer"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/notify"
 )
 
 // Members and invitations (spec/accounts.md "Members and roles", task A5b).
@@ -63,6 +64,21 @@ func writeErr(h *Handler, w http.ResponseWriter, what string, err error) {
 	default:
 		h.internal(w, what, err)
 	}
+}
+
+// once sends one member email through the notifier, so a retried request
+// or a second process cannot mail it twice (notifications.md "Sent once").
+// An earlier send of the same key counts as sent. Without a notifier it
+// sends directly.
+func (h *Handler) once(ctx context.Context, k notify.Key, to string, send notify.SendFunc) error {
+	if h.notes == nil {
+		return send(ctx, to)
+	}
+	out, err := h.notes.To(ctx, k, []string{to}, send)
+	if out == notify.Sent || out == notify.Skipped {
+		return nil
+	}
+	return err
 }
 
 type renameRequest struct {
@@ -205,8 +221,9 @@ func (h *Handler) removeMember(w http.ResponseWriter, r *http.Request, s account
 		by = ""
 	}
 	msg := mailer.Removal{AccountName: a.Name, ByEmail: by, At: h.now()}
+	key := notify.Key{AccountID: u.AccountID, Subject: "member", SubjectID: strconv.FormatInt(removed.ID, 10), Message: mailer.KindMemberRemoved}
 	h.sendLater("member removed email", func(ctx context.Context) error {
-		return h.mail.RemovedFromAccount(ctx, removed.Email, msg)
+		return h.once(ctx, key, removed.Email, func(ctx context.Context, to string) error { return h.mail.RemovedFromAccount(ctx, to, msg) })
 	})
 	if removed.ID == u.ID {
 		clearCookie(w)
@@ -336,8 +353,9 @@ func (h *Handler) sendInvitation(w http.ResponseWriter, r *http.Request, u accou
 		detail["resent"] = true
 	}
 	h.audit(ctx, accounts.ActionInvited, clientInfo(r), u.ID, u.AccountID, detail)
-	if err := h.mail.Invitation(ctx, inv.Email, mailer.Invite{AccountName: a.Name, InviterEmail: u.Email, Role: inv.Role,
-		Token: token, ExpiresAt: inv.ExpiresAt}); err != nil {
+	msg := mailer.Invite{AccountName: a.Name, InviterEmail: u.Email, Role: inv.Role, Token: token, ExpiresAt: inv.ExpiresAt}
+	key := notify.Key{AccountID: u.AccountID, Subject: "invitation", SubjectID: inv.ID, Message: mailer.KindInvitation}
+	if err := h.once(ctx, key, inv.Email, func(ctx context.Context, to string) error { return h.mail.Invitation(ctx, to, msg) }); err != nil {
 		h.log.Error("invitation email failed", "account", u.AccountID, "invitation", inv.ID, "err", err)
 		writeError(w, http.StatusServiceUnavailable, "email_unavailable", "email_unavailable",
 			"The invitation was saved but we couldn't send its email just now. Use Send again in a few minutes.", "")
@@ -451,8 +469,9 @@ func (h *Handler) acceptInvitation(w http.ResponseWriter, r *http.Request) {
 	if p.InvitedByEmail != "" {
 		msg := mailer.Joined{Email: u.Email, AccountName: p.AccountName, Role: u.Role, At: h.now()}
 		inviter := p.InvitedByEmail
+		key := notify.Key{AccountID: u.AccountID, Subject: "invitation", SubjectID: p.ID, Message: mailer.KindInvitationAccepted}
 		h.sendLater("invitation accepted email", func(ctx context.Context) error {
-			return h.mail.InvitationAccepted(ctx, inviter, msg)
+			return h.once(ctx, key, inviter, func(ctx context.Context, to string) error { return h.mail.InvitationAccepted(ctx, to, msg) })
 		})
 	}
 	h.startSession(w, r, u)

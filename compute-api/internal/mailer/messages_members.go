@@ -10,6 +10,13 @@ import (
 // accepted, removed from account. Kept apart from messages.go so the
 // account messages and these can change without touching each other.
 
+// Message kinds, also the notify.Key Message of each.
+const (
+	KindInvitation         = "invitation"
+	KindInvitationAccepted = "invitation-accepted"
+	KindMemberRemoved      = "member-removed"
+)
+
 const (
 	pathMembers = "/members"
 	pathAccept  = "/accept-invitation"
@@ -56,7 +63,7 @@ func (m *Mailer) Invitation(ctx context.Context, to string, in Invite) error {
 	}
 	details = append(details, detail{"Role", roleLabel(in.Role)}, detail{"Expires", utc(in.ExpiresAt)})
 	return m.send(ctx, to, &email{
-		Kind:         "invitation",
+		Kind:         KindInvitation,
 		Subject:      subject,
 		Preheader:    "Choose a password to accept. The link works once and expires in 7 days.",
 		Eyebrow:      "INVITATION",
@@ -81,7 +88,7 @@ type Joined struct {
 func (m *Mailer) InvitationAccepted(ctx context.Context, to string, j Joined) error {
 	who, account := oneLine(j.Email), oneLine(j.AccountName)
 	return m.send(ctx, to, &email{
-		Kind:      "invitation-accepted",
+		Kind:      KindInvitationAccepted,
 		Subject:   who + " joined " + account + " on Unify Compute",
 		Preheader: "They can now use the account's balance and create API keys.",
 		Eyebrow:   "MEMBERS",
@@ -117,7 +124,7 @@ func (m *Mailer) RemovedFromAccount(ctx context.Context, to string, r Removal) e
 		details = []detail{{"Account", account}, {"Removed by", by}, {"Removed", utc(r.At)}}
 	}
 	return m.send(ctx, to, &email{
-		Kind:         "member-removed",
+		Kind:         KindMemberRemoved,
 		Subject:      "You were removed from " + account + " on Unify Compute",
 		Preheader:    "Your login to this account is closed.",
 		Eyebrow:      "MEMBERS",

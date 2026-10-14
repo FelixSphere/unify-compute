@@ -41,6 +41,7 @@ import (
 	"github.com/FelixSphere/unify-compute/compute-api/internal/accounts"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/listings"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/mailer"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/notify"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/payments"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/ratelimit"
 )
@@ -88,6 +89,9 @@ type Config struct {
 	// Nil answers them 503 topups_unavailable; main sets it with
 	// ACCOUNTS_BACKEND=local, with or without Stripe keys.
 	Payments *payments.Service
+	// Notifier sends the member emails once per invitation or removal
+	// (internal/notify); nil sends them directly.
+	Notifier *notify.Notifier
 }
 
 type Handler struct {
@@ -102,6 +106,7 @@ type Handler struct {
 	ledger   Ledger
 	listings *listings.Store
 	pay      *payments.Service
+	notes    *notify.Notifier
 	reads    *ratelimit.Limiter
 
 	mux      *http.ServeMux
@@ -121,7 +126,7 @@ func New(cfg Config) (*Handler, error) {
 		return nil, fmt.Errorf("APP_ORIGIN %q: the dashboard needs the app's origin, e.g. https://app.compute.unifyai.us (http only for localhost)", cfg.AppOrigin)
 	}
 	h := &Handler{acc: cfg.Accounts, mail: cfg.Mailer, origin: strings.ToLower(origin), host: strings.ToLower(u.Host),
-		log: cfg.Log, now: cfg.Now, jobs: cfg.Jobs, mkt: cfg.Market, ledger: cfg.Ledger, listings: cfg.Listings, pay: cfg.Payments, reads: ratelimit.New(readBurst, readWindow), mux: http.NewServeMux()}
+		log: cfg.Log, now: cfg.Now, jobs: cfg.Jobs, mkt: cfg.Market, ledger: cfg.Ledger, listings: cfg.Listings, pay: cfg.Payments, notes: cfg.Notifier, reads: ratelimit.New(readBurst, readWindow), mux: http.NewServeMux()}
 	if h.now == nil {
 		h.now = time.Now
 	}

@@ -27,7 +27,7 @@
 | Sent once | Built: the `notifications` table (migration `0011_notifications.sql`) and `internal/notify`. See [Sent once](#sent-once). |
 | Job page the CTA opens | `{APP_ORIGIN}/jobs/{job_id}`, e.g. `https://app.compute.unifyai.us/jobs/job_…` (the dashboard's job page; `deploy/site/Caddyfile` rewrites it to `job.html`). The operator's 2026-10-01 decision named `compute.unifyai.us/jobs/{id}`; the job page was built on the app host instead. |
 | Sender | `Unify Compute <no-reply@compute.unifyai.us>` (`SES_SENDER`), as the account emails. |
-| Not built | An email at the first refused extension (H4), `interrupted`, the storage arrears messages of ADR-0008, refunds and disputes (W3), invitations (W4). |
+| Not built | An email at the first refused extension (H4), `interrupted`, the storage arrears messages of ADR-0008, refunds and disputes (W3). The member emails (W4) are in `accounts.md` and use this record. |
 
 ## Messages
 
@@ -164,6 +164,9 @@ The record is the `notifications` table, keyed on
 | Billing stopped the job | `job` | job id | `job-billing-stopped` |
 | Top-up received | `topup` | top-up id (`tu_…`) | `topup-received` |
 | Low balance | `balance` | the balance entry (`be_…`) that crossed the threshold | `low-balance` |
+| Invitation (to the invited address) | `invitation` | invitation id (`inv_…`; "Send again" makes a new one) | `invitation` |
+| Invitation accepted (to the inviter) | `invitation` | invitation id | `invitation-accepted` |
+| Removed from account (to the removed address) | `member` | user id | `member-removed` |
 
 The row is a **claim, written before the first address is mailed**. A second
 trigger finds it and sends nothing. The outcome is then written on the row:
