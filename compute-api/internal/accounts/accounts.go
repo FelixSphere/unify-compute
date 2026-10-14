@@ -84,6 +84,9 @@ type Account struct {
 	TopupsPerDay    int
 	SuspendedReason string
 	CreatedAt       time.Time
+	// LowBalance is the low-balance warning threshold in quota units; 0 is
+	// off (migration 0014).
+	LowBalance int64
 }
 
 // Owner is the owner string jobs, quotas and events key on.
@@ -165,12 +168,12 @@ func scanUser(row pgx.Row) (User, error) {
 }
 
 const accountColumns = `a.id, a.status, a.compute_enabled, a.available, a.held, a.topup_min_cents,
-	a.topup_max_cents, a.balance_max_cents, a.topups_per_day, coalesce(a.suspended_reason, ''), a.created_at`
+	a.topup_max_cents, a.balance_max_cents, a.topups_per_day, coalesce(a.suspended_reason, ''), a.created_at, a.low_balance_quota`
 
 func scanAccount(row pgx.Row) (Account, error) {
 	var a Account
 	err := row.Scan(&a.ID, &a.Status, &a.ComputeEnabled, &a.Available, &a.Held, &a.TopupMinCents,
-		&a.TopupMaxCents, &a.BalanceMaxCents, &a.TopupsPerDay, &a.SuspendedReason, &a.CreatedAt)
+		&a.TopupMaxCents, &a.BalanceMaxCents, &a.TopupsPerDay, &a.SuspendedReason, &a.CreatedAt, &a.LowBalance)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Account{}, ErrNotFound
 	}
