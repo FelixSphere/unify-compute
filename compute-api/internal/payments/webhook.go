@@ -13,6 +13,8 @@ import (
 
 	"github.com/FelixSphere/unify-compute/compute-api/internal/accounts"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/billing"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/mailer"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/notify"
 )
 
 // Webhook outcomes, stored in stripe_events.outcome and answered in the
@@ -164,7 +166,7 @@ func (s *Service) HandleWebhook(ctx context.Context, signature string, body []by
 	}
 	if credited != nil {
 		log.Info("top-up credited", "topup", credited.topupID, "account", credited.accountID)
-		s.fetchReceipt(credited)
+		s.afterCredit(credited)
 	}
 	return outcome, nil
 }
@@ -173,6 +175,11 @@ type creditDone struct {
 	topupID       string
 	accountID     int64
 	paymentIntent string
+	cents         int64
+	// available is the account's available balance right after the credit,
+	// in quota units.
+	available int64
+	paidAt    time.Time
 }
 
 func (s *Service) applySession(ctx context.Context, tx pgx.Tx, ev event, cs CheckoutSession, log *slog.Logger) (string, *creditDone, error) {
@@ -234,8 +241,9 @@ func (s *Service) applySession(ctx context.Context, tx pgx.Tx, ev event, cs Chec
 	if cs.PaymentIntent != "" {
 		pi = &cs.PaymentIntent
 	}
+	paidAt := s.now()
 	if _, err := tx.Exec(ctx, `UPDATE topups SET status = 'credited', paid_at = $2, stripe_payment_intent_id = $3 WHERE id = $1`,
-		cs.ClientReferenceID, s.now(), pi); err != nil {
+		cs.ClientReferenceID, paidAt, pi); err != nil {
 		return "", nil, err
 	}
 	if _, err := s.acc.AuditTx(ctx, tx, accounts.AuditEvent{ActorType: accounts.ActorStripe, ActorID: ev.ID, AccountID: t.accountID,
@@ -243,7 +251,8 @@ func (s *Service) applySession(ctx context.Context, tx pgx.Tx, ev event, cs Chec
 			"amount_usd": CentsUSD(int(t.cents)), "checkout_session": cs.ID, "available_after_usd": billing.USD(bal.Available)}}); err != nil {
 		return "", nil, err
 	}
-	return OutcomeCredited, &creditDone{topupID: cs.ClientReferenceID, accountID: t.accountID, paymentIntent: cs.PaymentIntent}, nil
+	return OutcomeCredited, &creditDone{topupID: cs.ClientReferenceID, accountID: t.accountID, paymentIntent: cs.PaymentIntent,
+		cents: t.cents, available: bal.Available, paidAt: paidAt}, nil
 }
 
 // close ends an open top-up without payment. Anything but open is left as
@@ -272,26 +281,51 @@ func (s *Service) topupForPayment(ctx context.Context, ref chargeRef) (string, e
 	return id, err
 }
 
-// fetchReceipt stores the charge id and Stripe's hosted receipt URL, which a
-// Checkout Session does not carry. After the commit and best effort: the
-// credit stands whether or not this works.
-func (s *Service) fetchReceipt(d *creditDone) {
-	if d.paymentIntent == "" || s.stripe == nil {
-		return
-	}
+// afterCredit runs after the commit, in the background, and never undoes
+// the credit: it stores Stripe's receipt link, which a Checkout Session does
+// not carry, then emails "Top-up received" with that link if it was found.
+// The receipt lookup comes first so the email can carry it; the email goes
+// out without it when the lookup fails.
+func (s *Service) afterCredit(d *creditDone) {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		charge, receipt, err := s.stripe.Receipt(ctx, d.paymentIntent)
-		if err != nil {
-			s.log.Warn("stripe: receipt lookup failed; the top-up stays credited without a receipt link", "topup", d.topupID, "err", err)
-			return
-		}
-		if _, err := s.db.Exec(ctx, `UPDATE topups SET stripe_charge_id = NULLIF($2, ''), receipt_url = NULLIF($3, '') WHERE id = $1`,
-			d.topupID, charge, receipt); err != nil {
-			s.log.Error("store receipt", "topup", d.topupID, "err", err)
-		}
+		receipt := s.fetchReceipt(d)
+		s.mailReceipt(d, receipt)
 	}()
+}
+
+// fetchReceipt stores the charge id and Stripe's hosted receipt URL and
+// returns the URL, or "" when there is none.
+func (s *Service) fetchReceipt(d *creditDone) string {
+	if d.paymentIntent == "" || s.stripe == nil {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	charge, receipt, err := s.stripe.Receipt(ctx, d.paymentIntent)
+	if err != nil {
+		s.log.Warn("stripe: receipt lookup failed; the top-up stays credited without a receipt link", "topup", d.topupID, "err", err)
+		return ""
+	}
+	if _, err := s.db.Exec(ctx, `UPDATE topups SET stripe_charge_id = NULLIF($2, ''), receipt_url = NULLIF($3, '') WHERE id = $1`,
+		d.topupID, charge, receipt); err != nil {
+		s.log.Error("store receipt", "topup", d.topupID, "err", err)
+	}
+	return receipt
+}
+
+// mailReceipt sends "Top-up received" to the account's owners, once per
+// top-up however many events credit-adjacent deliveries bring (notify). A
+// failure is logged by notify and changes nothing here.
+func (s *Service) mailReceipt(d *creditDone, receipt string) {
+	if s.mail == nil || s.notifier == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	r := mailer.TopupReceipt{ID: d.topupID, AmountUSD: CentsUSD(int(d.cents)), BalanceUSD: billing.USD(d.available),
+		PaidAt: d.paidAt, ReceiptURL: receipt}
+	_, _ = s.notifier.ToOwners(ctx, notify.Key{AccountID: d.accountID, Subject: "topup", SubjectID: d.topupID, Message: mailer.KindTopupReceived},
+		func(ctx context.Context, to string) error { return s.mail.TopupReceived(ctx, to, r) })
 }
