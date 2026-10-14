@@ -1974,6 +1974,26 @@ body.app .card.settings {
   .identity {
     padding: 0 4px;
   }
+
+  /* Nothing in the header may shrink: the menu button stays 44px (UI-STANDARD). */
+  .header-actions > *,
+  .header-actions .menu-button,
+  .header-actions .help-button,
+  .header-actions .logout-button,
+  .header-actions .identity {
+    flex: none;
+  }
+
+  .header-actions {
+    gap: 4px;
+  }
+
+  .locale-picker {
+    max-width: 96px;
+    padding-left: 6px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
 
 @media (max-width: 480px) {
