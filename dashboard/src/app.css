@@ -1450,6 +1450,7 @@ a.ghost {
   font-size: var(--u-text-sm);
   line-height: 1.5;
   color: var(--u-text-2);
+}
 
 /* The low-balance banner (shell.ts lowBalanceBanner): the form-error box's
    shape with the warning colour, since it is a warning and not an error. */
