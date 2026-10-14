@@ -49,16 +49,18 @@ const HELP = `<svg ${ICON_ATTRS}><circle cx="12" cy="12" r="10"/><path d="M9.09 
 // The signed-in pages, in sidebar order. `path` is what the browser shows;
 // /keys is also where the mailer's "Review keys" link points
 // (compute-api/internal/mailer/messages.go).
-const NAV: { id: string; path: string; label: string }[] = [
-  { id: 'overview', path: '/', label: 'Overview' },
-  { id: 'jobs', path: '/jobs', label: 'Jobs' },
-  { id: 'marketplace', path: '/marketplace', label: 'Marketplace' },
-  { id: 'listings', path: '/listings', label: 'My listings' },
-  { id: 'keys', path: '/keys', label: 'API keys' },
-  { id: 'usage', path: '/usage', label: 'Usage' },
-  { id: 'billing', path: '/billing', label: 'Billing' },
-  { id: 'account', path: '/account', label: 'Account' },
+const NAV: { id: string; path: string; label: string; key: string }[] = [
+  { id: 'overview', path: '/', label: 'Overview', key: 'nav.overview' },
+  { id: 'jobs', path: '/jobs', label: 'Jobs', key: 'nav.jobs' },
+  { id: 'marketplace', path: '/marketplace', label: 'Marketplace', key: 'nav.marketplace' },
+  { id: 'listings', path: '/listings', label: 'My listings', key: 'nav.listings' },
+  { id: 'keys', path: '/keys', label: 'API keys', key: 'nav.keys' },
+  { id: 'usage', path: '/usage', label: 'Usage', key: 'nav.usage' },
+  { id: 'billing', path: '/billing', label: 'Billing', key: 'nav.billing' },
+  { id: 'account', path: '/account', label: 'Account', key: 'nav.account' },
 ];
+// lucide LogOut (ISC), beside the "Log out" label in the header.
+const LOGOUT = `<svg ${ICON_ATTRS}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>`;
 
 const partials: Record<string, (arg: string) => string> = {
   head: () => `<meta charset="utf-8" />
@@ -74,13 +76,13 @@ const partials: Record<string, (arg: string) => string> = {
         </div>`,
   'form-error': () => `<div class="form-error" id="form-error" role="alert" tabindex="-1" hidden>${ALERT}<p></p></div>`,
   toggle: (id) =>
-    `<button type="button" class="toggle" aria-controls="${id}" aria-label="Show password" aria-pressed="false">${EYE}${EYE_OFF}</button>`,
+    `<button type="button" class="toggle" aria-controls="${id}" aria-label="Show password" aria-pressed="false" data-i18n-attr="aria-label:common.show-password">${EYE}${EYE_OFF}</button>`,
   // The honeypot the server checks on signup, resend, login and forgot
   // (ADR-0011 D5: no Turnstile). Off-screen rather than display:none, since
   // some bots skip fields that are not rendered; aria-hidden and tabindex=-1
   // keep it from people and screen readers.
   honeypot: () => `<div class="hp" aria-hidden="true">
-            <label for="website">Website</label>
+            <label for="website" data-i18n="common.website">Website</label>
             <input id="website" name="website" type="text" tabindex="-1" autocomplete="off" />
           </div>`,
   // UI-STANDARD "App shell": 64px header (lockup + divider + "Compute", the
@@ -90,64 +92,75 @@ const partials: Record<string, (arg: string) => string> = {
     if (!NAV.some((n) => n.id === active)) throw new Error(`@shell: unknown page ${active}`);
     const items = NAV.map(
       (n) =>
-        `<li><a href="${n.path}"${n.id === active ? ' aria-current="page"' : ''}>${n.label}</a></li>`,
+        `<li><a href="${n.path}"${n.id === active ? ' aria-current="page"' : ''} data-i18n="${n.key}">${n.label}</a></li>`,
     ).join('');
-    return `<a class="skip" href="#main">Skip to content</a>
+    return `<a class="skip" href="#main" data-i18n="common.skip-to-content">Skip to content</a>
     <header class="app-header">
-      <a class="brand" href="/" aria-label="Unify Compute overview">
+      <a class="brand" href="/" aria-label="Unify Compute overview" data-i18n-attr="aria-label:common.overview-link">
         <img src="/brand/unifyai-lockup-horizontal-black.svg" alt="UnifyAI" width="148" height="51" loading="eager" />
         <span class="divider" aria-hidden="true"></span>
         <span class="descriptor">Compute <span class="partner">&amp; Flatkey</span></span>
       </a>
-      <a class="mark" href="/" aria-label="Unify Compute overview"><img src="/brand/unifyai-mark-black.svg" alt="UnifyAI" width="32" height="32" loading="eager" /></a>
+      <a class="mark" href="/" aria-label="Unify Compute overview" data-i18n-attr="aria-label:common.overview-link"><img src="/brand/unifyai-mark-black.svg" alt="UnifyAI" width="32" height="32" loading="eager" /></a>
       <div class="header-actions">
         <div class="header-menu">
-          <button class="help-button" type="button" id="help-button" aria-expanded="false" aria-controls="help-panel">${HELP}<span class="help-label">Help</span></button>
+          <button class="help-button" type="button" id="help-button" aria-expanded="false" aria-controls="help-panel">${HELP}<span class="help-label" data-i18n="common.help">Help</span></button>
           <div class="account-panel" id="help-panel" hidden>
-            <a href="${QUICK_START_URL}" target="_blank" rel="noopener">Quick start</a>
-            <a href="${COMPUTE_API}/openapi.json" target="_blank" rel="noopener">API reference</a>
-            <a href="${HELP_MAILTO}">Contact us</a>
+            <a href="${QUICK_START_URL}" target="_blank" rel="noopener" data-i18n="common.quick-start">Quick start</a>
+            <a href="${COMPUTE_API}/openapi.json" target="_blank" rel="noopener" data-i18n="common.api-reference">API reference</a>
+            <a href="${HELP_MAILTO}" data-i18n="common.contact-us">Contact us</a>
           </div>
         </div>
-        <button class="menu-button" type="button" id="menu-button" aria-label="Menu" aria-expanded="false" aria-controls="app-nav">${MENU}${CLOSE}</button>
-        <div class="header-menu account-menu">
-          <button class="avatar" type="button" id="account-button" aria-label="Account" aria-expanded="false" aria-controls="account-panel"><span id="account-initials" aria-hidden="true"></span></button>
-          <div class="account-panel" id="account-panel" hidden>
-            <p class="account-email" id="account-email"></p>
-            <a href="/account">Account settings</a>
-            <button type="button" class="link" id="logout">Log out</button>
-          </div>
-        </div>
+        <div class="locale" id="locale"></div>
+        <button class="menu-button" type="button" id="menu-button" aria-label="Menu" aria-expanded="false" aria-controls="app-nav" data-i18n-attr="aria-label:common.menu">${MENU}${CLOSE}</button>
+        <a class="identity" id="account-button" href="/account"><span class="avatar" aria-hidden="true"><span id="account-initials"></span></span><span class="identity-email" id="account-email"></span></a>
+        <button type="button" class="logout-button" id="logout"><span data-i18n="common.log-out">Log out</span>${LOGOUT}</button>
       </div>
     </header>
-    <nav class="app-nav" id="app-nav" aria-label="Dashboard">
+    <nav class="app-nav" id="app-nav" aria-label="Dashboard" data-i18n-attr="aria-label:common.dashboard-nav">
       <ul>${items}</ul>
-      <p class="nav-foot">app.compute.unifyai.us<br />GPU jobs, billed by the second</p>
+      <p class="nav-foot">app.compute.unifyai.us<br /><span data-i18n="common.nav-foot">GPU jobs, billed by the second</span></p>
     </nav>`;
   },
   // The password prompt for a sensitive action more than 10 minutes after the
   // password was last entered (401 reauth_required, POST /reauth).
   reauth: () => `<dialog id="reauth-dialog" aria-labelledby="reauth-title">
         <form id="reauth-form" novalidate>
-          <h2 id="reauth-title">Confirm it's you</h2>
-          <p>Enter your password to continue.</p>
+          <h2 id="reauth-title" data-i18n="reauth.title">Confirm it's you</h2>
+          <p data-i18n="reauth.lead">Enter your password to continue.</p>
           <div class="field">
-            <label for="reauth_password">Password</label>
+            <label for="reauth_password" data-i18n="common.password">Password</label>
             <div class="password">
               <input id="reauth_password" name="password" type="password" autocomplete="current-password" required aria-describedby="reauth_password-error" />
-              <button type="button" class="toggle" aria-controls="reauth_password" aria-label="Show password" aria-pressed="false">${EYE}${EYE_OFF}</button>
+              <button type="button" class="toggle" aria-controls="reauth_password" aria-label="Show password" aria-pressed="false" data-i18n-attr="aria-label:common.show-password">${EYE}${EYE_OFF}</button>
             </div>
             <p class="field-error" id="reauth_password-error" hidden></p>
           </div>
           <div class="actions">
-            <button class="primary" type="submit">Continue</button>
-            <button class="ghost" type="button" id="reauth-cancel">Cancel</button>
+            <button class="primary" type="submit" data-i18n="common.continue">Continue</button>
+            <button class="ghost" type="button" id="reauth-cancel" data-i18n="common.cancel">Cancel</button>
           </div>
         </form>
       </dialog>`,
   legal: () =>
-    `<p class="legal">By signing up you agree to the <a href="${TERMS_URL}">Terms and Conditions</a> and <a href="${PRIVACY_URL}">Privacy Policy</a>.</p>`,
-  below: () => `<p class="below">© ${new Date().getFullYear()} UnifyAI · <a href="${PRIVACY_URL}">Privacy</a> · <a href="${TERMS_URL}">Terms</a></p>`,
+    `<p class="legal" data-i18n="signup.legal">By signing up you agree to the <a href="${TERMS_URL}">Terms and Conditions</a> and <a href="${PRIVACY_URL}">Privacy Policy</a>.</p>`,
+  below: () => `<p class="below">© ${new Date().getFullYear()} UnifyAI · <a href="${PRIVACY_URL}" data-i18n="common.privacy">Privacy</a> · <a href="${TERMS_URL}" data-i18n="common.terms">Terms</a></p>`,
+  // The signed-out pages' 64px top bar, as Unify Data's /app has: the brand,
+  // the language picker, and Log in / Sign up at the right (UI-STANDARD
+  // "Marketing header"), minus the link to the page you are on.
+  topbar: (page) => `<header class="app-header topbar">
+      <a class="brand" href="https://compute.unifyai.us/" aria-label="Unify Compute" data-i18n-attr="aria-label:common.site-link">
+        <img src="/brand/unifyai-lockup-horizontal-black.svg" alt="UnifyAI" width="148" height="51" loading="eager" />
+        <span class="divider" aria-hidden="true"></span>
+        <span class="descriptor">Compute <span class="partner">&amp; Flatkey</span></span>
+      </a>
+      <a class="mark" href="https://compute.unifyai.us/" aria-label="Unify Compute" data-i18n-attr="aria-label:common.site-link"><img src="/brand/unifyai-mark-black.svg" alt="UnifyAI" width="32" height="32" loading="eager" /></a>
+      <div class="header-actions">
+        <div class="locale" id="locale"></div>
+        ${page === 'login' ? '' : '<a class="topbar-login" href="/login" data-i18n="common.log-in">Log in</a>'}
+        ${page === 'signup' ? '' : '<a class="primary topbar-signup" href="/signup" data-i18n="common.sign-up">Sign up</a>'}
+      </div>
+    </header>`,
 };
 
 function htmlPartials(): Plugin {

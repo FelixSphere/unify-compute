@@ -1,3 +1,4 @@
+import { t, tag } from './i18n';
 // Shared by the signed-in pages in pages/: API types, requests, DOM helpers,
 // the app shell and the reauth prompt.
 
@@ -84,7 +85,7 @@ export async function getText(path: string): Promise<Result<string>> {
       cache: 'no-store',
     });
   } catch {
-    return { ok: false, error: { status: 0, code: 'network', message: "We couldn't reach Unify Compute. Check your connection and try again." } };
+    return { ok: false, error: { status: 0, code: 'network', message: t('err.we-couldn-t-reach-unify') } };
   }
   if (res.status === 401) return toLogin();
   if (res.ok) return { ok: true, status: res.status, data: await res.text() };
@@ -144,32 +145,41 @@ export function table(label: string, head: { text: string; num?: boolean }[], ro
 export type Tone = 'success' | 'live' | 'danger' | 'warning' | 'muted';
 export const state = (word: string, tone: Tone) => h('span', { class: 'state' }, h('span', { class: `dot dot-${tone}`, 'aria-hidden': 'true' }), word);
 
+// Catalogue keys, read with t() at render time: a module-level string would
+// be English, since the catalogue loads after this module.
 export const JOB_STATUS: Record<string, [string, Tone]> = {
-  queued: ['Queued', 'muted'],
-  provisioning: ['Provisioning', 'live'],
-  running: ['Running', 'live'],
-  succeeded: ['Succeeded', 'success'],
-  failed: ['Failed', 'danger'],
-  interrupted: ['Interrupted', 'warning'],
-  cancelled: ['Cancelled', 'muted'],
+  queued: ['status.queued', 'muted'],
+  provisioning: ['status.provisioning', 'live'],
+  running: ['status.running', 'live'],
+  succeeded: ['status.succeeded', 'success'],
+  failed: ['status.failed', 'danger'],
+  interrupted: ['status.interrupted', 'warning'],
+  cancelled: ['status.cancelled', 'muted'],
 };
-export const jobState = (s: string) => state(...(JOB_STATUS[s] ?? [s, 'muted']));
+export const jobState = (s: string) => (JOB_STATUS[s] ? state(t(JOB_STATUS[s][0]), JOB_STATUS[s][1]) : state(s, 'muted'));
 
 // Amounts the API returns as strings with up to four decimals; people read
 // dollars and cents. Parsing stays on the raw string (cents()).
-const usdFmt = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 export function usd(s: string | number | null | undefined): string {
   if (s === null || s === undefined || s === '') return '—';
   const n = Number(s);
-  return Number.isFinite(n) ? usdFmt.format(n) : String(s);
+  return Number.isFinite(n) ? new Intl.NumberFormat(tag(), { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n) : String(s);
 }
 export const money = (s: string | number | null | undefined) => h('span', { class: Number(s) === 0 ? 'mono zero' : 'mono' }, usd(s));
+
+// Catalogue text with markup in it (links, <strong>): the strings are ours,
+// never the API's, so innerHTML is safe; anything from outside goes through esc().
+export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+export function rich(key: string, vars?: Record<string, string | number>): HTMLElement {
+  const el = h('span');
+  el.innerHTML = t(key, vars);
+  return el;
+}
 
 // An empty list: a titled block in the card style, never a bare sentence.
 export const empty = (title: string, ...more: Child[]) => h('div', { class: 'empty' }, h('h3', {}, title), more.length ? h('p', {}, ...more) : null);
 
-export const dateFmt = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-export const when = (t: number | null | undefined) => (t ? dateFmt.format(new Date(t * 1000)) : '—');
+export const when = (at: number | null | undefined) => (at ? new Intl.DateTimeFormat(tag(), { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(at * 1000)) : '—');
 
 export function duration(secs: number): string {
   const s = Math.max(0, Math.floor(secs));
@@ -208,14 +218,14 @@ export function wireMenus() {
   const nav = $('app-nav')!;
   const setMenu = (open: boolean) => {
     menu.setAttribute('aria-expanded', String(open));
-    menu.setAttribute('aria-label', open ? 'Close menu' : 'Menu');
+    menu.setAttribute('aria-label', open ? t('common.close-menu') : t('common.menu'));
     nav.toggleAttribute('data-open', open);
   };
   menu.addEventListener('click', () => setMenu(menu.getAttribute('aria-expanded') !== 'true'));
 
-  // The Help and account buttons each open a panel under the header; one
-  // at a time, closed by a click elsewhere or Escape.
-  const dropdowns = (['help', 'account'] as const).map((name) => ({
+  // The Help button opens a panel under the header, closed by a click
+  // elsewhere or Escape.
+  const dropdowns = (['help'] as const).map((name) => ({
     button: $<HTMLButtonElement>(`${name}-button`)!,
     panel: $(`${name}-panel`)!,
   }));
@@ -258,7 +268,7 @@ export async function shell(): Promise<Me | null> {
   }
   setText('account-initials', initials(r.data.user.email));
   setText('account-email', r.data.user.email);
-  $('account-button')?.setAttribute('aria-label', `Account: ${r.data.user.email}`);
+  $('account-button')?.setAttribute('aria-label', t('common.account-email', { email: r.data.user.email }));
   return r.data;
 }
 
@@ -287,7 +297,7 @@ export function reauth(): Promise<boolean> {
     const submit = async (e: SubmitEvent) => {
       e.preventDefault();
       if (!field.value) {
-        setFieldError('reauth_password', 'Enter your password.');
+        setFieldError('reauth_password', t('auth.enter-your-password'));
         field.focus();
         return;
       }
@@ -325,12 +335,12 @@ export async function showBalance(): Promise<Balance | null> {
     setText(
       'balance-sub',
       /^0(\.0+)?$/.test(r.data.held_usd)
-        ? 'Nothing is held for running jobs.'
-        : `USD ${usd(r.data.held_usd)} more is held for running jobs and comes back when they finish.`,
+        ? t('common.nothing-is-held-for-running')
+        : t('common.held-for-running', { amount: usd(r.data.held_usd) }),
     );
     return r.data;
   } else if (notBuilt(r.error)) {
-    setText('balance-sub', 'Your balance will show here once billing is live in the dashboard.');
+    setText('balance-sub', t('common.your-balance-will-show-here'));
   } else {
     setText('balance-sub', r.error.message);
   }
@@ -340,7 +350,7 @@ export async function showBalance(): Promise<Balance | null> {
 export function jobsTable(label: string, jobs: Job[]) {
   return table(
     label,
-    [{ text: 'Job' }, { text: 'Status' }, { text: 'SKU' }, { text: 'Created' }, { text: 'GPU time', num: true }, { text: 'Charged (USD)', num: true }],
+    [{ text: 'Job' }, { text: t('common.status') }, { text: 'SKU' }, { text: t('common.created') }, { text: t('common.gpu-time'), num: true }, { text: t('common.charged-usd'), num: true }],
     jobs.map((j) => [
       jobLink(j.id),
       jobState(j.status),

@@ -6,54 +6,54 @@
     <link rel="stylesheet" href="/src/app.css" />
     <script type="module" src="/src/main.ts"></script>
   </head>
-  <body class="app" data-page="overview">
+  <body class="app" data-page="overview" data-i18n-title="overview.page-title">
     <!-- @shell:overview -->
     <main class="content" id="main" tabindex="-1">
       <!-- @form-error -->
       <div class="page-head">
         <div>
-          <h1>Overview</h1>
-          <p class="page-desc">Your balance, this month's spend and what is running right now.</p>
+          <h1 data-i18n="nav.overview">Overview</h1>
+          <p class="page-desc" data-i18n="overview.your-balance-this-month-s">Your balance, this month's spend and what is running right now.</p>
         </div>
       </div>
 
       <div class="stats">
         <section class="card stat-card hero" aria-labelledby="focal-label">
-          <p class="eyebrow" id="focal-label">Available balance · USD</p>
+          <p class="eyebrow" id="focal-label" data-i18n="common.available-balance-usd">Available balance · USD</p>
           <p class="stat-value" id="balance-available" aria-live="polite">—</p>
-          <p class="muted" id="balance-sub">Loading your balance…</p>
+          <p class="muted" id="balance-sub" data-i18n="common.loading-your-balance">Loading your balance…</p>
         </section>
         <section class="card stat-card" aria-labelledby="spend-label">
-          <p class="eyebrow" id="spend-label">Spent this month · USD</p>
+          <p class="eyebrow" id="spend-label" data-i18n="overview.spent-this-month-usd">Spent this month · USD</p>
           <p class="stat-value" id="spend-total" aria-live="polite">—</p>
-          <p class="muted" id="spend-sub">Loading this month's usage…</p>
+          <p class="muted" id="spend-sub" data-i18n="common.loading-this-month-s-usage">Loading this month's usage…</p>
         </section>
         <section class="card stat-card" aria-labelledby="running-label">
-          <p class="eyebrow" id="running-label">Running now</p>
-          <div id="running" aria-live="polite"><p class="muted">Loading jobs…</p></div>
+          <p class="eyebrow" id="running-label" data-i18n="common.running-now">Running now</p>
+          <div id="running" aria-live="polite"><p class="muted" data-i18n="common.loading-jobs">Loading jobs…</p></div>
         </section>
       </div>
 
       <section class="card" id="onboarding" aria-labelledby="onboarding-title" hidden>
         <div class="section-head">
-          <h2 id="onboarding-title">Get started</h2>
+          <h2 id="onboarding-title" data-i18n="overview.get-started">Get started</h2>
           <p class="progress" id="onboarding-progress"></p>
         </div>
         <ol class="steps" id="onboarding-steps"></ol>
       </section>
 
       <section class="card" id="access" aria-labelledby="access-title">
-        <h2 id="access-title">Compute access</h2>
+        <h2 id="access-title" data-i18n="overview.compute-access">Compute access</h2>
         <p class="state" id="access-state" hidden><span class="dot" id="access-dot"></span><span id="access-word"></span></p>
         <p class="muted" id="access-text"></p>
       </section>
 
       <section class="section" aria-labelledby="recent-title">
         <div class="section-head">
-          <h2 id="recent-title">Recent jobs</h2>
-          <a href="/jobs">All jobs</a>
+          <h2 id="recent-title" data-i18n="overview.recent-jobs">Recent jobs</h2>
+          <a href="/jobs" data-i18n="overview.all-jobs">All jobs</a>
         </div>
-        <div id="recent-jobs" aria-live="polite"><p class="muted">Loading jobs…</p></div>
+        <div id="recent-jobs" aria-live="polite"><p class="muted" data-i18n="common.loading-jobs">Loading jobs…</p></div>
       </section>
     </main>
   </body>

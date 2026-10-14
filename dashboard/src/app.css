@@ -203,13 +203,13 @@ textarea {
 }
 
 .password input {
-  padding-right: 48px;
+  padding-inline-end: 48px;
 }
 
 .toggle {
   position: absolute;
   top: 2px;
-  right: 2px;
+  inset-inline-end: 2px;
   width: 40px;
   height: 40px;
   display: flex;
@@ -435,7 +435,7 @@ body.app {
 
 .skip {
   position: absolute;
-  left: 16px;
+  inset-inline-start: 16px;
   top: -100px;
   z-index: 10;
   padding: 8px 12px;
@@ -556,7 +556,7 @@ body.app {
 
 .account-panel {
   position: absolute;
-  right: 0;
+  inset-inline-end: 0;
   top: calc(100% + 8px);
   min-width: 240px;
   max-width: calc(100vw - 32px);
@@ -586,7 +586,7 @@ body.app {
   justify-content: space-between;
   padding: 16px 12px;
   background: var(--u-bg);
-  border-right: var(--u-rule);
+  border-inline-end: var(--u-rule);
   overflow-y: auto;
 }
 
@@ -707,8 +707,11 @@ h2:focus {
   overflow-wrap: anywhere;
 }
 
+/* Ids, keys and code stay left-to-right inside right-to-left text. */
 .mono {
   font-family: var(--u-font-mono);
+  direction: ltr;
+  unicode-bidi: isolate;
 }
 
 .section {
@@ -823,7 +826,7 @@ th {
   font-weight: 500;
   letter-spacing: 1.2px;
   text-transform: uppercase;
-  text-align: left;
+  text-align: start;
   color: var(--u-text-muted);
   white-space: nowrap;
 }
@@ -844,7 +847,7 @@ tbody tr:last-child td {
 
 th.num,
 td.num {
-  text-align: right;
+  text-align: end;
 }
 
 .chips {
@@ -1811,5 +1814,173 @@ body.app .card.settings {
 
   .stat-card.hero .stat-value {
     font-size: 32px;
+  }
+}
+
+
+/* ------------------------------------------------------------ header identity
+   As Unify Data's top bar: the language picker, then who is signed in (the
+   initial and the address, a link to the Account page), then Log out in the
+   open. On signed-out pages the same bar carries Log in / Sign up instead
+   (UI-STANDARD "Marketing header"). */
+.locale-picker {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 36px;
+  padding: 0 30px 0 10px;
+  font-family: var(--u-font-body);
+  font-size: var(--u-text-sm);
+  color: var(--u-text-2);
+  background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236B6B66' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 8px center;
+  border: 1px solid transparent;
+  border-radius: var(--u-radius);
+  cursor: pointer;
+}
+
+.locale-picker:hover {
+  border-color: var(--u-btn-ghost-border);
+  color: var(--u-text);
+}
+
+.locale-picker:focus-visible {
+  outline: none;
+  box-shadow: var(--u-focus);
+}
+
+[dir='rtl'] .locale-picker {
+  padding: 0 10px 0 30px;
+  background-position: left 8px center;
+}
+
+[dir='rtl'] body.app select {
+  padding: 0 12px 0 32px;
+  background-position: left 10px center;
+}
+
+.identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 8px;
+  border-radius: var(--u-radius);
+  color: var(--u-text);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.identity:hover {
+  background: var(--u-bg);
+}
+
+.identity .avatar {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--u-radius-pill);
+  background: var(--u-btn-secondary-bg);
+  color: var(--u-btn-secondary-fg);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.identity-email {
+  font-size: var(--u-text-sm);
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: ltr;
+}
+
+.logout-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--u-btn-ghost-border);
+  border-radius: var(--u-radius);
+  background: var(--u-surface);
+  color: var(--u-text);
+  font-family: var(--u-font-body);
+  font-size: var(--u-text-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.logout-button:hover {
+  background: var(--u-bg);
+}
+
+.logout-button:disabled {
+  color: var(--u-text-muted);
+  cursor: default;
+}
+
+[dir='rtl'] .logout-button svg {
+  transform: scaleX(-1);
+}
+
+/* The signed-out top bar sits above the auth card. */
+.topbar .brand {
+  margin: 0;
+  color: var(--u-text);
+  text-decoration: none;
+}
+
+.topbar + .page {
+  min-height: calc(100vh - var(--u-header-height));
+  padding-top: 56px;
+}
+
+.topbar-login {
+  font-size: var(--u-text-sm);
+  text-decoration: none;
+  padding: 0 8px;
+}
+
+.topbar-login:hover {
+  text-decoration: underline;
+}
+
+a.primary.topbar-signup {
+  width: auto;
+  height: 40px;
+  margin: 0;
+  padding: 0 16px;
+  font-size: var(--u-text-sm);
+}
+
+@media (max-width: 767px) {
+  .identity-email {
+    display: none;
+  }
+
+  .identity {
+    padding: 0 4px;
+  }
+}
+
+@media (max-width: 480px) {
+  .logout-button span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .logout-button {
+    width: 36px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .topbar + .page {
+    padding-top: 24px;
   }
 }

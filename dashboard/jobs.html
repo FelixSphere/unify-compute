@@ -6,29 +6,29 @@
     <link rel="stylesheet" href="/src/app.css" />
     <script type="module" src="/src/main.ts"></script>
   </head>
-  <body class="app" data-page="jobs">
+  <body class="app" data-page="jobs" data-i18n-title="jobs.page-title">
     <!-- @shell:jobs -->
     <main class="content" id="main" tabindex="-1">
       <!-- @form-error -->
       <div class="page-head">
         <div>
-          <h1>Jobs</h1>
-          <p class="page-desc">Every job on this account, newest first. Run a template from the <a href="/marketplace">Marketplace</a>, or submit your own with an <a href="/keys">API key</a> and the <a href="https://compute.unifyai.us/start">quick start</a>.</p>
+          <h1 data-i18n="nav.jobs">Jobs</h1>
+          <p class="page-desc" data-i18n="jobs.every-job-on-this-account">Every job on this account, newest first. Run a template from the <a href="/marketplace">Marketplace</a>, or submit your own with an <a href="/keys">API key</a> and the <a href="https://compute.unifyai.us/start">quick start</a>.</p>
         </div>
-        <p class="head-stat" aria-live="polite"><span class="head-stat-value" id="jobs-running">—</span> running now</p>
+        <p class="head-stat" aria-live="polite" data-i18n="jobs.running-now"><span class="head-stat-value" id="jobs-running">—</span> running now</p>
       </div>
       <section class="section" aria-labelledby="list-title">
-        <h2 class="sr-only" id="list-title">Jobs</h2>
-        <div class="chips" role="group" aria-label="Filter by status" id="filters">
-          <button type="button" class="chip" data-status="" aria-pressed="true">All</button>
-          <button type="button" class="chip" data-status="running" aria-pressed="false">Running</button>
-          <button type="button" class="chip" data-status="queued,provisioning" aria-pressed="false">Starting</button>
-          <button type="button" class="chip" data-status="succeeded" aria-pressed="false">Succeeded</button>
-          <button type="button" class="chip" data-status="failed,interrupted" aria-pressed="false">Failed</button>
-          <button type="button" class="chip" data-status="cancelled" aria-pressed="false">Cancelled</button>
+        <h2 class="sr-only" id="list-title" data-i18n="nav.jobs">Jobs</h2>
+        <div class="chips" role="group" aria-label="Filter by status" id="filters" data-i18n-attr="aria-label:jobs.filter-by-status">
+          <button type="button" class="chip" data-status="" aria-pressed="true" data-i18n="common.all">All</button>
+          <button type="button" class="chip" data-status="running" aria-pressed="false" data-i18n="jobs.running">Running</button>
+          <button type="button" class="chip" data-status="queued,provisioning" aria-pressed="false" data-i18n="jobs.starting">Starting</button>
+          <button type="button" class="chip" data-status="succeeded" aria-pressed="false" data-i18n="jobs.succeeded">Succeeded</button>
+          <button type="button" class="chip" data-status="failed,interrupted" aria-pressed="false" data-i18n="jobs.failed">Failed</button>
+          <button type="button" class="chip" data-status="cancelled" aria-pressed="false" data-i18n="jobs.cancelled">Cancelled</button>
         </div>
-        <div id="jobs-list" aria-live="polite"><p class="muted">Loading jobs…</p></div>
-        <button class="ghost more" type="button" id="jobs-more" hidden>Load more</button>
+        <div id="jobs-list" aria-live="polite"><p class="muted" data-i18n="common.loading-jobs">Loading jobs…</p></div>
+        <button class="ghost more" type="button" id="jobs-more" hidden data-i18n="common.load-more">Load more</button>
       </section>
     </main>
   </body>

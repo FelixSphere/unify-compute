@@ -1,5 +1,6 @@
+import { t } from '../i18n';
 import { $ } from '../lib';
-import { empty, fill, get, h, type Job, jobsTable, type List, muted, notBuilt, setText, shell } from '../shell';
+import { empty, fill, get, h, type Job, jobsTable, type List, muted, notBuilt, rich, setText, shell } from '../shell';
 
 function chipsInit(onChange: (status: string) => void) {
   const chips = Array.from(document.querySelectorAll<HTMLButtonElement>('#filters .chip'));
@@ -32,7 +33,7 @@ export async function jobs() {
     more.disabled = false;
     if (!r.ok) {
       more.hidden = true;
-      fill('jobs-list', muted(notBuilt(r.error) ? 'Your jobs will be listed here once jobs are live in the dashboard.' : r.error.message));
+      fill('jobs-list', muted(notBuilt(r.error) ? t('jobs.your-jobs-will-be-listed') : r.error.message));
       return;
     }
     shown = append ? shown.concat(r.data.data) : r.data.data;
@@ -41,10 +42,10 @@ export async function jobs() {
     fill(
       'jobs-list',
       shown.length
-        ? jobsTable('Jobs', shown)
+        ? jobsTable(t('nav.jobs'), shown)
         : filter
-          ? empty('No jobs with this status')
-          : empty('No jobs yet', 'Run a template from the ', h('a', { href: '/marketplace' }, 'Marketplace'), ', or submit one with an ', h('a', { href: '/keys' }, 'API key'), '.'),
+          ? empty(t('jobs.no-jobs-with-this-status'))
+          : empty(t('jobs.no-jobs-yet'), rich('jobs.no-jobs-yet-text')),
     );
   }
 
