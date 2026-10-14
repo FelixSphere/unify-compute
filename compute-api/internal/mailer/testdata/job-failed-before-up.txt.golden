@@ -1,0 +1,22 @@
+JOB FAILED
+
+Your job failed.
+
+job_01J8Q6ZK3R7Y9W2X4V6T8S0A1B could not start, so no GPU time was charged and its hold was released in full. No provider had a GPU of this type free. Submitting it again later may work.
+
+View job:
+https://app.compute.unifyai.us/jobs/job_01J8Q6ZK3R7Y9W2X4V6T8S0A1B
+
+Status: failed
+Job: job_01J8Q6ZK3R7Y9W2X4V6T8S0A1B
+GPU: a10g-24gb-x1 · NVIDIA A10G
+GPU-seconds: 0
+Cost: USD 0.0000
+Reason: capacity_exhausted
+
+Reason is the job's error.code; the job page shows the full message. If you don't recognise this job, revoke the key that submitted it on the Keys page of the Unify Compute dashboard.
+
+-- 
+Unify Compute · compute.unifyai.us
+You're receiving this because a job on your Unify Compute account ended.
+© UnifyAI · Operated by FelixSphere LLC · 6 Karen Ct, CA 94010, United States

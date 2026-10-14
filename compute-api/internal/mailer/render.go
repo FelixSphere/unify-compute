@@ -38,11 +38,20 @@ type email struct {
 	Details      []detail
 	Safety       string
 	FooterReason string
+
+	// Status, when set, is the first detail row: a job's status word with
+	// the kit's status dot beside it (the only place status colour is used).
+	Status *status
 }
 
 type cta struct{ Label, URL string }
 
 type detail struct{ Label, Value string }
+
+type status struct{ Word, Tone string }
+
+// The kit's status colours, by tone.
+var statusColours = map[string]string{"success": "#1E9E63", "danger": "#D92D20", "warning": "#E0A100"}
 
 //go:embed layout.html
 var layoutHTML string
@@ -54,6 +63,13 @@ var layoutHTML string
 var layout = template.Must(template.New("layout").Funcs(template.FuncMap{
 	"notMSO":    func() template.HTML { return "<!--[if !mso]><!-->" },
 	"endNotMSO": func() template.HTML { return "<!--<![endif]-->" },
+	"statusDot": func(tone string) template.HTML {
+		c, ok := statusColours[tone]
+		if !ok {
+			return ""
+		}
+		return template.HTML(`<span style="color:` + c + `;">&#9679;</span>&nbsp;`)
+	},
 	"msoButton": func(c *cta) template.HTML {
 		return template.HTML(`<!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="` + html.EscapeString(c.URL) +
 			`" style="height:48px;v-text-anchor:middle;width:240px;" arcsize="12%" stroke="f" fillcolor="#F5A623"><center style="color:#0E0E0E;font-family:Arial,sans-serif;font-size:16px;font-weight:bold;">` +
@@ -85,8 +101,11 @@ func (e *email) text() string {
 	case e.Code != "":
 		p("Your code: " + e.Code)
 	}
-	if len(e.Details) > 0 {
+	if len(e.Details) > 0 || e.Status != nil {
 		var rows []string
+		if e.Status != nil {
+			rows = append(rows, "Status: "+e.Status.Word)
+		}
 		for _, d := range e.Details {
 			rows = append(rows, d.Label+": "+d.Value)
 		}
