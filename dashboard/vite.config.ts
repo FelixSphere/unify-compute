@@ -93,7 +93,7 @@ const partials: Record<string, (arg: string) => string> = {
     if (!NAV.some((n) => n.id === active)) throw new Error(`@shell: unknown page ${active}`);
     const items = NAV.map(
       (n) =>
-        `<li><a href="${n.path}"${n.id === active ? ' aria-current="page"' : ''} data-i18n="${n.key}">${n.label}</a></li>`,
+        `<li><a data-i18n="${n.key}" href="${n.path}"${n.id === active ? ' aria-current="page"' : ''}>${n.label}</a></li>`,
     ).join('');
     return `<a class="skip" href="#main" data-i18n="common.skip-to-content">Skip to content</a>
     <header class="app-header">
@@ -113,7 +113,7 @@ const partials: Record<string, (arg: string) => string> = {
           </div>
         </div>
         <div class="locale" id="locale"></div>
-        <button class="menu-button" type="button" id="menu-button" aria-label="Menu" aria-expanded="false" aria-controls="app-nav" data-i18n-attr="aria-label:common.menu">${MENU}${CLOSE}</button>
+        <button data-i18n-attr="aria-label:common.menu" class="menu-button" type="button" id="menu-button" aria-label="Menu" aria-expanded="false" aria-controls="app-nav">${MENU}${CLOSE}</button>
         <a class="identity" id="account-button" href="/account"><span class="avatar" aria-hidden="true"><span id="account-initials"></span></span><span class="identity-email" id="account-email"></span></a>
         <button type="button" class="logout-button" id="logout"><span data-i18n="common.log-out">Log out</span>${LOGOUT}</button>
       </div>
@@ -144,8 +144,8 @@ const partials: Record<string, (arg: string) => string> = {
         </form>
       </dialog>`,
   legal: () =>
-    `<p class="legal" data-i18n="signup.legal">By signing up you agree to the <a href="${TERMS_URL}">Terms and Conditions</a> and <a href="${PRIVACY_URL}">Privacy Policy</a>.</p>`,
-  below: () => `<p class="below">© ${new Date().getFullYear()} UnifyAI · <a href="${PRIVACY_URL}" data-i18n="common.privacy">Privacy</a> · <a href="${TERMS_URL}" data-i18n="common.terms">Terms</a></p>`,
+    `<p data-i18n="signup.legal" class="legal">By signing up you agree to the <a href="${TERMS_URL}">Terms and Conditions</a> and <a href="${PRIVACY_URL}">Privacy Policy</a>.</p>`,
+  below: () => `<p class="below">© ${new Date().getFullYear()} UnifyAI · <a data-i18n="common.privacy" href="${PRIVACY_URL}">Privacy</a> · <a data-i18n="common.terms" href="${TERMS_URL}">Terms</a></p>`,
   // The signed-out pages' 64px top bar, as Unify Data's /app has: the brand,
   // the language picker, and Log in / Sign up at the right (UI-STANDARD
   // "Marketing header"), minus the link to the page you are on.
