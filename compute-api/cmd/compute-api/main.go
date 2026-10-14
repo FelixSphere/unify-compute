@@ -267,7 +267,7 @@ func main() {
 			lst := listings.New(st.Pool(), cat, platform.MaxRuntimeSeconds, templates, os.Getenv("ENVIRONMENT"), nil)
 			handler.Listings = lst
 			dash, err = dashboard.New(dashboard.Config{Accounts: acc, Mailer: mail, AppOrigin: os.Getenv("APP_ORIGIN"), Log: log,
-				Jobs: handler.AccountJobs(), Market: handler.AccountJobs(), Ledger: local, Payments: pay, Listings: lst})
+				Jobs: handler.AccountJobs(), Market: handler.AccountJobs(), Ledger: local, Payments: pay, Listings: lst, Notifier: notes})
 			if err != nil {
 				log.Error("dashboard", "err", err)
 				os.Exit(1)

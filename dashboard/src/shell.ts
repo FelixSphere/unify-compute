@@ -3,9 +3,11 @@
 
 import { $, type ApiError, busy, call, clearFieldError, GENERIC, input, type Result, setFieldError, setFormError } from './lib';
 
+export type Role = 'owner' | 'admin' | 'member';
 export type Me = {
-  user: { email: string; created_at: number };
-  account: { id: number; status: 'active' | 'suspended' | 'closed'; compute_enabled: boolean };
+  // role and name arrive with members (A5b); an older compute-api omits them.
+  user: { email: string; role?: Role; created_at: number };
+  account: { id: number; name?: string; status: 'active' | 'suspended' | 'closed'; compute_enabled: boolean };
   csrf_token: string;
 };
 export type Balance = {
