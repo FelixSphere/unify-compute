@@ -45,10 +45,10 @@ func (m *Mailer) Invitation(ctx context.Context, to string, in Invite) error {
 	account := oneLine(in.AccountName)
 	inviter := oneLine(in.InviterEmail)
 	subject := "You were invited to " + account + " on Unify Compute"
-	intro := "You were invited to join " + account + " on Unify Compute as " + roleLabel(in.Role) + "."
+	intro := "You were invited to join " + account + " on Unify Compute with the " + roleLabel(in.Role) + " role."
 	if inviter != "" {
 		subject = inviter + " invited you to " + account + " on Unify Compute"
-		intro = inviter + " invited you to join " + account + " on Unify Compute as " + roleLabel(in.Role) + "."
+		intro = inviter + " invited you to join " + account + " on Unify Compute with the " + roleLabel(in.Role) + " role."
 	}
 	details := []detail{{"Account", account}}
 	if inviter != "" {
