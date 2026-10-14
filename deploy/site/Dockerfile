@@ -30,6 +30,13 @@ RUN npm run build \
  && test -f dist/client/marketplace/batch-embed.html \
  && test -f dist/client/marketplace/batch-embed.txt \
  && test -f dist/client/404.html \
+ && for lang in zh zh-hant ja ko es fr de pt-br ar; do \
+      for page in "$lang" "$lang/start" "$lang/marketplace" "$lang/marketplace/batch-embed" "$lang/privacy"; do \
+        test -f "dist/client/$page.html" || { echo "missing dist/client/$page.html"; exit 1; }; \
+      done; \
+    done \
+ && test -f dist/client/sitemap.xml \
+ && test -f dist/client/robots.txt \
  && rm -rf dist/client/.vite dist/client/vinext-client-entry-manifest.json \
  && for page in index signup login verify forgot-password reset-password 404 keys jobs job usage billing account marketplace listings members accept-invitation; do \
       test -f "dist/app/$page.html" || { echo "missing dist/app/$page.html"; exit 1; }; \
