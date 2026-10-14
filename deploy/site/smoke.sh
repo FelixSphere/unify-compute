@@ -217,11 +217,13 @@ app_pages=(
   "/usage|Usage — Unify Compute"
   "/billing|Billing — Unify Compute"
   "/account|Account — Unify Compute"
+  "/members|Members — Unify Compute"
   "/signup|Sign up — Unify Compute"
   "/login|Log in — Unify Compute"
   "/verify|Check your email — Unify Compute"
   "/forgot-password|Reset your password — Unify Compute"
   "/reset-password|Reset your password — Unify Compute"
+  "/accept-invitation|Accept invitation — Unify Compute"
 )
 for app_host in app.compute.unifyai.us app.staging.compute.unifyai.us; do
   export CURL_ARGS="-H Host:$app_host"

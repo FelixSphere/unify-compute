@@ -18,6 +18,7 @@ import {
   wireToggles,
 } from './lib';
 import { dashboard } from './dashboard';
+import { acceptInvitation } from './pages/accept-invitation';
 
 const PENDING_EMAIL = 'uc_pending_email';
 const honeypot = () => input('website')?.value ?? '';
@@ -228,6 +229,8 @@ const pages: Record<string, (form: HTMLFormElement | null) => void> = {
     });
   },
 };
+
+pages['accept-invitation'] = (form) => void acceptInvitation(form);
 
 wireToggles();
 const page = document.body.dataset.page ?? '';
