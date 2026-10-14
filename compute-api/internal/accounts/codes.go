@@ -204,9 +204,9 @@ func (s *Service) ResetTokenUser(ctx context.Context, token string) (User, error
 	return u, err
 }
 
-// PurgeExpired deletes sessions, codes, reset tokens and throttle rows that
-// can no longer be used. Meant for the hourly sweep. Each row is judged
-// against its own lifetime.
+// PurgeExpired deletes sessions, codes, reset tokens, throttle rows and old
+// invitations that can no longer be used. Meant for the hourly sweep. Each
+// row is judged against its own lifetime.
 func (s *Service) PurgeExpired(ctx context.Context) error {
 	now := s.now()
 	stmts := []struct {
@@ -217,6 +217,9 @@ func (s *Service) PurgeExpired(ctx context.Context) error {
 		{`DELETE FROM email_codes WHERE expires_at <= $1`, []any{now}},
 		{`DELETE FROM auth_tokens WHERE expires_at <= $1`, []any{now}},
 		{`DELETE FROM auth_attempts WHERE expires_at <= $1`, []any{now}},
+		// Invitations stay listed for InvitationShownFor after they expire
+		// or close, so "Send again" has something to act on.
+		{`DELETE FROM invitations WHERE expires_at <= $1 OR coalesce(accepted_at, revoked_at, superseded_at) <= $1`, []any{now.Add(-InvitationShownFor)}},
 	}
 	for _, st := range stmts {
 		if _, err := s.db.Exec(ctx, st.sql, st.args...); err != nil {

@@ -202,6 +202,15 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			charge = map[string]any{"id": "ch_for_" + id, "object": "charge", "receipt_url": "https://pay.stripe.com/receipts/payment/" + id}
 		}
 		out = map[string]any{"id": id, "object": "payment_intent", "latest_charge": charge}
+	case r.Method == http.MethodPost && r.URL.Path == "/v1/refunds":
+		amount, err := strconv.ParseInt(form.Get("amount"), 10, 64)
+		if form.Get("payment_intent") == "" || err != nil || amount <= 0 {
+			stripeError(w, http.StatusBadRequest, "invalid_request_error", "parameter_invalid", "payment_intent and a positive amount are required.")
+			return
+		}
+		s.n++
+		out = map[string]any{"id": fmt.Sprintf("re_fake%d", s.n), "object": "refund", "amount": amount, "currency": "usd",
+			"payment_intent": form.Get("payment_intent"), "status": "succeeded", "reason": form.Get("reason"), "metadata": metadata(form, "metadata")}
 	default:
 		stripeError(w, http.StatusNotFound, "invalid_request_error", "", "Unrecognized request URL ("+r.Method+": "+r.URL.Path+").")
 		return

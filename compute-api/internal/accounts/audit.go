@@ -33,6 +33,7 @@ const (
 	ActionKeyCreated        = "key_created"
 	ActionKeyRevoked        = "key_revoked"
 	ActionKeyCapChanged     = "key_cap_changed"
+	ActionLowBalanceChanged = "low_balance_changed"
 	ActionListingSubmitted  = "listing_submitted"
 	ActionListingUpdated    = "listing_updated"
 	ActionListingUnlisted   = "listing_unlisted"

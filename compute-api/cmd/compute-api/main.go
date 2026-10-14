@@ -194,6 +194,7 @@ func main() {
 	var dash *dashboard.Handler
 	var sweepAccounts *accounts.Service
 	var pay *payments.Service
+	var lowBalance *billing.LowBalanceMailer
 	if dsn := os.Getenv("DATABASE_URL"); dsn == "" {
 		if backendName == backendLocal {
 			log.Error("ACCOUNTS_BACKEND=local needs DATABASE_URL: the balance, accounts and sessions live in the job store")
@@ -236,6 +237,10 @@ func main() {
 			if mail != nil {
 				notes = notify.New(st.Pool(), log, nil)
 				cfg.Mailer, cfg.Notifier = mail, notes
+				// One email per downward crossing of an account's
+				// low-balance threshold (accounts.md, W6).
+				lowBalance = billing.NewLowBalanceMailer(notes, mail, log)
+				local.OnLowBalance(lowBalance.Crossed)
 			}
 		}
 		svc = jobs.New(cfg)
@@ -256,13 +261,13 @@ func main() {
 		// The same switch mounts /dashboard/v1: with the console backend
 		// none of it is registered.
 		if backendName == backendLocal {
-			pay = paymentsService(log, st, acc, local, mail, notes)
+			pay = paymentsService(log, st, acc, local, mail, notes, svc)
 			// The template marketplace's account side (ADR-0012 M2). Closed
 			// in production until worker egress is controlled (§4).
 			lst := listings.New(st.Pool(), cat, platform.MaxRuntimeSeconds, templates, os.Getenv("ENVIRONMENT"), nil)
 			handler.Listings = lst
 			dash, err = dashboard.New(dashboard.Config{Accounts: acc, Mailer: mail, AppOrigin: os.Getenv("APP_ORIGIN"), Log: log,
-				Jobs: handler.AccountJobs(), Market: handler.AccountJobs(), Ledger: local, Payments: pay, Listings: lst})
+				Jobs: handler.AccountJobs(), Market: handler.AccountJobs(), Ledger: local, Payments: pay, Listings: lst, Notifier: notes})
 			if err != nil {
 				log.Error("dashboard", "err", err)
 				os.Exit(1)
@@ -318,6 +323,11 @@ func main() {
 	}
 	// The loops stop at their next tick boundary; a step in flight finishes.
 	workers.Wait()
+	if lowBalance != nil {
+		// After the loops, so a warning from an extend in their last step
+		// still goes out.
+		lowBalance.Wait()
+	}
 }
 
 // sweepAccountsHourly deletes expired sessions, codes, reset tokens and
@@ -348,11 +358,15 @@ func sweepAccountsHourly(ctx context.Context, log *slog.Logger, acc *accounts.Se
 // lists top-ups, while creating one and the webhook answer 503: a host must
 // not crash-loop over a payment setting (the CONSOLE_URL lesson of
 // 2026-10-02), and a live key on staging must never take money.
-func paymentsService(log *slog.Logger, st *store.Store, acc *accounts.Service, local *billing.Local, mail *mailer.Mailer, notes *notify.Notifier) *payments.Service {
+func paymentsService(log *slog.Logger, st *store.Store, acc *accounts.Service, local *billing.Local, mail *mailer.Mailer,
+	notes *notify.Notifier, jobsSvc *jobs.Service) *payments.Service {
 	set := payments.SettingsFromEnv(os.Getenv)
-	cfg := payments.Config{DB: st.Pool(), Accounts: acc, Billing: local, Settings: set, AppOrigin: os.Getenv("APP_ORIGIN"), Log: log}
-	if notes != nil {
-		cfg.Mailer, cfg.Notifier = mail, notes
+	cfg := payments.Config{DB: st.Pool(), Accounts: acc, Billing: local, Settings: set, AppOrigin: os.Getenv("APP_ORIGIN"), Log: log,
+		Mailer: mail, Notifier: notes, OperatorEmail: os.Getenv("OPERATOR_EMAIL")}
+	// An interface holding a nil pointer is not nil: set it only when there
+	// is a job service behind it.
+	if jobsSvc != nil {
+		cfg.Jobs = jobsSvc
 	}
 	switch err := set.Check(); {
 	case !set.Configured():
@@ -472,6 +486,16 @@ func runAdmin(args []string) int {
 	}
 	if mail != nil {
 		cli.Mailer = mail
+	}
+	// topup refund creates the refund at Stripe; the service's webhook
+	// applies it. Keys that the service would refuse are refused here too.
+	if os.Getenv("ACCOUNTS_BACKEND") == backendLocal {
+		set := payments.SettingsFromEnv(os.Getenv)
+		cfg := payments.Config{DB: st.Pool(), Accounts: cli.Accounts, Billing: cli.Biller, Settings: set, Log: quiet}
+		if set.Configured() && set.Check() == nil {
+			cfg.Stripe = &payments.Stripe{Key: set.SecretKey, HTTP: &http.Client{Timeout: 20 * time.Second}}
+		}
+		cli.Payments = payments.New(cfg)
 	}
 	err = cli.Run(ctx, args)
 	switch {

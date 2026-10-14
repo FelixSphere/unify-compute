@@ -3,14 +3,19 @@
 
 import { $, type ApiError, busy, call, clearFieldError, GENERIC, input, type Result, setFieldError, setFormError } from './lib';
 
+export type Role = 'owner' | 'admin' | 'member';
 export type Me = {
-  user: { email: string; created_at: number };
-  account: { id: number; status: 'active' | 'suspended' | 'closed'; compute_enabled: boolean };
+  // role and name arrive with members (A5b); an older compute-api omits them.
+  user: { email: string; role?: Role; created_at: number };
+  account: { id: number; name?: string; status: 'active' | 'suspended' | 'closed'; compute_enabled: boolean };
   csrf_token: string;
 };
 export type Balance = {
   available_usd: string;
   held_usd: string;
+  // The low-balance warning's threshold, 2 places; "0.00" is off. Absent
+  // from a compute-api older than W6.
+  low_balance_usd?: string;
   currency?: 'USD';
   limits?: { topup_min_usd: string; topup_max_usd: string; balance_max_usd: string; topups_per_day: number };
 };
@@ -259,6 +264,7 @@ export async function shell(): Promise<Me | null> {
   setText('account-initials', initials(r.data.user.email));
   setText('account-email', r.data.user.email);
   $('account-button')?.setAttribute('aria-label', `Account: ${r.data.user.email}`);
+  void balance().then((b) => b.ok && lowBalanceBanner(b.data));
   return r.data;
 }
 
@@ -318,9 +324,71 @@ export async function withReauth<T>(action: () => Promise<Result<T>>): Promise<R
 
 // ---------------------------------------------------------------- balance
 
-export async function showBalance(): Promise<Balance | null> {
-  const r = await get<Balance>('/balance');
+// One GET /balance per page load, shared by the shell's banner and the
+// page's own figure; fresh asks again (after a top-up or a change).
+let balanceOnce: Promise<Result<Balance>> | null = null;
+export function balance(fresh = false): Promise<Result<Balance>> {
+  if (fresh || !balanceOnce) balanceOnce = get<Balance>('/balance');
+  return balanceOnce;
+}
+
+// A decimal string as an integer number of ten-thousandths, so the
+// comparison is exact: balances have 4 places and thresholds 2.
+export function units(usd: string): number | null {
+  const m = /^(-?)(\d+)(?:\.(\d{1,4}))?$/.exec(usd.trim());
+  if (!m) return null;
+  const n = Number(m[2]) * 10000 + Number((m[3] ?? '').padEnd(4, '0'));
+  return m[1] ? -n : n;
+}
+
+export const isLow = (b: Balance) => {
+  const avail = units(b.available_usd);
+  const limit = units(b.low_balance_usd ?? '0');
+  return avail !== null && limit !== null && limit > 0 && avail < limit;
+};
+
+// The low-balance banner (accounts.md, "Low-balance warning"): on every
+// signed-in page while available is below the account's threshold, first in
+// the content. A link, not a button: the page's one primary stays its own.
+export function lowBalanceBanner(b: Balance) {
+  const main = document.querySelector('main.content');
+  let el = $('low-balance');
+  if (!isLow(b)) {
+    el?.remove();
+    return;
+  }
+  const onBilling = document.body.dataset.page === 'billing';
+  const text = h(
+    'p',
+    {},
+    `Your available balance is USD ${b.available_usd}, below your low-balance alert of USD ${b.low_balance_usd}. New jobs need enough balance for their hold. `,
+    onBilling ? 'Add credit to keep jobs running.' : h('a', { href: '/billing' }, 'Top up'),
+  );
+  if (!el) {
+    el = h('div', { class: 'balance-alert', id: 'low-balance', role: 'status' });
+    main?.prepend(el);
+  }
+  el.replaceChildren(alertIcon(), text);
+}
+
+// lucide TriangleAlert (ISC).
+function alertIcon(): SVGSVGElement {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  for (const [k, v] of Object.entries({ width: '20', height: '20', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5',
+    'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', focusable: 'false' })) svg.setAttribute(k, v);
+  for (const d of ['m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3', 'M12 9v4', 'M12 17h.01']) {
+    const p = document.createElementNS(ns, 'path');
+    p.setAttribute('d', d);
+    svg.append(p);
+  }
+  return svg;
+}
+
+export async function showBalance(fresh = false): Promise<Balance | null> {
+  const r = await balance(fresh);
   if (r.ok) {
+    lowBalanceBanner(r.data);
     setText('balance-available', usd(r.data.available_usd));
     setText(
       'balance-sub',

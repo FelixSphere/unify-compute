@@ -178,6 +178,22 @@ func (s *Stripe) Receipt(ctx context.Context, paymentIntentID string) (chargeID,
 	return pi.LatestCharge.ID, pi.LatestCharge.ReceiptURL, nil
 }
 
+// Refund is the part of Stripe's Refund object the CLI reports.
+type Refund struct {
+	ID            string `json:"id"`
+	Amount        int64  `json:"amount"`
+	Status        string `json:"status"` // pending, requires_action, succeeded, failed, canceled
+	PaymentIntent string `json:"payment_intent"`
+}
+
+// CreateRefund is POST /v1/refunds. The balance is not touched here: the
+// charge.refunded webhook applies every refund, whoever created it.
+func (s *Stripe) CreateRefund(ctx context.Context, form url.Values, idempotencyKey string) (Refund, error) {
+	var r Refund
+	err := s.do(ctx, http.MethodPost, "/v1/refunds", form, idempotencyKey, &r)
+	return r, err
+}
+
 func putMetadata(form url.Values, prefix string, metadata map[string]string) {
 	for k, v := range metadata {
 		form.Set(prefix+"["+k+"]", v)
