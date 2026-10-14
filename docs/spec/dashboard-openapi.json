@@ -1540,6 +1540,97 @@
             }
           }
         }
+      },
+      "patch": {
+        "operationId": "setLowBalance",
+        "summary": "Set the low-balance warning's threshold",
+        "description": "Sets low_balance_usd. 0 turns the warning off. No recent password is needed: the threshold controls a banner and an email, not spending. The warning is armed again when available is at or above the new value, so lowering it under the balance means the next drop below it is emailed; raising it over the balance sends nothing now (the banner shows) and waits for a top-up.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "low_balance_usd"
+                ],
+                "properties": {
+                  "low_balance_usd": {
+                    "type": "string",
+                    "description": "Dollars with at most two decimals, 0 to 10000."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The balance, with the new threshold.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Balance"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "malformed_body; invalid_low_balance (param low_balance_usd).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "csrf_failed: Origin is not APP_ORIGIN (every non-GET), or X-CSRF-Token does not match the session (session routes).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: Host is not the app host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/dashboard/v1/transactions": {
@@ -4087,6 +4178,7 @@
           "currency",
           "available_usd",
           "held_usd",
+          "low_balance_usd",
           "limits"
         ],
         "properties": {
@@ -4105,6 +4197,11 @@
             "type": "string",
             "pattern": "^-?[0-9]+\\.[0-9]{4}$",
             "description": "Reserved for running jobs; what a job does not use comes back when it ends."
+          },
+          "low_balance_usd": {
+            "type": "string",
+            "pattern": "^[0-9]+\\.[0-9]{2}$",
+            "description": "The low-balance warning's threshold (default 5.00; 0.00 is off). The dashboard shows a banner while available_usd is below it, and the account's owners get one email each time available drops below it (again only after a top-up or credit brings it back to the threshold or more)."
           },
           "limits": {
             "type": "object",

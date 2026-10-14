@@ -19,7 +19,7 @@
 
 | Piece | State |
 |---|---|
-| Messages | Built: `compute-api/internal/mailer/messages_jobs.go` (job succeeded, job failed, job stopped for billing, top-up received). Golden files in `internal/mailer/testdata/job-*.golden` and `topup-received*.golden`. |
+| Messages | Built: `compute-api/internal/mailer/messages_jobs.go` (job succeeded, job failed, job stopped for billing, top-up received). Golden files in `internal/mailer/testdata/job-*.golden` and `topup-received*.golden`. Low balance (W6): `messages_balance.go`, `low-balance.*.golden`; when it fires is `accounts.md`, "Low-balance warning". |
 | Sending | Built: SES v2 raw email with the instance role (`internal/mailer`), multipart plain text plus HTML; `MAIL_OUTBOX_DIR` `.eml` files with `ENVIRONMENT=development`. |
 | Recipients | Every `active` user of the account with role `owner` (`notify.Notifier.Owners`). Today an account has one user, its owner. A `pending` user (address not verified) gets nothing. |
 | Trigger: jobs | The terminal transition in `internal/jobs` (`backendStore.UpdateStatus`, `endUntracked`), only in the process that drives jobs. The send runs in the background and never holds up or fails the transition. |
@@ -27,7 +27,7 @@
 | Sent once | Built: the `notifications` table (migration `0011_notifications.sql`) and `internal/notify`. See [Sent once](#sent-once). |
 | Job page the CTA opens | `{APP_ORIGIN}/jobs/{job_id}`, e.g. `https://app.compute.unifyai.us/jobs/job_…` (the dashboard's job page; `deploy/site/Caddyfile` rewrites it to `job.html`). The operator's 2026-10-01 decision named `compute.unifyai.us/jobs/{id}`; the job page was built on the app host instead. |
 | Sender | `Unify Compute <no-reply@compute.unifyai.us>` (`SES_SENDER`), as the account emails. |
-| Not built | An email at the first refused extension (H4), `interrupted`, the storage arrears messages of ADR-0008, low balance (W6), refunds and disputes (W3), invitations (W4). |
+| Not built | An email at the first refused extension (H4), `interrupted`, the storage arrears messages of ADR-0008, refunds and disputes (W3), invitations (W4). |
 
 ## Messages
 
@@ -163,6 +163,7 @@ The record is the `notifications` table, keyed on
 | Job failed | `job` | job id | `job-failed` |
 | Billing stopped the job | `job` | job id | `job-billing-stopped` |
 | Top-up received | `topup` | top-up id (`tu_…`) | `topup-received` |
+| Low balance | `balance` | the balance entry (`be_…`) that crossed the threshold | `low-balance` |
 
 The row is a **claim, written before the first address is mailed**. A second
 trigger finds it and sends nothing. The outcome is then written on the row:

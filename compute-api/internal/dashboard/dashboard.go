@@ -147,6 +147,7 @@ func New(cfg Config) (*Handler, error) {
 	h.handle("PATCH /listings/{id}", h.session(h.updateListing))
 	h.handle("POST /listings/{id}/unlist", h.session(h.unlistListing))
 	h.handle("GET /balance", h.session(h.read(h.balance)))
+	h.handle("PATCH /balance", h.session(h.setLowBalance))
 	h.handle("GET /transactions", h.session(h.read(h.transactions)))
 	h.handle("GET /usage", h.session(h.read(h.usage)))
 	h.handle("GET /usage/jobs", h.session(h.read(h.usageJobs)))

@@ -72,6 +72,8 @@ marked **append-only** get the same refusing trigger as `usage_events`.
 | `held` | `bigint` | Quota units, `>= 0` |
 | `topup_min_cents`, `topup_max_cents`, `balance_max_cents`, `topups_per_day` | `integer` | Defaults 1000, 10000, 20000, 3 |
 | `stripe_customer_id` | `text` unique, null | Created on first top-up |
+| `low_balance_quota` | `bigint` | Quota units, `>= 0`, default 2 500 000 (USD 5, operator decision 2026-10-14); `0` is off. Migration 0014. See [Low-balance warning](#low-balance-warning) |
+| `low_balance_armed` | `boolean` | The next drop of `available` below `low_balance_quota` is emailed. Migration 0014 |
 | `suspended_reason` | `text` null | `dispute`, `abuse`, `operator` |
 | `created_at`, `closed_at` | `timestamptz` | |
 
@@ -266,7 +268,8 @@ own data. Folding them together means storing the message detail in
 `account_renamed`, `topup_created`,
 `topup_credited`, `refund`, `dispute_opened`, `dispute_closed`,
 `account_suspended`, `account_reinstated`, `compute_enabled`,
-`limits_changed`, `admin_credit`, `admin_debit`, `export`, `account_closed`.
+`limits_changed`, `admin_credit`, `admin_debit`, `export`, `account_closed`,
+`low_balance_changed` (detail `low_balance_usd`).
 
 ### Changes to existing tables
 
@@ -500,7 +503,8 @@ after the response, so neither the status nor the time depends on it.
 | `POST /reauth` | `{ password }` | `204`; sets `reauth_at` |
 | `GET /sessions` | — | `{ other_sessions }`: the user's live sessions other than this one (not idle, not past the absolute lifetime). Read-limited. Built (W7) |
 | `POST /sessions/end-others` | — | `200 { ended }`: every other session of the user is deleted and this one kept; `ended` counts the live ones. No reauth (it only removes access). Audited as `sessions_ended`. Built (W7) |
-| `GET /balance` | — | `{ object: "compute.balance", currency: "USD", available_usd, held_usd, limits: { topup_min_usd, topup_max_usd, balance_max_usd, topups_per_day } }`, from the account row. Built (A7d) |
+| `GET /balance` | — | `{ object: "compute.balance", currency: "USD", available_usd, held_usd, low_balance_usd, limits: { topup_min_usd, topup_max_usd, balance_max_usd, topups_per_day } }`, from the account row. `low_balance_usd` has 2 places, `"0.00"` when off. Built (A7d; `low_balance_usd` W6) |
+| `PATCH /balance` | `{ low_balance_usd }` (dollars, two decimals, 0 to 10000) | `200`, the balance as `GET`; `400 invalid_low_balance` (`param: low_balance_usd`). No reauth: it controls a banner and an email, not spending. Re-arms the warning exactly when `available` is at or above the new value. Writes `low_balance_changed`. Built (W6) |
 | `GET /transactions?after=&limit=&kind=` | — | `kind` repeatable, any of the entry kinds (`400 invalid_kind` otherwise); absent is every kind.  `{ object: "list", data, has_more, next? }`, balance entries newest first, `limit` 1–100 (default 20), `after` an entry id: `{ id, object: "compute.balance_entry", kind, amount_usd, available_delta_usd, held_delta_usd, available_after_usd, held_after_usd, job_id, ref, created_at, detail }`. `amount_usd` is what a `settle` took out of held (negative), and for every other kind the change in available. `ref` is `{ type: "job" \| "topup", id }` or `null`: a hold's id is replaced by its job, and an operator adjustment's audit id and reason are never returned. `detail` holds only `sku`. Built (A7d) |
 | `GET /keys` | — | `[{ id, name, display, scopes, created_at, expires_at, last_used_at, revoked_at, monthly_cap_usd, spent_this_month_usd }]`, a bare array, newest first, revoked and expired keys included. Built (A5) |
 | `POST /keys` | `{ name, scopes, expires_at?, monthly_cap_usd? }` | `201 { …key, secret: "uck_…" }`; the secret is never returned again. Needs reauth after 10 min (`401 reauth_required`, checked before the body). Emails "key created". Built (A5) |
@@ -702,6 +706,44 @@ operator's `account suspend` still does not stop running jobs; only a
 dispute cancels them.
 The CLI never migrates; the service does at boot.
 
+## Low-balance warning
+
+Built (W6). Each account has a threshold, `low_balance_quota`, default USD 5
+and set on the Billing page (`PATCH /balance`); `0` turns the warning off.
+
+- **Banner.** Every signed-in page shows a warning box first in its content
+  while `available_usd` is below `low_balance_usd`, with a "Top up" link to
+  `/billing` (on Billing itself, a line pointing at "Add credit"). It reads
+  `GET /balance`, so it appears and goes away with the balance, whatever
+  the email has done.
+- **Email.** One to the account's active owners each time `available`
+  crosses the threshold downward. The local biller decides it in the
+  transaction that moves the balance, under the account lock: the account
+  must be *armed* and the movement must leave `available` below the
+  threshold. It then disarms the account and, after the commit, hands the
+  crossing to `billing.LowBalanceMailer`, which sends through `notify` with
+  subject `balance` and the crossing's balance entry id as `subject_id`
+  (`notifications.md`, "Sent once"). The send runs in the background; a mail
+  failure never fails the hold or extend.
+- **Re-arming.** A credit (`topup`, `admin_credit`, `dispute_reversal`) that leaves `available`
+  at or above the threshold arms the account again. A hold released or
+  expired at a job's end does not: holds take `available` down at every
+  submit and give the unused part back at every end, and re-arming there
+  would mail an account near its threshold once per job. Changing the
+  threshold sets armed to `available >= new value`, so raising it over the
+  balance sends nothing at that moment (the banner shows) and waits for the
+  next top-up.
+- **What crosses.** Holds and extends, the movements that take `available`
+  down in the biller's own transactions. A settle moves held, not
+  `available`. An operator debit (`admin_debit`) runs in the admin CLI's
+  transaction, so it is not reported and leaves the account armed: the next
+  hold or extend below the threshold sends the email. A Stripe refund or
+  dispute (`ReverseTx`, in the webhook's transaction) behaves the same way:
+  the refund and suspension emails already tell the owner, and the
+  low-balance email follows on the next hold or extend.
+- **Not built.** Console accounts get nothing (no addresses here). The
+  threshold is in USD only, per account, not per member.
+
 ## Emails
 
 All from `Unify Compute <no-reply@compute.unifyai.us>`, multipart plain text
@@ -718,6 +760,7 @@ something the subject does not say.
 | Password changed | change or reset | none (no CTA; safety line says what to do) | `Your Unify Compute password was changed` |
 | API key created | `POST /keys` | CTA "Review keys" | `A new Unify Compute API key was created` |
 | Top-up received | webhook credits | CTA "View receipt" (Stripe `receipt_url`), or "View billing" (`/billing`) when the receipt lookup failed; details: amount, new balance, top-up id, paid. Built (W2) | `Unify Compute: USD 20.00 added to your balance` |
+| Low balance | `available` crosses below `low_balance_quota` (see [Low-balance warning](#low-balance-warning)) | CTA "Top up" (`/billing`); details: available balance, held by running jobs, alert below. Built (W6) | `Unify Compute: your balance is below USD 5.00` |
 | Refund issued | `charge.refunded` applied (from the CLI or the Stripe dashboard); states the refund policy | CTA "View balance" (`/billing`) | `Unify Compute: refund of USD 20.00 issued` |
 | Account suspended | a dispute that suspends the account (not sent for an admin suspension yet) | CTA "Contact us" (mailto `contactus@felixsphere.com`, per UI-STANDARD) | `Your Unify Compute account is suspended` |
 | Compute enabled | admin `enable-compute` | CTA "Create an API key" | `Your Unify Compute account can now run jobs` |
@@ -732,7 +775,7 @@ The links open these dashboard pages on `APP_ORIGIN`: `/login`,
 `/forgot-password`, `/reset-password#token=…`, `/keys`, `/members` and
 `/accept-invitation#token=…`
 (`compute-api/internal/mailer/messages.go`), and `/jobs/{id}` and `/billing`
-(`messages_jobs.go`). A7b and A7c build the pages at those paths or change
+(`messages_jobs.go`, `messages_balance.go`). A7b and A7c build the pages at those paths or change
 them there.
 
 `{{footer_reason}}` for account messages: "You're receiving this because
