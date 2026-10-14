@@ -25,6 +25,7 @@ import (
 	"github.com/FelixSphere/unify-compute/compute-api/internal/accounts"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/billing"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/listings"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/payments"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/sku"
 )
 
@@ -38,10 +39,12 @@ const Usage = `usage: compute-api admin <command>
   balance show <account_id>
   balance credit <account_id> --usd AMOUNT --reason TEXT
   balance debit <account_id> --usd AMOUNT --reason TEXT
+  topup refund <tu_id> [--usd AMOUNT] --reason TEXT
   audit [--account <account_id>]
   listing queue | show <lst_id> | approve|reject|unlist <lst_id> --reason …
 
-AMOUNT is USD with at most 4 decimals, e.g. 12.50.`
+AMOUNT is USD with at most 4 decimals, e.g. 12.50 (at most 2 for a refund;
+without --usd a refund is everything left on the top-up).`
 
 // ErrUsage is a command line the CLI does not accept; nothing was read or
 // written. main prints Usage and exits 2.
@@ -70,6 +73,9 @@ type CLI struct {
 	// Listings is the marketplace's account side; nil when the deployment
 	// has no local accounts (then `listing` says so).
 	Listings *listings.Store
+	// Payments issues `topup refund` through Stripe; nil when the
+	// deployment has no local accounts.
+	Payments *payments.Service
 	// Actor is who ran the command, recorded as the audit event's actor_id.
 	Actor string
 	Out   io.Writer
@@ -93,6 +99,8 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		return c.audit(ctx, args[1:])
 	case "listing":
 		return c.listing(ctx, args[1:])
+	case "topup":
+		return c.topup(ctx, args[1:])
 	}
 	return usage("unknown command %q", args[0])
 }

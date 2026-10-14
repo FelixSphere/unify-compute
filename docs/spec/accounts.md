@@ -15,8 +15,11 @@
   `internal/payments`, the dashboard's `/topups` routes and the Stripe
   webhook, the Billing page's "Add credit"). All of it is behind
   `ACCOUNTS_BACKEND=local`, which no environment sets, and top-ups also need
-  the Stripe keys, which no environment has yet. Refunds and disputes (B2),
-  the top-up receipt email, `admin account limits`, `GET /compute/v1/balance`,
+  the Stripe keys, which no environment has yet. Refunds and disputes (B2:
+  migration `0012_refunds_disputes.sql`, `internal/payments/refunds.go`,
+  `admin topup refund`, the refund, suspension and operator emails) are on
+  the branch `feat/refunds-and-disputes`, tested against the Stripe fake
+  only. The top-up receipt email, `admin account limits`, `GET /compute/v1/balance`,
   account export and close do not exist yet.
 - Task breakdown: [`plan-own-accounts.md`](../plan-own-accounts.md).
 - Depends on: [`job-api.md`](job-api.md) (error envelope, job routes),
@@ -65,7 +68,7 @@ marked **append-only** get the same refusing trigger as `usage_events`.
 | `name` | `text` | 1–64 chars, how the tenant appears in the dashboard and in member emails. Defaults to the first user's email at signup; owners and admins rename it (`PATCH /account`) |
 | `status` | `text` | `active`, `suspended`, `closed` |
 | `compute_enabled` | `boolean` | Default from `ACCOUNTS_COMPUTE_DEFAULT` (`false` while starting small; ADR-0011 D3) |
-| `available` | `bigint` | Quota units. `CHECK (available >= 0 OR status = 'suspended')`; only a chargeback drives it negative |
+| `available` | `bigint` | Quota units. May be negative: a dispute or a refund larger than the unused balance drives it below zero (0005's `CHECK (available >= 0 OR status = 'suspended')` was dropped by 0012, because a refund made at Stripe has already returned the money and does not suspend). A negative balance refuses every hold |
 | `held` | `bigint` | Quota units, `>= 0` |
 | `topup_min_cents`, `topup_max_cents`, `balance_max_cents`, `topups_per_day` | `integer` | Defaults 1000, 10000, 20000, 3 |
 | `stripe_customer_id` | `text` unique, null | Created on first top-up |
@@ -217,7 +220,7 @@ After the cutover its `user_id` holds the account id and `token_id` the key id.
 | `stripe_customer_id` | `text` | The account's Customer (also on `accounts`) |
 | `stripe_payment_intent_id`, `stripe_charge_id` | `text` | The PaymentIntent from the completed session; the charge and receipt looked up after the credit |
 | `receipt_url` | `text` | Stripe's hosted receipt |
-| `refunded_cents`, `disputed_cents` | `integer` | B2 |
+| `refunded_cents`, `disputed_cents` | `integer` | Refunded so far (the charge's cumulative `amount_refunded` last applied) and the amount under open disputes (B2) |
 | `created_at`, `paid_at`, `expires_at` | `timestamptz` | `expires_at` = Checkout's, one hour after creation (`payments.CheckoutTTL`) |
 
 ### `stripe_events`
@@ -226,6 +229,31 @@ After the cutover its `user_id` holds the account id and `token_id` the key id.
 `received_at`, `processed_at`. Inserted first in the same transaction as the
 effect, so a redelivered event, even one delivered concurrently, is a no-op.
 Only compute's own events are stored; see [Stripe webhook](#stripe-webhook-post-dashboardv1stripewebhook).
+
+### `topup_disputes`
+
+`id` (Stripe's `dp_…`) PK, `topup_id`, `account_id`, `amount_cents`,
+`status` (`open` → `won` | `lost`; Stripe's `warning_closed` is recorded as
+`won`), `reason`, `suspended_account` (whether this dispute moved the
+account from `active` to `suspended`), `opened_event_id`,
+`closed_event_id`, `created_at`, `closed_at`. Keyed on the dispute, so a
+dispute is debited and reinstated at most once whatever order its events
+arrive in.
+
+### `payment_emails`
+
+`(event_id, kind, recipient)` PK, `account_id`, `detail jsonb`,
+`created_at`, `claimed_at`, `sent_at`. The messages a Stripe event causes,
+inserted in the event's transaction and sent after it commits; the Stripe
+event id is the idempotency key. A send claims the row first (a claim older
+than 15 minutes is taken as dead) and marks it sent after, so each message
+goes out at most once; a failed one is unclaimed and retried when Stripe
+delivers the event again. It is separate from W2's `notifications`
+(`internal/notify`) because these messages are rendered from what the
+event's transaction saw and retried on redelivery, when that data is no
+longer at hand; notify retries only from a later trigger that brings its
+own data. Folding them together means storing the message detail in
+`notifications`.
 
 ### `audit_events` (**append-only**)
 
@@ -315,21 +343,55 @@ key is `401 invalid_key`, with no cache.
   payment went through and its webhook will credit it: `409 topup_open`.
 - `failed` cannot happen with cards only; it is handled because the event
   exists.
-- Refunds and disputes (below) are B2. Until B2, their events on a top-up
-  are stored (`outcome = recorded`) and logged as errors for the operator,
-  and nothing moves.
-- `disputed` debits `disputed_cents` immediately; `won` writes a
-  `dispute_reversal` entry; `lost` writes nothing more.
-- A refund is created by the admin CLI (`refund` entry, top-up →
-  `refunded` or `partially_refunded`), confirmed by `charge.refunded`. A
-  refund larger than the account's `available` is refused: the customer
-  cannot be refunded money already spent on GPUs.
+- **Refund policy** (operator, 2026-10-14; wording pending legal review):
+  unused prepaid balance can be refunded on request; compute already used
+  is not refunded.
+- A refund is created by `admin topup refund`, which only calls Stripe
+  (`POST /v1/refunds`, idempotency key on the top-up, what was refunded so
+  far and the amount). It refuses more than is left on the top-up (amount −
+  refunded − disputed) and more than the account's `available`. The balance
+  moves only when `charge.refunded` arrives, the same path a refund made in
+  the Stripe dashboard takes: the debit is the charge's cumulative
+  `amount_refunded` minus `refunded_cents`, as a `refund` entry keyed
+  `refund:<topup>:<cumulative cents>`, so a duplicate or stale event debits
+  nothing. Top-up → `partially_refunded` or `refunded` (left `disputed` or
+  `lost` if it is). A refund larger than `available` (made in the Stripe
+  dashboard, or racing a settle) is debited in full: the balance goes
+  negative, the operator is emailed, the account is **not** suspended and
+  running jobs are not cancelled. The customer gets "Refund issued".
+- `charge.dispute.created` debits the disputed amount at once (`dispute`
+  entry, key `dispute:<dp_…>`), adds it to `disputed_cents`, moves the
+  top-up to `disputed`, suspends an `active` account
+  (`suspended_reason = dispute`), records a cancel for every live job of the
+  account in the same transaction and then carries them out through the
+  normal cancel path (`jobs.Service.Cancel`: metering stops at the
+  dispute, the hold settles what was used), emails "Account suspended" to
+  the account (only if this dispute suspended it) and a notice to the
+  operator.
+- `charge.dispute.closed` with `won` (or `warning_closed`) writes a
+  `dispute_reversal` entry and returns the top-up to `credited` /
+  `partially_refunded` / `refunded`. The suspension is lifted only if this
+  dispute caused it, the account is still suspended for `dispute`, no other
+  dispute on it is open, and `available >= 0`; otherwise it stays for the
+  operator. `lost` writes nothing more, the top-up becomes `lost` and the
+  account stays suspended until `admin account reinstate`. A close that
+  arrives before its open is applied as open-then-close when lost, and only
+  recorded when won (no money moved).
+- An event that cannot be applied as it is (not USD, a charge amount that
+  differs from the top-up, a disputed amount outside it) is stored with
+  `outcome = recorded` and logged as an error: the money has moved at
+  Stripe, so the operator reconciles it by hand.
+- Not handled: a refund that later fails (`charge.refund.updated` with
+  `status = failed`) stays debited; Stripe's `charge.dispute.funds_*`
+  events are not used.
 
 ### Account
 
-`active ⇄ suspended → closed`. Suspension is automatic on a dispute that
-leaves `available < 0`, otherwise an admin action. Reinstatement is always an
-admin action.
+`active ⇄ suspended → closed`. Suspension is automatic on a dispute
+(`suspended_reason = dispute`), otherwise an admin action (`operator`). A
+won dispute lifts only the suspension it caused (above); every other
+reinstatement is `admin account reinstate`, which refuses a negative
+balance.
 
 ## Errors
 
@@ -585,15 +647,20 @@ PaymentIntent and its charge) carries `metadata.product = unify-compute`,
    - `checkout.session.expired`: `open` → `expired`.
    - `checkout.session.async_payment_failed`: `open` → `failed`.
    - `charge.refunded`, `charge.dispute.created`, `charge.dispute.closed`
-     on a top-up: stored as `recorded` and logged as an error for the
-     operator. Applying them is B2.
+     on a top-up: applied as [Top-up](#top-up) describes, with outcomes
+     `refunded`, `disputed`, `dispute_won`, `dispute_lost`, `no_change`
+     (already applied), or `recorded` (could not be applied; logged as an
+     error).
 5. Commit, then look up the PaymentIntent with `latest_charge` expanded and
    store the charge id and `receipt_url` (outside the transaction; a failure
    leaves the top-up credited without a receipt link). Then the "Top-up
    received" email goes to the account's owners, once per top-up
    (`notifications.md`, "Sent once"), with the receipt link if the lookup
    found one. Both run in the background after the response; neither can
-   undo the credit or change the webhook's answer. Built (W2).
+   undo the credit or change the webhook's answer. Built (W2). After a refund or
+   dispute: carry out the recorded job cancels, then send the event's queued
+   emails (`payment_emails`; also on a duplicate delivery, which retries any
+   that failed).
 
 The response body is `{ received: true, outcome }`, so Stripe's delivery log
 says what happened. A `5xx` from us makes Stripe retry for up to 3 days,
@@ -612,7 +679,7 @@ admin account enable-compute|disable-compute <id> --reason …
 admin account suspend|reinstate <id> --reason …
 admin account limits <id> [--topup-max-usd N] [--balance-max-usd N] [--topups-per-day N] --reason …
 admin balance credit|debit <id> --usd 12.50 --reason …      # admin_credit / admin_debit entries
-admin topup refund <tu_…> [--usd N] --reason …               # Stripe refund + refund entry
+admin topup refund <tu_…> [--usd N] --reason …               # Stripe refund; the webhook writes the refund entry
 admin audit [--account <id>]                                  # checks the balance invariant
 ```
 
@@ -626,7 +693,11 @@ after the change commits; a failed email is reported and does not undo it.
 Built (A6): `account show|enable-compute|disable-compute|suspend|reinstate`,
 `balance show|credit|debit`, `audit`. Not yet: `account limits` (the per-
 account top-up columns exist and are read; until the verb exists the
-operator changes them with SQL and an audit row) and `topup refund` (B2). Suspending does not stop running jobs yet (B2).
+operator changes them with SQL and an audit row). `topup refund` (B2) is built: it creates the refund at Stripe (`--amount` is accepted
+for `--usd`; without either, everything left on the top-up), writes a
+`refund` audit row with `stage: requested`, and changes no balance. An
+operator's `account suspend` still does not stop running jobs; only a
+dispute cancels them.
 The CLI never migrates; the service does at boot.
 
 ## Emails
@@ -645,15 +716,15 @@ something the subject does not say.
 | Password changed | change or reset | none (no CTA; safety line says what to do) | `Your Unify Compute password was changed` |
 | API key created | `POST /keys` | CTA "Review keys" | `A new Unify Compute API key was created` |
 | Top-up received | webhook credits | CTA "View receipt" (Stripe `receipt_url`), or "View billing" (`/billing`) when the receipt lookup failed; details: amount, new balance, top-up id, paid. Built (W2) | `Unify Compute: USD 20.00 added to your balance` |
-| Refund issued | admin refund | CTA "View balance" | `Unify Compute: refund of USD 20.00 issued` |
-| Account suspended | dispute or admin | CTA "Contact us" (mailto `contactus@felixsphere.com`, per UI-STANDARD) | `Your Unify Compute account is suspended` |
+| Refund issued | `charge.refunded` applied (from the CLI or the Stripe dashboard); states the refund policy | CTA "View balance" (`/billing`) | `Unify Compute: refund of USD 20.00 issued` |
+| Account suspended | a dispute that suspends the account (not sent for an admin suspension yet) | CTA "Contact us" (mailto `contactus@felixsphere.com`, per UI-STANDARD) | `Your Unify Compute account is suspended` |
 | Compute enabled | admin `enable-compute` | CTA "Create an API key" | `Your Unify Compute account can now run jobs` |
 | Invitation | `POST /members/invitations` | CTA "Accept invitation" (link with token in the fragment); details: account name, inviter, role | `<inviter> invited you to <account> on Unify Compute` |
 | Invitation accepted | `POST /invitations/accept` (to the inviter) | CTA "View members" | `<email> joined <account> on Unify Compute` |
 | Removed from account | `DELETE /members/{id}` (to the removed address) | none (safety line names the account and who to contact) | `You were removed from <account> on Unify Compute` |
 | Job finished / failed / billing stopped | as `notifications.md` | as `notifications.md` | as `notifications.md`; the safety lines' "Unify API console" becomes the Unify Compute dashboard. Built (W2) |
 | Storage arrears started / artifacts deletion scheduled / deleted | ADR-0008 | CTA "Top up" | `Unify Compute: storage unpaid, artifacts deleted on <date>` (and variants) |
-| Operator: top-up review request, dispute opened | limit refusal is not emailed; disputes are | — (plain operator notice to the operator address) | `[Unify Compute ops] dispute opened on tu_…` |
+| Operator: dispute opened, dispute won/lost, refund left a balance negative | B2 webhook; limit refusals are not emailed | — (plain operator notice to `OPERATOR_EMAIL`) | `[Unify Compute ops] dispute opened on tu_…` |
 
 The links open these dashboard pages on `APP_ORIGIN`: `/login`,
 `/forgot-password`, `/reset-password#token=…`, `/keys`, `/members` and
@@ -684,6 +755,7 @@ line.
 | `MAIL_OUTBOX_DIR` | Only with `ENVIRONMENT=development` and no `SES_SENDER`: where messages are written as `.eml` files instead of sent (default `outbox`) |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET` | Cloudflare; test keys in development |
 | `STRIPE_SECRET_KEY` | Compute's own restricted key on the shared Stripe account: `rk_test_…` with any `ENVIRONMENT` but `production`, `rk_live_…` only with `ENVIRONMENT=production` (and only after O5/O6). B1 needs Checkout Sessions write, Customers write, PaymentIntents read and Charges read (the receipt lookup expands `latest_charge`); B2 adds Refunds write and Disputes read. A key in the wrong environment, a malformed one, or one without its webhook secret is logged as an error and top-ups answer `503 topups_unavailable`; compute-api still boots |
+| `OPERATOR_EMAIL` | Where operator notices go (disputes, a refund that leaves a negative balance). Unset: `contactus@felixsphere.com` |
 | `STRIPE_WEBHOOK_SECRET` | `whsec_…` of compute's own endpoint (`https://<app host>/dashboard/v1/stripe/webhook`), never Unify API's |
 
 Secrets come from SSM under the stack's prefix, like the existing ones
@@ -706,8 +778,10 @@ Two known gaps, left for the legal review before the first live top-up
 
 1. **Refunds.** The document is a generic template whose refund clause is
    written for physical goods (returns, shipping), not for prepaid compute
-   credit that is spent per second. Refunds of unused balance, including at
-   account close, are not covered.
+   credit that is spent per second. The operator decided the policy on
+   2026-10-14 (unused prepaid balance can be refunded on request; compute
+   already used is not), and the refund email states it; the terms and the
+   email's wording still need the legal review.
 2. **Acceptable use.** It has no acceptable-use policy: nothing forbids
    cryptocurrency mining, abuse of GPUs, or the other uses the upstream GPU
    providers' own terms require us to prohibit and enforce.

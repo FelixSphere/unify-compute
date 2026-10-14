@@ -26,9 +26,10 @@ const (
 	OutcomeFailed          = "failed"
 	OutcomeAwaitingPayment = "awaiting_payment"
 	OutcomeNoChange        = "no_change"
-	// OutcomeRecorded: a refund or dispute on a compute top-up, stored but
-	// not applied until B2 builds the flow. Logged as an error for the
-	// operator.
+	// OutcomeRecorded: a refund or dispute on a compute top-up that cannot be
+	// applied as it is (another currency, an amount that does not fit the
+	// top-up). Stored and logged as an error: the money has moved at Stripe,
+	// so the operator reconciles it by hand rather than it being rejected.
 	OutcomeRecorded = "recorded"
 	// OutcomeRejected: compute's own event that does not match its top-up
 	// (amount, currency, account, session). Never credited; logged as an
@@ -57,13 +58,19 @@ type event struct {
 // chargeRef is the part of a Charge or Dispute object that ties it to a
 // payment: compute recognises its own by the PaymentIntent of a top-up.
 type chargeRef struct {
-	ID            string            `json:"id"`
-	Object        string            `json:"object"`
-	Charge        string            `json:"charge"`
-	PaymentIntent string            `json:"payment_intent"`
-	Amount        int64             `json:"amount"`
-	Status        string            `json:"status"`
-	Metadata      map[string]string `json:"metadata"`
+	ID            string `json:"id"`
+	Object        string `json:"object"`
+	Charge        string `json:"charge"`
+	PaymentIntent string `json:"payment_intent"`
+	// Amount is the charge's amount on a charge, the disputed amount on a
+	// dispute.
+	Amount   int64  `json:"amount"`
+	Currency string `json:"currency"`
+	// AmountRefunded is a charge's cumulative refunded amount.
+	AmountRefunded int64             `json:"amount_refunded"`
+	Status         string            `json:"status"`
+	Reason         string            `json:"reason"`
+	Metadata       map[string]string `json:"metadata"`
 }
 
 // HandleWebhook verifies and applies one delivery. A signature error is
@@ -90,6 +97,8 @@ func (s *Service) HandleWebhook(ctx context.Context, signature string, body []by
 
 	var apply func(tx pgx.Tx) (outcome, topupID string, err error)
 	var credited *creditDone
+	var effects *chargeEffects
+	charge := false
 	switch ev.Type {
 	case "checkout.session.completed", "checkout.session.async_payment_succeeded",
 		"checkout.session.async_payment_failed", "checkout.session.expired":
@@ -119,12 +128,11 @@ func (s *Service) HandleWebhook(ctx context.Context, signature string, body []by
 		if id == "" {
 			return OutcomeIgnored, nil
 		}
-		apply = func(pgx.Tx) (string, string, error) {
-			// B2 builds refunds and disputes. Until then the event is kept
-			// so B2 can replay it, and the operator is told.
-			log.Error("stripe webhook: refund or dispute on a top-up recorded but NOT applied (B2 not built); operator action needed",
-				"topup", id, "object", ref.ID, "amount", ref.Amount, "status", ref.Status)
-			return OutcomeRecorded, id, nil
+		charge = true
+		apply = func(tx pgx.Tx) (string, string, error) {
+			out, eff, err := s.applyCharge(ctx, tx, ev, ref, id, log)
+			effects = eff
+			return out, id, err
 		}
 	default:
 		return OutcomeIgnored, nil
@@ -162,11 +170,20 @@ func (s *Service) HandleWebhook(ctx context.Context, signature string, body []by
 		return "", err
 	}
 	if outcome == OutcomeDuplicate {
-		credited = nil
+		credited, effects = nil, nil
 	}
 	if credited != nil {
 		log.Info("top-up credited", "topup", credited.topupID, "account", credited.accountID)
 		s.afterCredit(credited)
+	}
+	if charge {
+		if outcome != OutcomeDuplicate {
+			log.Info("stripe webhook: refund or dispute", "outcome", outcome)
+		}
+		s.cancelJobs(ctx, effects, log)
+		// On a duplicate too: a message that failed the first time is
+		// retried when Stripe delivers the event again.
+		s.sendEmails(ev.ID)
 	}
 	return outcome, nil
 }

@@ -159,6 +159,14 @@ type Config struct {
 	// received" once per credited top-up. Either nil sends nothing.
 	Mailer   *mailer.Mailer
 	Notifier *notify.Notifier
+	// OperatorEmail receives the refund and dispute operator notices
+	// (OPERATOR_EMAIL); empty is mailer.DefaultOperator. Mailer alone (no
+	// Notifier) is enough for the refund, suspension and operator messages;
+	// nil queues them unsent and logs an error.
+	OperatorEmail string
+	// Jobs cancels a disputed account's live jobs right away; nil leaves the
+	// recorded cancels to the worker-lock holder's next reconcile.
+	Jobs JobCanceller
 }
 
 type Service struct {
@@ -170,6 +178,8 @@ type Service struct {
 	livemode  bool
 	env       string
 	appOrigin string
+	operator  string
+	jobs      JobCanceller
 	log       *slog.Logger
 	now       func() time.Time
 	wg        sync.WaitGroup
@@ -180,7 +190,10 @@ type Service struct {
 func New(cfg Config) *Service {
 	s := &Service{db: cfg.DB, acc: cfg.Accounts, bill: cfg.Billing, stripe: cfg.Stripe, whsec: cfg.Settings.WebhookSecret,
 		livemode: cfg.Settings.Livemode(), env: cmpEnv(cfg.Settings.Environment), appOrigin: strings.TrimRight(cfg.AppOrigin, "/"),
-		log: cfg.Log, now: cfg.Now, mail: cfg.Mailer, notifier: cfg.Notifier}
+		log: cfg.Log, now: cfg.Now, mail: cfg.Mailer, notifier: cfg.Notifier, operator: cfg.OperatorEmail, jobs: cfg.Jobs}
+	if s.operator == "" {
+		s.operator = mailer.DefaultOperator
+	}
 	if s.now == nil {
 		s.now = time.Now
 	}
@@ -202,7 +215,8 @@ func cmpEnv(env string) string {
 // Enabled reports whether top-ups can be created.
 func (s *Service) Enabled() bool { return s != nil && s.stripe != nil }
 
-// Wait blocks until receipt lookups started after a webhook have finished.
+// Wait blocks until receipt lookups and emails started after a webhook have
+// finished.
 func (s *Service) Wait() { s.wg.Wait() }
 
 // Topup is a top-up as the dashboard shows it.

@@ -256,7 +256,7 @@ func main() {
 		// The same switch mounts /dashboard/v1: with the console backend
 		// none of it is registered.
 		if backendName == backendLocal {
-			pay = paymentsService(log, st, acc, local, mail, notes)
+			pay = paymentsService(log, st, acc, local, mail, notes, svc)
 			// The template marketplace's account side (ADR-0012 M2). Closed
 			// in production until worker egress is controlled (§4).
 			lst := listings.New(st.Pool(), cat, platform.MaxRuntimeSeconds, templates, os.Getenv("ENVIRONMENT"), nil)
@@ -348,11 +348,15 @@ func sweepAccountsHourly(ctx context.Context, log *slog.Logger, acc *accounts.Se
 // lists top-ups, while creating one and the webhook answer 503: a host must
 // not crash-loop over a payment setting (the CONSOLE_URL lesson of
 // 2026-10-02), and a live key on staging must never take money.
-func paymentsService(log *slog.Logger, st *store.Store, acc *accounts.Service, local *billing.Local, mail *mailer.Mailer, notes *notify.Notifier) *payments.Service {
+func paymentsService(log *slog.Logger, st *store.Store, acc *accounts.Service, local *billing.Local, mail *mailer.Mailer,
+	notes *notify.Notifier, jobsSvc *jobs.Service) *payments.Service {
 	set := payments.SettingsFromEnv(os.Getenv)
-	cfg := payments.Config{DB: st.Pool(), Accounts: acc, Billing: local, Settings: set, AppOrigin: os.Getenv("APP_ORIGIN"), Log: log}
-	if notes != nil {
-		cfg.Mailer, cfg.Notifier = mail, notes
+	cfg := payments.Config{DB: st.Pool(), Accounts: acc, Billing: local, Settings: set, AppOrigin: os.Getenv("APP_ORIGIN"), Log: log,
+		Mailer: mail, Notifier: notes, OperatorEmail: os.Getenv("OPERATOR_EMAIL")}
+	// An interface holding a nil pointer is not nil: set it only when there
+	// is a job service behind it.
+	if jobsSvc != nil {
+		cfg.Jobs = jobsSvc
 	}
 	switch err := set.Check(); {
 	case !set.Configured():
@@ -472,6 +476,16 @@ func runAdmin(args []string) int {
 	}
 	if mail != nil {
 		cli.Mailer = mail
+	}
+	// topup refund creates the refund at Stripe; the service's webhook
+	// applies it. Keys that the service would refuse are refused here too.
+	if os.Getenv("ACCOUNTS_BACKEND") == backendLocal {
+		set := payments.SettingsFromEnv(os.Getenv)
+		cfg := payments.Config{DB: st.Pool(), Accounts: cli.Accounts, Billing: cli.Biller, Settings: set, Log: quiet}
+		if set.Configured() && set.Check() == nil {
+			cfg.Stripe = &payments.Stripe{Key: set.SecretKey, HTTP: &http.Client{Timeout: 20 * time.Second}}
+		}
+		cli.Payments = payments.New(cfg)
 	}
 	err = cli.Run(ctx, args)
 	switch {

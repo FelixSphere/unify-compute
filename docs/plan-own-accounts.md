@@ -307,6 +307,13 @@ on migration numbers (A1 takes `0005`, A6 takes `0006`).
   (`admin topup refund`), `compute-api/internal/jobs` (cancel on
   suspension), `compute-api/internal/mailer` (refund issued, account
   suspended, operator dispute notice).
+- **Status (2026-10-14):** built on `feat/refunds-and-disputes` (migration
+  `0012`), tested against the Stripe fake only; not on staging (no Stripe
+  keys there). Differs from the line below in two places, by the
+  operator's W3 brief: every dispute suspends the account (not only one that
+  leaves it negative), and a won dispute lifts the suspension it caused.
+  Jobs are cancelled through the normal cancel path (status `cancelled`),
+  not with `balance_exhausted`.
 - **Done when:** in test mode: a partial refund debits once and is confirmed
   by `charge.refunded`; a refund above `available` is refused; a test
   dispute (`4000 0000 0000 0259`) debits immediately, suspends the account if
