@@ -409,8 +409,11 @@ func TestMemberCapCountsLiveInvitations(t *testing.T) {
 		403, "permission_error", "member_limit_reached")
 	// Inviting an address again replaces its invitation; it is not one more.
 	f.invite(owner, "p1@example.com", "admin")
+	// The test clock does not move, so both share created_at and the order
+	// between them is the ids' random tail: look p1 up rather than index.
 	list := f.listInvitations(owner)
-	if len(list) != 2 || list[0].Email != "p1@example.com" || list[0].Role != "admin" {
+	i := slices.IndexFunc(list, func(v invBody) bool { return v.Email == "p1@example.com" })
+	if len(list) != 2 || i < 0 || list[i].Role != "admin" {
 		t.Fatalf("invitations %+v", list)
 	}
 	// An expired invitation no longer holds a slot.
