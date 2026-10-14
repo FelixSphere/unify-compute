@@ -435,10 +435,16 @@ named by `param`, or in the form-level box when `param` is absent
 | 403 | `permission_error` | `csrf_failed` | Missing or wrong `X-CSRF-Token`, or foreign `Origin` |
 | 403 | `permission_error` | `topup_limit_exceeded` | Below the minimum, above the per-top-up maximum, would exceed the balance maximum (`param: amount_usd` for these three), or over the daily count (no `param`). `message` says which and invites contact for a review |
 | 403 | `permission_error` | `key_limit_reached` | 10 active keys already |
+| 403 | `permission_error` | `role_required` | The user's role does not allow the action ([Members and roles](#members-and-roles)): a member topping up, inviting, renaming, or revoking a key another user created; an admin inviting an admin or removing a non-member; a non-owner changing roles |
+| 403 | `permission_error` | `member_limit_reached` | Members plus live invitations would exceed the account's `member_limit` |
+| 400 | `invalid_request` | `invalid_role` | Invitation role not `admin`/`member`, or member role not `owner`/`admin`/`member` |
 | 400 | `invalid_request` | `invalid_month` | `/usage`: `month` not `YYYY-MM` |
 | 400 | `invalid_request` | `invalid_cursor`, `invalid_limit`, `invalid_status` | List routes: `after` not one of this account's entries or jobs, `limit` out of range, unknown job status (`param` names it) |
 | 404 | `not_found` | `not_found` | Key or top-up not in this account |
 | 404 | `not_found` | `job_not_found` | Job not in this account, on the dashboard as on the job API |
+| 409 | `conflict` | `already_member` | Inviting an address that is already a user of this account (`param: email`) |
+| 409 | `conflict` | `last_owner` | Demoting or removing the account's last active owner |
+| 409 | `conflict` | `email_in_use` | Accepting an invitation for an address that already has a login, in this or another account |
 | 409 | `conflict` | `topup_open` | The account's `open` top-up was already paid at Stripe and its webhook has not arrived; `error.topup_id` names it. An unpaid open top-up never blocks: it is expired and replaced |
 | 429 | `rate_limited` | `rate_limited` | Any throttle; always with `Retry-After` |
 | 502 | `payment_provider_error` | `stripe_unavailable` | Stripe did not create the Checkout Session (or the Customer, or did not answer the expiry of an open session); nothing was charged and no top-up is kept |
@@ -490,14 +496,14 @@ after the response, so neither the status nor the time depends on it.
 | `POST /login` | `{ email, password, website }` | `200 { user, account, csrf_token }` + `Set-Cookie` | Rotates any existing session |
 | `POST /password/forgot` | `{ email, website }` | `202 { status: "reset_requested" }` | Always `202` |
 | `POST /password/reset` | `{ token, password, password_confirm }` | `200 { status: "password_reset" }`, cookie cleared | Ends every session; does not log in |
-| `GET /invitations/{token}` | — | `200 { account_name, email, role, invited_by_email, expires_at }` | What the accept page shows. Expired, revoked or used is `404 not_found` |
-| `POST /invitations/accept` | `{ token, password, password_confirm }` | `200 { user, account, csrf_token }` + `Set-Cookie` | Creates an `active` user (the link proves the address) and logs in. An address that already belongs to a user is `409 email_in_use`: a user belongs to exactly one account, and the person logs in instead. Counts against the signup throttles |
+| `POST /invitations/lookup` | `{ token }` | `200 { account_name, email, role, invited_by_email, expires_at }` | What the accept page shows, without using the token. Expired, withdrawn, superseded, used or unknown is `404 not_found`. A POST body, not the `GET /invitations/{token}` first specified here: a token in a path lands in access logs and is enough to join the account. Built (A5b) |
+| `POST /invitations/accept` | `{ token, password, password_confirm }` | `200 { user, account, csrf_token }` + `Set-Cookie` | Creates an `active` user (the link proves the address) and logs in. An address that already belongs to a user is `409 email_in_use`: a user belongs to exactly one account, and the person logs in instead. Counts against the signup throttles. Emails the inviter. Built (A5b) |
 
 ### Session (cookie `__Host-uc_session` + `X-CSRF-Token`)
 
 | Route | Body | Success |
 |---|---|---|
-| `GET /me` | — | `{ user: { email, role, created_at }, account: { id, name, status, compute_enabled }, csrf_token }` |
+| `GET /me` | — | `{ user: { email, role, created_at }, account: { id, name, status, compute_enabled }, csrf_token }`. `role` and `name` built (A5b) |
 | `POST /logout` | — | `204`, cookie cleared |
 | `POST /password` | `{ current_password, password, password_confirm }` | `204`; other sessions ended. `current_password` is the recent-password check and counts as a reauth; wrong is `401 invalid_credentials` with `param: current_password` |
 | `POST /reauth` | `{ password }` | `204`; sets `reauth_at` |
@@ -525,13 +531,14 @@ after the response, so neither the status nor the time depends on it.
 | `POST /stripe/webhook` | Stripe event | Not for the pages: see [Stripe webhook](#stripe-webhook-post-dashboardv1stripewebhook). Built (B1) |
 | `GET /usage/jobs?month=|from=&to=&sku=&key=&after=&limit=` | — | The per-job view of the same settles: `{ object: "list", data: [{ object: "compute.job_usage", job_id, sku, status, key: { id, name, display }, started_at, finished_at, settled_at, gpu_seconds, usd }], has_more, next? }`, newest settle first, keyset on `(settled_at, job_id)`, `limit` 1–100 (default 20). `sku` and `key` (an API key id) filter; the page's `usd` values sum to `/usage`'s `gpu_usd` when unfiltered. Errors: `invalid_month`, `invalid_key`, `invalid_limit`, `invalid_cursor`. The console's per-request log, at the job grain |
 | `GET /usage/export?month=|from=&to=` | — | The same rows as `/usage/jobs`, unfiltered, as a CSV attachment named `unify-compute-usage-<from>-<to>.csv` with FOCUS 1.0 column names (`BillingAccountId`, `BillingPeriodStart/End`, `ChargePeriodStart/End`, `ChargeCategory`, `ServiceName`, `ResourceId`, `SkuId`, `ConsumedQuantity`, `ConsumedUnit`, `BilledCost`, `EffectiveCost`, …) plus `x_ApiKeyId`, `x_ApiKeyName`, `x_JobStatus`. At most 10 000 rows. Product-design C10 |
-| `PATCH /account` | `{ name }` | `200 { account }`; owner or admin |
-| `GET /members` | — | `[{ user_id, email, role, status, created_at, last_login_at }]`, oldest first; any role may read |
-| `GET /members/invitations` | — | `[{ id, email, role, invited_by_email, created_at, expires_at }]`, live invitations only; owner or admin |
-| `POST /members/invitations` | `{ email, role }` | `201 { id, email, role, expires_at }`; owner or admin; `role` is `admin` or `member`. Needs reauth after 10 min. Emails the invitation. An address that is already a member is `409 already_member`; the 21st member (live invitations counted) is `403 member_limit_reached` |
-| `DELETE /members/invitations/{id}` | — | `204`; owner or admin |
-| `PATCH /members/{user_id}` | `{ role }` | `200`; owner only. Demoting the last `owner` is `409 last_owner`. Needs reauth after 10 min |
-| `DELETE /members/{user_id}` | — | `204`; owner removes anyone, admin removes members, anyone removes themself. Removing the last `owner` is `409 last_owner`. The user's sessions end and the user is `closed` with its address tombstoned; keys it created stay, because they belong to the account. Emails the removed address. Needs reauth after 10 min |
+| `PATCH /account` | `{ name }` | `200 { account }`; owner or admin; needs reauth after 10 min; `400 invalid_name` for 0 or over 64 characters, a control, format or angle-bracket character. Built (A5b) |
+| `GET /members` | — | `[{ user_id, email, role, status, created_at, last_login_at }]`, oldest first, closed users left out; any role may read. Built (A5b) |
+| `GET /members/invitations` | — | `[{ id, email, role, status, invited_by_email, created_at, expires_at }]`, newest first: invitations not accepted, withdrawn or superseded, live (`status: pending`) or expired within the last 30 days (`status: expired`, kept so the page can offer "Send again"); owner or admin. Built (A5b) |
+| `POST /members/invitations` | `{ email, role }` | `201 { id, email, role, expires_at }`; owner or admin; `role` is `admin` or `member`. Needs reauth after 10 min. Emails the invitation. An address that is already a member is `409 already_member`; the 21st member (live invitations counted; the account's `member_limit`, 20 by default) is `403 member_limit_reached`. An admin may invite only `member` (`403 role_required`). A new invitation for an address supersedes its open one. 20 invitations, resends included, per account per 24 h. The email is sent before the answer: if SES refuses it the invitation is kept and the answer is `503 email_unavailable`. Built (A5b) |
+| `POST /members/invitations/{id}/resend` | — | `201 { …invitation }` with a new id: "Send again". The open invitation, live or expired, is superseded and a new one for the same address and role, with a new link valid 7 days, is emailed. Same roles, reauth, cap and throttle as inviting. Built (A5b) |
+| `DELETE /members/invitations/{id}` | — | `204`; owner or admin (an admin withdraws member invitations only); live or expired. No reauth. Built (A5b) |
+| `PATCH /members/{user_id}` | `{ role }` | `200`; owner only. Demoting the last active `owner` is `409 last_owner`. Needs reauth after 10 min. Built (A5b) |
+| `DELETE /members/{user_id}` | — | `204`; owner removes anyone, admin removes members, anyone removes themself. Removing the last `owner` is `409 last_owner`. The user's sessions end and the user is `closed` with its address tombstoned; keys it created stay, because they belong to the account. Emails the removed address. Needs reauth after 10 min. Built (A5b) |
 | `GET /listings` | — | `{ object: "list", data: [listing…], open }`: the account's marketplace listings (`marketplace.md` M2), oldest first |
 | `POST /listings` | `{ template }` (one templates.json entry) | `201` pending listing; needs `compute_enabled`; `400 invalid_listing` / `listing_id_taken`, `409 listing_exists`; 20 writes an hour per account |
 | `PATCH /listings/{id}` | `{ template }` | `200`; relisted and pending again; `400 listing_id_fixed` if the id changes |
@@ -578,8 +585,10 @@ Rules:
 - Signing up creates an account with its first `owner`. There is always at
   least one `owner`; the last one cannot be demoted or removed (`409
   last_owner`). Ownership changes hands by promoting another member first.
-- A member cap of 20 per account (live invitations included), raised by the
-  operator on request like the top-up limits (`admin account limits`).
+- A member cap of 20 per account (live invitations included), stored as
+  `accounts.member_limit` and raised by the operator on request like the
+  top-up limits. `admin account limits` is not built for either yet; until
+  it is, the operator raises it in SQL with an audit row by hand.
 - An email belongs to at most one user, and a user to exactly one account.
   Membership in several accounts, and organisations above accounts, are not
   planned; a person who needs two tenants uses two addresses.
@@ -592,6 +601,15 @@ Rules:
 - Job API keys carry no user identity: the job's owner is `account:<id>`
   and `created_by` on the key is for the dashboard's key list and the audit
   log. Per-user attribution of spend is not in scope.
+
+Built in A5b (migration `0013_members.sql`, `internal/accounts/members.go`,
+`internal/dashboard/members.go`, pages `/members` and `/accept-invitation`).
+The role checks on existing routes: `POST /topups` is owner or admin, and a
+member's `DELETE /keys/{id}` succeeds only for keys it created (`403
+role_required` otherwise). The last-owner rule counts active owners. Two
+choices beyond the text above: an admin invites, sends again and withdraws
+`member` invitations only, and `GET /keys` does not say who created a key,
+so the keys page still offers Revoke to a member and the server refuses it.
 
 ## Job API changes (`/compute/v1`)
 

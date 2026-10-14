@@ -7,7 +7,7 @@ import { $, busy, call, checkConfirm, checkNewPassword, focusFirstInvalid, input
 
 type Lookup = { account_name: string; email: string; role: 'admin' | 'member'; invited_by_email: string; expires_at: number };
 
-const ROLE = { admin: 'Admin', member: 'Member' } as const;
+const AS_ROLE = { admin: 'an admin', member: 'a member' } as const;
 const dateFmt = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
 export async function acceptInvitation(form: HTMLFormElement | null) {
@@ -41,7 +41,7 @@ export async function acceptInvitation(form: HTMLFormElement | null) {
     ...(inv.invited_by_email ? [strong(inv.invited_by_email), ' invited you'] : ['You were invited']),
     ' to ',
     strong(inv.account_name),
-    ` on Unify Compute as ${ROLE[inv.role] ?? inv.role}. Members share the account's balance, API keys and jobs. The invitation expires ${dateFmt.format(new Date(inv.expires_at * 1000))}.`,
+    ` on Unify Compute as ${AS_ROLE[inv.role] ?? inv.role}. Members share the account's balance, API keys and jobs. The invitation expires ${dateFmt.format(new Date(inv.expires_at * 1000))}.`,
   );
   input('email')!.value = inv.email;
   form.hidden = false;
