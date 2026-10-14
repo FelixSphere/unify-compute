@@ -18,9 +18,10 @@ import (
 // An account's available balance crossing its threshold downward is one
 // event, detected in move under the account lock and reported once its
 // transaction commits. Only movements made in the biller's own transactions
-// (holds and extends) report one: AdjustTx's caller owns its transaction and
-// its commit, so an operator debit leaves the warning armed and the next
-// spend below the threshold reports it.
+// (holds and extends) report one: AdjustTx's and ReverseTx's callers own
+// their transactions and commits, so an operator debit, a refund or a
+// dispute leaves the warning armed and the next spend below the threshold
+// reports it.
 
 // LowBalanceCrossing is one downward crossing. EntryID is the balance entry
 // that crossed, and names the occurrence: notify sends one email per id.
@@ -32,9 +33,10 @@ type LowBalanceCrossing struct {
 }
 
 // creditKinds re-arm the warning when they leave available at or above the
-// threshold. A released or expired hold does not: it is the end of a job,
-// and re-arming there would mail an account near its threshold once per job.
-var creditKinds = map[string]bool{"topup": true, "admin_credit": true}
+// threshold: money paid in, credited by an operator, or given back by a won
+// dispute. A released or expired hold does not: it is the end of a job, and
+// re-arming there would mail an account near its threshold once per job.
+var creditKinds = map[string]bool{"topup": true, "admin_credit": true, "dispute_reversal": true}
 
 // crossingTx carries a biller transaction's crossings to its commit.
 type crossingTx struct {

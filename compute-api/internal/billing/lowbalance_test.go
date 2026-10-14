@@ -274,3 +274,39 @@ func TestLowBalanceMailedOncePerCrossing(t *testing.T) {
 		t.Fatalf("sent %v, want a second email for the second crossing", box.sent)
 	}
 }
+
+func reverse(t *testing.T, db *pgxpool.Pool, l *billing.Local, kind string, q int64, ref string) {
+	t.Helper()
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := l.ReverseTx(ctx, tx, billing.Reversal{AccountID: lowAccount, Kind: kind, Quota: q, RefType: "dispute", RefID: ref,
+		Idempotency: kind + ":" + ref}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A dispute runs in the webhook's transaction: it reports nothing and leaves
+// the warning armed, so the next hold reports the crossing. A won dispute's
+// reinstatement is a credit and re-arms the warning like a top-up.
+func TestLowBalanceDisputeLeavesItArmedAndItsReversalRearms(t *testing.T) {
+	db, l, c := lowBalanceSubject(t)
+	reverse(t, db, l, "dispute", -18*usd, "dp_low_1") // 20 -> 2
+	if got := c.take(); len(got) != 0 {
+		t.Fatalf("dispute: %+v", got)
+	}
+	place(t, l, lowHold("hold_a", usd)) // 2 -> 1: the armed warning fires here
+	if got := c.take(); len(got) != 1 {
+		t.Fatalf("crossings %+v, want one on the next hold", got)
+	}
+	reverse(t, db, l, "dispute_reversal", 18*usd, "dp_low_1") // 1 -> 19
+	place(t, l, lowHold("hold_b", 15*usd))                    // 19 -> 4
+	if got := c.take(); len(got) != 1 || got[0].EntryID != entryOf(t, l, "hold", "hold_b") {
+		t.Fatalf("after the reversal: %+v, want one crossing on hold_b", got)
+	}
+}

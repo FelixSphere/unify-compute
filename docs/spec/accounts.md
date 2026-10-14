@@ -725,7 +725,7 @@ and set on the Billing page (`PATCH /balance`); `0` turns the warning off.
   subject `balance` and the crossing's balance entry id as `subject_id`
   (`notifications.md`, "Sent once"). The send runs in the background; a mail
   failure never fails the hold or extend.
-- **Re-arming.** A credit (`topup`, `admin_credit`) that leaves `available`
+- **Re-arming.** A credit (`topup`, `admin_credit`, `dispute_reversal`) that leaves `available`
   at or above the threshold arms the account again. A hold released or
   expired at a job's end does not: holds take `available` down at every
   submit and give the unused part back at every end, and re-arming there
@@ -737,9 +737,10 @@ and set on the Billing page (`PATCH /balance`); `0` turns the warning off.
   down in the biller's own transactions. A settle moves held, not
   `available`. An operator debit (`admin_debit`) runs in the admin CLI's
   transaction, so it is not reported and leaves the account armed: the next
-  hold or extend below the threshold sends the email. A future movement that
-  debits `available` in a caller's transaction (refunds, disputes) has the
-  same property until it reports crossings itself.
+  hold or extend below the threshold sends the email. A Stripe refund or
+  dispute (`ReverseTx`, in the webhook's transaction) behaves the same way:
+  the refund and suspension emails already tell the owner, and the
+  low-balance email follows on the next hold or extend.
 - **Not built.** Console accounts get nothing (no addresses here). The
   threshold is in USD only, per account, not per member.
 
