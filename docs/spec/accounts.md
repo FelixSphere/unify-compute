@@ -589,8 +589,11 @@ PaymentIntent and its charge) carries `metadata.product = unify-compute`,
      operator. Applying them is B2.
 5. Commit, then look up the PaymentIntent with `latest_charge` expanded and
    store the charge id and `receipt_url` (outside the transaction; a failure
-   leaves the top-up credited without a receipt link). The "Top-up
-   received" email belongs here and is not built yet.
+   leaves the top-up credited without a receipt link). Then the "Top-up
+   received" email goes to the account's owners, once per top-up
+   (`notifications.md`, "Sent once"), with the receipt link if the lookup
+   found one. Both run in the background after the response; neither can
+   undo the credit or change the webhook's answer. Built (W2).
 
 The response body is `{ received: true, outcome }`, so Stripe's delivery log
 says what happened. A `5xx` from us makes Stripe retry for up to 3 days,
@@ -641,22 +644,23 @@ something the subject does not say.
 | Password reset | forgot-password for an `active` or `pending` user | CTA "Reset password" (link with token in the fragment) | `Reset your Unify Compute password` |
 | Password changed | change or reset | none (no CTA; safety line says what to do) | `Your Unify Compute password was changed` |
 | API key created | `POST /keys` | CTA "Review keys" | `A new Unify Compute API key was created` |
-| Top-up received | webhook credits | CTA "View receipt" (Stripe `receipt_url`); details: amount, new balance | `Unify Compute: USD 20.00 added to your balance` |
+| Top-up received | webhook credits | CTA "View receipt" (Stripe `receipt_url`), or "View billing" (`/billing`) when the receipt lookup failed; details: amount, new balance, top-up id, paid. Built (W2) | `Unify Compute: USD 20.00 added to your balance` |
 | Refund issued | admin refund | CTA "View balance" | `Unify Compute: refund of USD 20.00 issued` |
 | Account suspended | dispute or admin | CTA "Contact us" (mailto `contactus@felixsphere.com`, per UI-STANDARD) | `Your Unify Compute account is suspended` |
 | Compute enabled | admin `enable-compute` | CTA "Create an API key" | `Your Unify Compute account can now run jobs` |
 | Invitation | `POST /members/invitations` | CTA "Accept invitation" (link with token in the fragment); details: account name, inviter, role | `<inviter> invited you to <account> on Unify Compute` |
 | Invitation accepted | `POST /invitations/accept` (to the inviter) | CTA "View members" | `<email> joined <account> on Unify Compute` |
 | Removed from account | `DELETE /members/{id}` (to the removed address) | none (safety line names the account and who to contact) | `You were removed from <account> on Unify Compute` |
-| Job finished / failed / billing stopped | as `notifications.md` | as `notifications.md` | as `notifications.md`; the safety lines' "Unify API console" becomes the Unify Compute dashboard |
+| Job finished / failed / billing stopped | as `notifications.md` | as `notifications.md` | as `notifications.md`; the safety lines' "Unify API console" becomes the Unify Compute dashboard. Built (W2) |
 | Storage arrears started / artifacts deletion scheduled / deleted | ADR-0008 | CTA "Top up" | `Unify Compute: storage unpaid, artifacts deleted on <date>` (and variants) |
 | Operator: top-up review request, dispute opened | limit refusal is not emailed; disputes are | — (plain operator notice to the operator address) | `[Unify Compute ops] dispute opened on tu_…` |
 
 The links open these dashboard pages on `APP_ORIGIN`: `/login`,
 `/forgot-password`, `/reset-password#token=…`, `/keys`, `/members` and
 `/accept-invitation#token=…`
-(`compute-api/internal/mailer/messages.go`). A7b and A7c build the pages at
-those paths or change them there.
+(`compute-api/internal/mailer/messages.go`), and `/jobs/{id}` and `/billing`
+(`messages_jobs.go`). A7b and A7c build the pages at those paths or change
+them there.
 
 `{{footer_reason}}` for account messages: "You're receiving this because
 this address is registered for a Unify Compute account." For the

@@ -1,30 +1,41 @@
 # Notifications: Unify Compute customer email for job outcomes
 
-- **Status:** Spec, nothing built. Unify Compute sends no mail today. No code in this
-  repository builds, renders or sends email, and this document does not add
-  any.
+- **Status:** Built for Compute's own accounts (ADR-0011,
+  `ACCOUNTS_BACKEND=local`), task W2, 2026-10-14. Not yet released. Compute
+  sends the three job outcome emails below and "Top-up received"
+  (`accounts.md`, "Emails") itself, through SES, each once. With console
+  accounts nothing here is sent: the addresses belong to the console.
 - Depends on: [`job-api.md`](job-api.md) (job states, `error.code`, the
   `usage` object), [`metering.md`](metering.md) (what is billed, money format,
   holds H1–H7), [ADR-0008](../adr/0008-zero-balance-policy.md) (zero-balance
-  policy, **Proposed**), and the shared UnifyAI email kit
+  policy, **Proposed**), [ADR-0011](../adr/0011-compute-owns-accounts-and-billing.md) (Compute's
+  own accounts), and the shared UnifyAI email kit
   (`~/unifyai-brand-kit/email/README.md`).
 - Layout: [`email/base.html`](email/base.html), a verbatim copy of the kit's
-  `base.html` taken on 2026-10-01 (the revision with `{{product_short}}` and
-  without the FelixSphere tagline). Copy it again when the kit changes rather
-  than editing it here.
+  `base.html` taken on 2026-10-01. The mailer renders it from
+  `compute-api/internal/mailer/layout.html`.
 
 ## What exists and what does not
 
 | Piece | State |
 |---|---|
-| Layout (`docs/spec/email/base.html`) | Copied from the kit. Not wired to anything. |
-| Logo PNGs (`public/email/`) | Served by the marketing site at `https://compute.unifyai.us/email/…` once this branch is released. The `site` container (`deploy/site/`) answers `200` to both the literal `@2x` and the `%402x` spelling, with no redirect; `deploy/site/smoke.sh` asserts both. The old Workers build redirected `@2x` with a `307`. Check the live URLs once before the first send. |
-| Customer email addresses | **Compute does not have them.** The Unify API console owns accounts and contact details (ADR-0001). |
-| Delivery path | **Proposed:** a new console bridge verb, `notify`. Not built on either side. See [Delivery](#delivery-proposed). |
-| Job web page for the CTA to open | **Decided by the operator, 2026-10-01:** `https://compute.unifyai.us/jobs/{job_id}`. **The page does not exist yet, and none of these emails is sent until it does.** |
-| Sender name and address | **Decided by the operator, 2026-10-01:** `Unify Compute <no-reply@compute.unifyai.us>`. No mail domain is set up yet; it is set up when sending is built. |
+| Messages | Built: `compute-api/internal/mailer/messages_jobs.go` (job succeeded, job failed, job stopped for billing, top-up received). Golden files in `internal/mailer/testdata/job-*.golden` and `topup-received*.golden`. |
+| Sending | Built: SES v2 raw email with the instance role (`internal/mailer`), multipart plain text plus HTML; `MAIL_OUTBOX_DIR` `.eml` files with `ENVIRONMENT=development`. |
+| Recipients | Every `active` user of the account with role `owner` (`notify.Notifier.Owners`). Today an account has one user, its owner. A `pending` user (address not verified) gets nothing. |
+| Trigger: jobs | The terminal transition in `internal/jobs` (`backendStore.UpdateStatus`, `endUntracked`), only in the process that drives jobs. The send runs in the background and never holds up or fails the transition. |
+| Trigger: top-up | After the webhook's credit commits (`internal/payments/webhook.go`), after the receipt lookup, so the email carries Stripe's `receipt_url` when the lookup found one. |
+| Sent once | Built: the `notifications` table (migration `0011_notifications.sql`) and `internal/notify`. See [Sent once](#sent-once). |
+| Job page the CTA opens | `{APP_ORIGIN}/jobs/{job_id}`, e.g. `https://app.compute.unifyai.us/jobs/job_…` (the dashboard's job page; `deploy/site/Caddyfile` rewrites it to `job.html`). The operator's 2026-10-01 decision named `compute.unifyai.us/jobs/{id}`; the job page was built on the app host instead. |
+| Sender | `Unify Compute <no-reply@compute.unifyai.us>` (`SES_SENDER`), as the account emails. |
+| Not built | An email at the first refused extension (H4), `interrupted`, the storage arrears messages of ADR-0008, low balance (W6), refunds and disputes (W3), invitations (W4). |
 
 ## Messages
+
+The tables in this section are the copy as first specified for the console
+to send. The built text is in the golden files
+(`compute-api/internal/mailer/testdata/`), and
+[Copy changes from the original spec](#copy-changes-from-the-original-spec)
+lists where it differs and why.
 
 Three messages, all transactional, all from terminal job states that
 `job-api.md` already defines. No new state or `error.code` is introduced here.
@@ -61,9 +72,9 @@ These values are the same in every message.
 | `{{product_name}}` | `Unify Compute`, the full product name (user decision, 2026-10-01). Used in the footer line. |
 | `{{product_short}}` | `Compute`, the header descriptor after the UnifyAI lockup. |
 | `{{product_url}}` / `{{product_domain}}` | `https://compute.unifyai.us` / `compute.unifyai.us` |
-| `{{footer_reason}}` | "You're receiving this because a job you submitted with your Unify API key changed state." |
+| `{{footer_reason}}` | "You're receiving this because a job on your Unify Compute account ended." |
 | Focal element | Option (a), the CTA button: amber `#F5A623` with **ink `#0E0E0E` text**, exactly as in `base.html`. Never white on amber. Amber appears only on this button. |
-| `{{cta_url}}` | `https://compute.unifyai.us/jobs/{job_id}` (decided by the operator, 2026-10-01). The page does not exist yet, so nothing is sent until it does. The raw link under the button is the same URL. |
+| `{{cta_url}}` | `{APP_ORIGIN}/jobs/{job_id}`, the dashboard's job page. The raw link under the button is the same URL. |
 
 All three messages use these detail rows. Values are mono, as in the layout.
 
@@ -136,44 +147,90 @@ The focal element stays the job link in both variants. The top-up action lives
 in the Unify API console. A second button would put amber on the page twice, so
 the safety line names the action as text instead.
 
-## Delivery (proposed)
+## Sent once
 
-**Proposed by the operator, 2026-10-01: the console sends, through a new bridge
-verb `notify`.** The console already holds customer email addresses (ADR-0001),
-and compute never sees them. ADR-0008 open point 1 already names the verb as
-`POST /api/compute/v1/notify`; this spec proposes it and does not specify it.
-Before any email can go out, this still needs:
+Each message is sent at most once per thing it is about, however often its
+trigger fires: Stripe redelivering an event or sending
+`async_payment_succeeded` after `completed`, the backend observing an end
+again after a restart, or two processes on one database.
 
-- the verb, specified in `console-billing-bridge.md` and signed like the other
-  bridge calls;
-- the console-side handler, written as new AGPL files in `unifyapi-console`
-  (ADR-0002). The console's existing sender is `console/common/email.go` over
-  SES, per the kit README. Compute sends the template data, and either the
-  rendered HTML and plain text or the slot values; which of the two is part
-  of specifying the verb;
-- the `compute.unifyai.us` mail domain for the sender above, or a decision
-  that the console's SES identity sends on its behalf;
-- the job page at `https://compute.unifyai.us/jobs/{job_id}`.
+The record is the `notifications` table, keyed on
+`(account_id, subject_kind, subject_id, message)`:
 
-ADR-0008's consequences say a notification path "must be resolved before the
-first paid customer". These are the alternatives that were considered and not
-proposed:
+| Message | `subject_kind` | `subject_id` | `message` |
+|---|---|---|---|
+| Job finished | `job` | job id | `job-succeeded` |
+| Job failed | `job` | job id | `job-failed` |
+| Billing stopped the job | `job` | job id | `job-billing-stopped` |
+| Top-up received | `topup` | top-up id (`tu_…`) | `topup-received` |
 
-- **Compute sends.** Compute would need the address from the console, which
-  is new data crossing the bridge, plus its own mail provider.
-- **Neither, for now.** Job events and webhooks (ADR-0007 P1) carry the same
-  information.
+The row is a **claim, written before the first address is mailed**. A second
+trigger finds it and sends nothing. The outcome is then written on the row:
 
-The `{{…}}` values above are the contract whichever side renders them.
+- `sent` (with `sent_at`) once SES accepted at least one address;
+- `failed` (with `last_error`) when SES refused every address. A refusal is a
+  definite answer, so the next trigger for the same key claims the row again,
+  up to 5 attempts (`notify.MaxAttempts`);
+- a row left `claimed` means the process stopped between the claim and SES's
+  answer. It is never retried: whether the mail went out is unknown, and a
+  missing email is better than a second copy. This is Unify Data's rule for
+  its own sends (`updates.py`, "A send happens once").
+
+The guarantee is therefore at most once. For jobs, a trigger fires once per
+transition, so a refused job email is not retried by itself today; a
+top-up's is retried only if Stripe delivers another event for that session.
+A sweep that retries `failed` rows is not built.
+
+A mail failure never fails what triggered it: the job transition, the
+webhook's `200`, and the credit all stand, and the failure is logged with the
+message kind, subject and account.
+
+### For later messages
+
+`internal/notify` knows nothing about message content. A new message picks
+a `subject_kind` (`refund`, `invitation`, `balance`, …) and calls:
+
+```go
+n.ToOwners(ctx, notify.Key{AccountID: id, Subject: "refund", SubjectID: refundID, Message: "refund-issued"},
+	func(ctx context.Context, to string) error { return mail.RefundIssued(ctx, to, r) })
+```
+
+or `n.To(ctx, key, []string{addr}, send)` for an address that is not an
+owner (an invitation). A message that can recur about the same thing (a
+low-balance warning per downward crossing) puts the occurrence in
+`subject_id`. No migration is needed for a new kind.
+
+## Copy changes from the original spec
+
+The tables above were written when the console was to send these emails.
+What the built messages say instead, because it is what is true for
+Compute's own accounts:
+
+- "Unify API console" and "Unify API balance" become the Unify Compute
+  dashboard (its Keys and Billing pages), as `accounts.md` says.
+- The footer reason is "You're receiving this because a job on your Unify
+  Compute account ended." The top-up email uses the account reason.
+- No line promises log or output retention or daily storage charges:
+  logs are not kept after teardown (`backend.md` open question 4) and storage
+  and egress metering is not built. The succeeded intro says the job page
+  shows its events and any outputs it uploaded.
+- The job failed email adds one plain-language sentence for each known
+  `error.code` (`mailer.FailureLine`) and prints the code untranslated as the
+  Reason row. The raw `error.message` is not copied into the email: it can
+  carry SkyPilot's text, and the job page shows it.
+- The CTA label of the failed email is `View job`.
+- The status row is the first detail row, the status word with the kit's dot.
+- Cost is the settled GPU charge once the hold is closed. While the final
+  settle is pending (always for `billing_unavailable`) it is what the ledger
+  accrued, labelled `Cost (pending settlement)`.
 
 ## Open points
 
-1. **Delivery path.** The `notify` verb is proposed and still needs the
-   console-side work listed above. It is not accepted until the bridge spec
-   changes.
-2. **Job page.** `https://compute.unifyai.us/jobs/{job_id}` is decided but does
-   not exist. Nothing is sent before it does.
-3. **Mail domain** for `no-reply@compute.unifyai.us`. It is set up when sending
-   is built.
-4. **More messages.** An early warning at the first refused extension (H4,
+1. **More messages.** An early warning at the first refused extension (H4,
    about 50 minutes before the cancel), and `interrupted` (B9).
+2. **Retrying refused job emails.** A `failed` row is retried only when the
+   same trigger fires again, which for a job it does not. A sweep over
+   `failed` rows is the fix if SES refusals turn out to happen.
+3. **Console accounts.** The `notify` bridge verb this spec once proposed is
+   moot while every host runs `ACCOUNTS_BACKEND=local`. Nothing is sent to
+   console-owned jobs.

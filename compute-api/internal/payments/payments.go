@@ -37,6 +37,8 @@ import (
 
 	"github.com/FelixSphere/unify-compute/compute-api/internal/accounts"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/billing"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/mailer"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/notify"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/sku"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/store"
 )
@@ -153,6 +155,10 @@ type Config struct {
 	AppOrigin string
 	Log       *slog.Logger
 	Now       func() time.Time
+	// Mailer and Notifier, both set, send the account's owners "Top-up
+	// received" once per credited top-up. Either nil sends nothing.
+	Mailer   *mailer.Mailer
+	Notifier *notify.Notifier
 }
 
 type Service struct {
@@ -167,12 +173,14 @@ type Service struct {
 	log       *slog.Logger
 	now       func() time.Time
 	wg        sync.WaitGroup
+	mail      *mailer.Mailer
+	notifier  *notify.Notifier
 }
 
 func New(cfg Config) *Service {
 	s := &Service{db: cfg.DB, acc: cfg.Accounts, bill: cfg.Billing, stripe: cfg.Stripe, whsec: cfg.Settings.WebhookSecret,
 		livemode: cfg.Settings.Livemode(), env: cmpEnv(cfg.Settings.Environment), appOrigin: strings.TrimRight(cfg.AppOrigin, "/"),
-		log: cfg.Log, now: cfg.Now}
+		log: cfg.Log, now: cfg.Now, mail: cfg.Mailer, notifier: cfg.Notifier}
 	if s.now == nil {
 		s.now = time.Now
 	}

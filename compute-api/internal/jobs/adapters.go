@@ -16,7 +16,11 @@ import (
 type backendStore struct{ s *Service }
 
 func (b backendStore) UpdateStatus(ctx context.Context, id string, to store.Status, jobErr *store.JobError) (store.Job, error) {
-	return b.s.Store.UpdateStatusWithEvent(ctx, id, to, jobErr, b.s.statusEvent(to))
+	j, err := b.s.Store.UpdateStatusWithEvent(ctx, id, to, jobErr, b.s.statusEvent(to))
+	if err == nil {
+		b.s.jobEnded(j)
+	}
+	return j, err
 }
 
 func (b backendStore) SetPlacement(ctx context.Context, id string, p store.Placement) (store.Job, error) {

@@ -30,6 +30,8 @@ import (
 	"github.com/FelixSphere/unify-compute/compute-api/internal/console"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/events"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/ledger"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/mailer"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/notify"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/quota"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/sku"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/store"
@@ -84,6 +86,11 @@ type Config struct {
 	Elect bool
 	Now   func() time.Time
 	Log   *slog.Logger
+	// Mailer and Notifier, both set, email the account's owners when a job
+	// succeeds, fails or is stopped for billing (notifications.md). Either
+	// nil sends nothing.
+	Mailer   *mailer.Mailer
+	Notifier *notify.Notifier
 }
 
 // SubmitGate refuses a submit from an account that may not run jobs:
@@ -125,6 +132,10 @@ type Service struct {
 	// ledger calls it holding its lock, and stopping a job reports the end
 	// back to the ledger.
 	stops map[string]ledger.EndReason
+
+	mail     *mailer.Mailer
+	notifier *notify.Notifier
+	mailWG   sync.WaitGroup
 }
 
 func New(cfg Config) *Service {
@@ -138,6 +149,7 @@ func New(cfg Config) *Service {
 	s := &Service{
 		Store: cfg.Store, catalogue: cfg.Catalogue, quota: cfg.Quota, task: task, now: now, log: cfg.Log,
 		ended: map[string]backend.Event{}, stops: map[string]ledger.EndReason{}, elect: cfg.Elect,
+		mail: cfg.Mailer, notifier: cfg.Notifier,
 	}
 	s.drive.Store(!cfg.Elect)
 	var biller ledger.Biller = cfg.Console
@@ -362,11 +374,17 @@ func (s *Service) Cancel(ctx context.Context, owner, id string, acceptedAt time.
 // endUntracked cancels a job the backend is not running and SkyPilot has no
 // cluster for: one whose launch never started, or one without a backend.
 func (s *Service) endUntracked(ctx context.Context, id string, jobErr *store.JobError) error {
-	_, err := s.Store.UpdateStatusWithEvent(ctx, id, store.StatusCancelled, jobErr, s.statusEvent(store.StatusCancelled))
+	j, err := s.Store.UpdateStatusWithEvent(ctx, id, store.StatusCancelled, jobErr, s.statusEvent(store.StatusCancelled))
 	if err != nil && !errors.Is(err, store.ErrInvalidTransition) {
 		return err
 	}
-	return s.finish(ctx, id)
+	// Mailed whether or not the final settle answered now: a transition
+	// is made once, and the ledger retries the settle on its own.
+	ferr := s.finish(ctx, id)
+	if err == nil {
+		s.jobEnded(j)
+	}
+	return ferr
 }
 
 // Logs copies what the backend can still read of the job's output. Nothing
@@ -431,6 +449,7 @@ func (s *Service) Run(ctx context.Context) {
 		s.runWorkers(ctx)
 	}
 	wg.Wait()
+	s.WaitMail()
 }
 
 // runWorkers runs the loops that drive jobs until ctx ends. Each backend
