@@ -26,7 +26,11 @@ type crossings struct {
 	got []billing.LowBalanceCrossing
 }
 
-func (c *crossings) add(x billing.LowBalanceCrossing) { c.mu.Lock(); defer c.mu.Unlock(); c.got = append(c.got, x) }
+func (c *crossings) add(x billing.LowBalanceCrossing) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.got = append(c.got, x)
+}
 
 func (c *crossings) take() []billing.LowBalanceCrossing {
 	c.mu.Lock()
@@ -118,7 +122,7 @@ func TestLowBalanceOneCrossingPerDropAfterATopup(t *testing.T) {
 	}
 	first := got[0].EntryID
 
-	place(t, l, lowHold("hold_c", usd)) // 4 -> 3
+	place(t, l, lowHold("hold_c", usd))                 // 4 -> 3
 	if _, err := l.Release(ctx, "hold_a"); err != nil { // 3 -> 18: a job's end does not re-arm
 		t.Fatal(err)
 	}
@@ -127,7 +131,7 @@ func TestLowBalanceOneCrossingPerDropAfterATopup(t *testing.T) {
 		t.Fatalf("without a top-up nothing re-arms: %+v", got)
 	}
 
-	topup(t, db, l, "tu_low_1", 10*usd) // 2 -> 12
+	topup(t, db, l, "tu_low_1", 10*usd)   // 2 -> 12
 	place(t, l, lowHold("hold_e", 8*usd)) // 12 -> 4
 	got = c.take()
 	if len(got) != 1 || got[0].EntryID == first || got[0].EntryID != entryOf(t, l, "hold", "hold_e") {

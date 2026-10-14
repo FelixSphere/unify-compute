@@ -86,10 +86,10 @@ func (h *Handler) job(route func(JobRoutes, http.ResponseWriter, *http.Request, 
 func centsUSD(c int) string { return new(big.Rat).SetFrac64(int64(c), 100).FloatString(2) }
 
 type balanceView struct {
-	Object       string       `json:"object"`
-	Currency     string       `json:"currency"`
-	AvailableUSD string       `json:"available_usd"`
-	HeldUSD      string       `json:"held_usd"`
+	Object       string `json:"object"`
+	Currency     string `json:"currency"`
+	AvailableUSD string `json:"available_usd"`
+	HeldUSD      string `json:"held_usd"`
 	// LowBalanceUSD is the low-balance warning's threshold, 2 places; "0.00"
 	// is off. The dashboard shows its banner while available is below it.
 	LowBalanceUSD string       `json:"low_balance_usd"`
