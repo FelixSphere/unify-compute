@@ -165,6 +165,7 @@ func New(cfg Config) (*Handler, error) {
 	h.handle("GET /topups", h.session(h.read(h.listTopups)))
 	h.handle("GET /topups/{id}", h.session(h.read(h.getTopup)))
 	h.handle("POST "+webhookPath, h.stripeWebhook)
+	h.registerMembers()
 	h.mux.HandleFunc(Prefix+"/", func(w http.ResponseWriter, _ *http.Request) { notFound(w) })
 	return h, nil
 }
