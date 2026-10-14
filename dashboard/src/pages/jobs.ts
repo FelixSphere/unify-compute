@@ -1,6 +1,6 @@
 import { t } from '../i18n';
 import { $ } from '../lib';
-import { empty, fill, get, h, type Job, jobsTable, type List, muted, notBuilt, rich, setText, shell } from '../shell';
+import { empty, fill, get, type Job, jobsTable, type List, muted, notBuilt, rich, setText, shell } from '../shell';
 
 function chipsInit(onChange: (status: string) => void) {
   const chips = Array.from(document.querySelectorAll<HTMLButtonElement>('#filters .chip'));
