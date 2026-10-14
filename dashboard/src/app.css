@@ -285,9 +285,11 @@ textarea {
 }
 
 /* The honeypot partial (dashboard/vite.config.ts says why off-screen). */
+/* Off the start edge, whichever side that is: in a right-to-left page a box
+   10000px to the left is scrollable, one past the start edge is not. */
 .hp {
   position: absolute;
-  left: -10000px;
+  inset-inline-start: -10000px;
   top: auto;
   width: 1px;
   height: 1px;
