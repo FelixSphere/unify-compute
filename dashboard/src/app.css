@@ -158,14 +158,44 @@ input {
   font-size: var(--u-text-md);
 }
 
-input:focus {
+input:focus,
+select:focus,
+textarea:focus {
   outline: none;
   border-color: var(--u-input-border-focus);
   box-shadow: var(--u-focus);
 }
 
-input[aria-invalid='true'] {
+input[aria-invalid='true'],
+select[aria-invalid='true'],
+textarea[aria-invalid='true'] {
   border-color: var(--u-danger);
+}
+
+select,
+textarea {
+  display: block;
+  width: 100%;
+  padding: 0 12px;
+  background: var(--u-input-bg);
+  border: 1px solid var(--u-input-border);
+  border-radius: var(--u-radius);
+  color: var(--u-text);
+  font-family: var(--u-font-body);
+  font-size: var(--u-text-md);
+}
+
+select {
+  height: var(--u-btn-height);
+}
+
+textarea {
+  min-height: 160px;
+  padding: 10px 12px;
+  font-family: var(--u-font-mono);
+  font-size: var(--u-text-sm);
+  line-height: 1.5;
+  resize: vertical;
 }
 
 .password {
@@ -1179,4 +1209,98 @@ a.ghost {
   display: inline-flex;
   gap: 12px;
   white-space: nowrap;
+}
+
+/* Marketplace: one tile per template, the run form in a card above them. */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 20px;
+  background: var(--u-surface);
+  border: var(--u-rule);
+  border-radius: var(--u-radius);
+}
+
+.tile h3 {
+  margin: 0;
+  font-size: var(--u-text-md);
+}
+
+.tile .muted {
+  flex: 1 0 auto;
+}
+
+.tile-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.tile-top code {
+  font-family: var(--u-font-mono);
+  font-size: var(--u-text-sm);
+  overflow-wrap: anywhere;
+}
+
+.badge {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: var(--u-radius-pill);
+  background: var(--u-badge-bg);
+  color: var(--u-badge-fg);
+  font-size: var(--u-text-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badge.muted {
+  background: transparent;
+  border: var(--u-rule);
+  color: var(--u-text-muted);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+}
+
+.facts dt {
+  font-family: var(--u-font-mono);
+  font-size: var(--u-text-xs);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--u-text-muted);
+}
+
+.facts dd {
+  margin: 2px 0 0;
+  font-size: var(--u-text-sm);
+  overflow-wrap: anywhere;
+}
+
+.tile .secondary {
+  align-self: flex-start;
+  margin-top: 4px;
+}
+
+.reason {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--u-text-xs);
+  color: var(--u-text-2);
+  white-space: normal;
 }

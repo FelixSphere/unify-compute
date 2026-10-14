@@ -107,13 +107,32 @@ ADR-0012 §4: nothing checks the image's source automatically.
 - One of ADR-0012 decision 4's two conditions holds: egress control, or
   images built from reviewed source.
 
-## M3 — dashboard (design)
+## M3 — dashboard (built)
 
-- **Browse** in the app: the same cards, plus a "Run this" form. The form
-  collects one `source` per input and every overridable field the template
-  allows, then submits with the session to a `/dashboard/v1` route.
-- **My listings**: submit, edit, unlist, and see review state with the
-  reviewer's reason.
+Two signed-in pages in `dashboard/` (the app host), on the same session as
+the rest of the dashboard:
+
+- **`/marketplace`** lists what `GET /dashboard/v1/templates` returns: the
+  cards of M1 with the publisher of record, and a **Run this** form per
+  template. The form asks for one `source` (an `https://` file URL) per
+  declared input and offers every field the template marks overridable: the
+  SKU (from `GET /dashboard/v1/skus`, sold ones only), the providers of the
+  chosen SKU, the declared `env` keys, `max_runtime_seconds` and the
+  command. It posts job-api.md's submit body to `POST /dashboard/v1/jobs`,
+  which runs the job API's own submit for the account: the same
+  validation and codes, no key (so no key cap; the job's `token_id` is
+  null), and on `201` the page opens `/jobs/<id>`. A `402` links to
+  Billing, a `403 compute_not_enabled` to the contact address.
+- **`/listings`** is the account's side of M2: the listings table with
+  review state and the reviewer's reason, a form that takes one
+  templates.json entry (as JSON) for `POST /dashboard/v1/listings`, Edit
+  (`PATCH`, which returns the listing to pending) and Unlist. When the
+  deployment does not serve account listings (`open: false`), the page says
+  so above the table.
+
+The pages are static files (`deploy/site/`), so they need a site release;
+the routes need an API release. Each page says what is missing when it
+meets an older compute-api (404 or 501), as the others do.
 
 ## Not planned
 

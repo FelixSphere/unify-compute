@@ -1786,6 +1786,138 @@
             }
           }
         }
+      },
+      "post": {
+        "operationId": "dashboardSubmitJob",
+        "summary": "Submit a job with the session",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "description": "job-api.md's submit (POST /compute/v1/jobs), run for the session's account: the same body, validation, template resolution, quota, hold and launch, and the same error codes. Needs Origin = APP_ORIGIN and X-CSRF-Token. There is no key, so no key cap applies and the job's token id is null; the hold is against the account. Not counted against the read limit. The marketplace page's \"Run this\" form posts here with `template`, one `source` per declared input and the overridable fields the template allows.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "openapi.json#/components/schemas/SubmitJobRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Submitted; the Job object.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "openapi.json#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "An Idempotency-Key replay: the Job already submitted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "openapi.json#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_request: as the job API (malformed_body, unknown_template, template_unavailable, field_not_overridable, missing_input, unknown_input_mount, missing_sku, unknown_sku, sku_unavailable, runtime_over_ceiling, invalid_input_source, …); param names the field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "insufficient_balance: the account's available balance does not cover the initial hold. Nothing was submitted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "csrf_failed; compute_not_enabled; account_suspended; quota_exceeded (with quotas).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: Host is not the app host. The whole prefix is 404 on any other host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "idempotency_conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "not_implemented: this deployment has no job service, or no job service in the dashboard.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "upstream_unavailable; console_unavailable; capacity_exhausted: as the job API.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/dashboard/v1/jobs/{id}": {
@@ -3407,6 +3539,170 @@
           },
           "429": {
             "description": "rate_limited: a throttle refused the attempt. Always with Retry-After (seconds).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "not_implemented.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/templates": {
+      "get": {
+        "operationId": "dashboardTemplates",
+        "summary": "The templates a run can start from",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "description": "The job API's own handler (compute-api/internal/api), run for the session's account, so the body and errors are exactly the job API's (openapi.json, the same path under /compute/v1). Key scopes do not apply; the session is the credential. What the dashboard's marketplace page reads (marketplace.md M3). Platform templates and, where the deployment serves account listings, approved listings, every entry with publisher \"Unify Compute\".",
+        "responses": {
+          "200": {
+            "description": "The templates.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "openapi.json#/components/schemas/TemplateList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: Host is not the app host. The whole prefix is 404 on any other host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than 600 reads a minute from this account (in process memory, per replica). Always with Retry-After (seconds).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "not_implemented: this deployment has no job service in the dashboard.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/skus": {
+      "get": {
+        "operationId": "dashboardSKUs",
+        "summary": "The SKU catalogue",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "description": "The job API's own handler (compute-api/internal/api), run for the session's account, so the body and errors are exactly the job API's (openapi.json, the same path under /compute/v1). Key scopes do not apply; the session is the credential. What the dashboard's marketplace page reads (marketplace.md M3). What the run form offers where a template lets the submitter choose the SKU.",
+        "responses": {
+          "200": {
+            "description": "The catalogue.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "openapi.json#/components/schemas/SKUList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: Host is not the app host. The whole prefix is 404 on any other host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than 600 reads a minute from this account (in process memory, per replica). Always with Retry-After (seconds).",
             "headers": {
               "Retry-After": {
                 "schema": {

@@ -231,10 +231,14 @@ func (s *Service) Submit(ctx context.Context, sub Submission) (job store.Job, cr
 		}
 		return err
 	}
-	tokenID := int64(sub.TokenID)
 	nj := store.NewJob{
-		ID: id, Owner: sub.Owner, TokenID: &tokenID, SKU: sub.SKU.ID, Spec: spec, Metadata: sub.Metadata,
+		ID: id, Owner: sub.Owner, SKU: sub.SKU.ID, Spec: spec, Metadata: sub.Metadata,
 		Candidates: candidates, Events: []store.NewEvent{*queued},
+	}
+	// A dashboard submit has no key (TokenID 0): the job records none.
+	if sub.TokenID != 0 {
+		tokenID := int64(sub.TokenID)
+		nj.TokenID = &tokenID
 	}
 	if sub.TemplateID != "" {
 		nj.TemplateID = &sub.TemplateID

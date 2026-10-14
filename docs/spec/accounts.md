@@ -442,6 +442,9 @@ after the response, so neither the status nor the time depends on it.
 | `POST /keys` | `{ name, scopes, expires_at?, monthly_cap_usd? }` | `201 { …key, secret: "uck_…" }`; the secret is never returned again. Needs reauth after 10 min (`401 reauth_required`, checked before the body). Emails "key created". Built (A5) |
 | `PATCH /keys/{id}` | `{ monthly_cap_usd }` (dollars, two decimals, or null) | `200 { …key }`; needs reauth after 10 min; a revoked or foreign key is `404 not_found`; `400 invalid_cap` |
 | `DELETE /keys/{id}` | — | `204`, also for a key already revoked; another account's key is `404 not_found`. Built (A5) |
+| `GET /templates` | — | The job API's template list (`GET /compute/v1/templates`) for the session: platform templates plus approved account listings where served, each with `publisher`. Read-limited. Built (M3) |
+| `GET /skus` | — | The job API's SKU catalogue, for the run form's SKU choice. Read-limited. Built (M3) |
+| `POST /jobs` | job-api.md's submit body | The job API's submit for the account: same validation, template resolution, quota, hold and launch, same codes (`403 compute_not_enabled`, `402 insufficient_balance`, …). Needs the CSRF header. No key: no key cap, `token_id` null on the job, and the hold's key is 0, so `/usage` `by_key` does not list dashboard runs. Built (M3) |
 | `GET /jobs?status=&after=&limit=` | — | The job API's list, owner-scoped to the account. Built (A7d) |
 | `GET /jobs/{id}` | — | The Job object (`job-api.md`). Built (A7d) |
 | `GET /jobs/{id}/events`, `GET /jobs/{id}/logs` | — | As the job API (`follow=true` is 501 in both). Built (A7d) |

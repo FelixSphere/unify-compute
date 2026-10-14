@@ -77,6 +77,9 @@ type Config struct {
 	// (billing.Local). Either nil answers its routes 501 not_implemented;
 	// main sets both.
 	Jobs JobRoutes
+	// Market serves GET /templates, GET /skus and POST /jobs with the job
+	// API's own handlers (api.Server.AccountJobs too); nil answers them 501.
+	Market MarketRoutes
 	// Listings is the template marketplace's account side (M2); nil answers
 	// its routes 501 not_implemented.
 	Listings *listings.Store
@@ -95,6 +98,7 @@ type Handler struct {
 	log      *slog.Logger
 	now      func() time.Time
 	jobs     JobRoutes
+	mkt      MarketRoutes
 	ledger   Ledger
 	listings *listings.Store
 	pay      *payments.Service
@@ -117,7 +121,7 @@ func New(cfg Config) (*Handler, error) {
 		return nil, fmt.Errorf("APP_ORIGIN %q: the dashboard needs the app's origin, e.g. https://app.compute.unifyai.us (http only for localhost)", cfg.AppOrigin)
 	}
 	h := &Handler{acc: cfg.Accounts, mail: cfg.Mailer, origin: strings.ToLower(origin), host: strings.ToLower(u.Host),
-		log: cfg.Log, now: cfg.Now, jobs: cfg.Jobs, ledger: cfg.Ledger, listings: cfg.Listings, pay: cfg.Payments, reads: ratelimit.New(readBurst, readWindow), mux: http.NewServeMux()}
+		log: cfg.Log, now: cfg.Now, jobs: cfg.Jobs, mkt: cfg.Market, ledger: cfg.Ledger, listings: cfg.Listings, pay: cfg.Payments, reads: ratelimit.New(readBurst, readWindow), mux: http.NewServeMux()}
 	if h.now == nil {
 		h.now = time.Now
 	}
@@ -145,6 +149,9 @@ func New(cfg Config) (*Handler, error) {
 	h.handle("GET /usage", h.session(h.read(h.usage)))
 	h.handle("GET /usage/jobs", h.session(h.read(h.usageJobs)))
 	h.handle("GET /usage/export", h.session(h.read(h.usageExport)))
+	h.handle("GET /templates", h.session(h.read(h.market(MarketRoutes.Templates))))
+	h.handle("GET /skus", h.session(h.read(h.market(MarketRoutes.SKUs))))
+	h.handle("POST /jobs", h.session(h.market(MarketRoutes.Submit)))
 	h.handle("GET /jobs", h.session(h.read(h.job(JobRoutes.List))))
 	h.handle("GET /jobs/{id}", h.session(h.read(h.job(JobRoutes.Get))))
 	h.handle("POST /jobs/{id}/cancel", h.session(h.job(JobRoutes.Cancel)))
