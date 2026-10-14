@@ -194,6 +194,7 @@ func main() {
 	var dash *dashboard.Handler
 	var sweepAccounts *accounts.Service
 	var pay *payments.Service
+	var lowBalance *billing.LowBalanceMailer
 	if dsn := os.Getenv("DATABASE_URL"); dsn == "" {
 		if backendName == backendLocal {
 			log.Error("ACCOUNTS_BACKEND=local needs DATABASE_URL: the balance, accounts and sessions live in the job store")
@@ -236,6 +237,10 @@ func main() {
 			if mail != nil {
 				notes = notify.New(st.Pool(), log, nil)
 				cfg.Mailer, cfg.Notifier = mail, notes
+				// One email per downward crossing of an account's
+				// low-balance threshold (accounts.md, W6).
+				lowBalance = billing.NewLowBalanceMailer(notes, mail, log)
+				local.OnLowBalance(lowBalance.Crossed)
 			}
 		}
 		svc = jobs.New(cfg)
@@ -318,6 +323,11 @@ func main() {
 	}
 	// The loops stop at their next tick boundary; a step in flight finishes.
 	workers.Wait()
+	if lowBalance != nil {
+		// After the loops, so a warning from an extend in their last step
+		// still goes out.
+		lowBalance.Wait()
+	}
 }
 
 // sweepAccountsHourly deletes expired sessions, codes, reset tokens and
