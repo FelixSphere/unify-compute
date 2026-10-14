@@ -526,3 +526,37 @@ func (h *Handler) reauth(w http.ResponseWriter, r *http.Request, s accounts.Sess
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+type sessionsView struct {
+	OtherSessions int `json:"other_sessions"`
+}
+
+// sessions counts the user's other live sessions, for the account page's
+// "Sign out other sessions" (copied from Unify Data's profile page).
+func (h *Handler) sessions(w http.ResponseWriter, r *http.Request, s accounts.Session, u accounts.User) {
+	n, err := h.acc.OtherSessions(r.Context(), u.ID, s.Token)
+	if err != nil {
+		h.internal(w, "count sessions", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, sessionsView{OtherSessions: n})
+}
+
+type endedView struct {
+	Ended int `json:"ended"`
+}
+
+// endOtherSessions keeps this session and ends every other one of the user.
+// Like logout it needs no reauth: it only takes access away. A stolen
+// session that uses it logs the owner out until they log in again; the
+// owner using it is how a stolen session is ended without a password change.
+func (h *Handler) endOtherSessions(w http.ResponseWriter, r *http.Request, s accounts.Session, u accounts.User) {
+	ctx := r.Context()
+	n, err := h.acc.EndOtherSessions(ctx, u.ID, s.Token)
+	if err != nil {
+		h.internal(w, "end other sessions", err)
+		return
+	}
+	h.audit(ctx, accounts.ActionSessionsEnded, clientInfo(r), u.ID, u.AccountID, map[string]any{"ended": n})
+	writeJSON(w, http.StatusOK, endedView{Ended: n})
+}

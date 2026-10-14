@@ -136,6 +136,8 @@ func New(cfg Config) (*Handler, error) {
 	h.handle("POST /logout", h.session(h.logout))
 	h.handle("POST /password", h.session(h.changePassword))
 	h.handle("POST /reauth", h.session(h.reauth))
+	h.handle("GET /sessions", h.session(h.read(h.sessions)))
+	h.handle("POST /sessions/end-others", h.session(h.endOtherSessions))
 	h.handle("GET /keys", h.session(h.listKeys))
 	h.handle("POST /keys", h.session(h.createKey))
 	h.handle("DELETE /keys/{id}", h.session(h.revokeKey))
