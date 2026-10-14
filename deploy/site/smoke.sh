@@ -212,6 +212,8 @@ app_pages=(
   "/keys|API keys — Unify Compute"
   "/jobs|Jobs — Unify Compute"
   "/jobs/job_01J8Q6ZK3R7Y9W2X4V6T8S0A1B|Job — Unify Compute"
+  "/marketplace|Marketplace — Unify Compute"
+  "/listings|My listings — Unify Compute"
   "/usage|Usage — Unify Compute"
   "/billing|Billing — Unify Compute"
   "/account|Account — Unify Compute"

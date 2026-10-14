@@ -44,6 +44,21 @@ func (a AccountJobs) Events(w http.ResponseWriter, r *http.Request, accountID in
 	a.s.listEvents(w, a.as(r, accountID))
 }
 
+// Templates, SKUs and Submit are the dashboard's MarketRoutes: the public
+// catalogue, and job-api.md's submit for the session's account. The caller
+// has no key, so tokenID stays 0: no key cap, and a null token id on the job.
+func (a AccountJobs) Templates(w http.ResponseWriter, r *http.Request, accountID int64) {
+	a.s.listTemplates(w, a.as(r, accountID))
+}
+
+func (a AccountJobs) SKUs(w http.ResponseWriter, r *http.Request, accountID int64) {
+	a.s.listSKUs(w, a.as(r, accountID))
+}
+
+func (a AccountJobs) Submit(w http.ResponseWriter, r *http.Request, accountID int64) {
+	a.s.submitJob(w, a.as(r, accountID))
+}
+
 func (a AccountJobs) Artifacts(w http.ResponseWriter, r *http.Request, accountID int64) {
 	a.s.listArtifacts(w, a.as(r, accountID))
 }

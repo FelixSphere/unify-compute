@@ -46,6 +46,8 @@ const CLOSE = `<svg class="icon-close" ${ICON_ATTRS}><path d="M18 6 6 18"/><path
 const NAV: { id: string; path: string; label: string }[] = [
   { id: 'overview', path: '/', label: 'Overview' },
   { id: 'jobs', path: '/jobs', label: 'Jobs' },
+  { id: 'marketplace', path: '/marketplace', label: 'Marketplace' },
+  { id: 'listings', path: '/listings', label: 'My listings' },
   { id: 'keys', path: '/keys', label: 'API keys' },
   { id: 'usage', path: '/usage', label: 'Usage' },
   { id: 'billing', path: '/billing', label: 'Billing' },

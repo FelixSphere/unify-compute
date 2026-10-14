@@ -4,7 +4,7 @@
 // not register, and one without a job service 501; each section then says
 // what will appear there instead of failing the page.
 
-import { API, $, type ApiError, busy, call, checkConfirm, checkNewPassword, clearFieldError, focusFirstInvalid, GENERIC, input, onSubmit, type Result, setFieldError, setFormError, showApiError, wireConfirm } from './lib';
+import { API, $, type ApiError, busy, call, checkConfirm, checkNewPassword, clearErrors, clearFieldError, focusFirstInvalid, GENERIC, input, onSubmit, type Result, setFieldError, setFormError, showApiError, wireConfirm } from './lib';
 
 type Me = {
   user: { email: string; created_at: number };
@@ -90,6 +90,38 @@ type JobUsage = {
   usd: string;
 };
 type JobUsageList = { data: JobUsage[]; has_more: boolean; next?: string };
+type Mount = { mount: string; description: string };
+type Template = {
+  id: string;
+  title: string;
+  description: string;
+  image: string;
+  command: string[];
+  env: Record<string, string>;
+  sku: string;
+  max_runtime_seconds: number;
+  inputs: Mount[];
+  outputs: Mount[];
+  overridable: string[];
+  available: boolean;
+  unavailable_reason?: string;
+  publisher?: string;
+};
+type SKU = { id: string; gpu?: string; accelerator?: string; gpu_count?: number; price_usd_per_hour: string; available: boolean; providers?: { cloud: string }[] };
+type Listing = {
+  id: string;
+  template_id: string;
+  review_state: 'pending' | 'approved' | 'rejected';
+  review_reason?: string;
+  reviewed_at: number | null;
+  listed: boolean;
+  public: boolean;
+  runs: number;
+  template: Template;
+  created_at: number;
+  updated_at: number;
+};
+type ListingList = { data: Listing[]; open: boolean };
 type List<T> = { data: T[]; has_more?: boolean; next?: string };
 
 const CONTACT = 'mailto:contactus@felixsphere.com?subject=Unify%20Compute%20access';
@@ -1246,4 +1278,361 @@ async function account() {
   });
 }
 
-export const dashboard: Record<string, () => Promise<void>> = { overview, keys, jobs, job, usage, billing, account };
+// ---------------------------------------------------------------- marketplace
+
+const PUBLISHER = 'Unify Compute';
+const summary = (text: string) => (text.length > 160 ? text.slice(0, 157).trimEnd() + '…' : text);
+const runtimeLabel = (secs: number) => (secs % 3600 === 0 ? `${secs / 3600} h` : secs % 60 === 0 ? `${secs / 60} min` : `${secs} s`);
+
+function field(id: string, label: string, control: HTMLElement, hint?: string): HTMLElement {
+  control.id = id;
+  control.setAttribute('aria-describedby', `${id}-hint ${id}-error`);
+  return h(
+    'div',
+    { class: 'field' },
+    h('label', { for: id }, label),
+    control,
+    hint ? h('p', { class: 'hint', id: `${id}-hint` }, hint) : null,
+    h('p', { class: 'field-error', id: `${id}-error`, hidden: true }),
+  );
+}
+
+function tile(t: Template): HTMLElement {
+  return h(
+    'li',
+    { class: 'tile' },
+    h('div', { class: 'tile-top' }, h('code', {}, t.id), h('span', { class: t.available ? 'badge' : 'badge muted' }, t.available ? 'Available' : 'Not yet')),
+    h('h3', {}, t.title),
+    muted(summary(t.description)),
+    h(
+      'dl',
+      { class: 'facts' },
+      h('div', {}, h('dt', {}, 'GPU'), h('dd', { class: 'mono' }, t.sku)),
+      h('div', {}, h('dt', {}, 'Default runtime'), h('dd', {}, runtimeLabel(t.max_runtime_seconds))),
+      h('div', {}, h('dt', {}, 'Inputs'), h('dd', {}, t.inputs.length ? t.inputs.map((m) => m.mount).join(', ') : 'none')),
+      h('div', {}, h('dt', {}, 'Publisher'), h('dd', {}, t.publisher ?? PUBLISHER)),
+    ),
+    h('button', { type: 'button', class: 'secondary', 'data-run': t.id, disabled: !t.available, 'aria-label': `Run ${t.title}` }, t.available ? 'Run this' : t.unavailable_reason ?? 'Not runnable yet'),
+  );
+}
+
+async function marketplace() {
+  const me = await shell();
+  if (!me) return;
+  $('access-note')!.hidden = me.account.status === 'active' && me.account.compute_enabled;
+
+  const r = await get<List<Template>>('/templates');
+  if (!r.ok) {
+    fill('tpl-list', muted(notBuilt(r.error) ? 'Templates will appear here once the marketplace is live in the dashboard.' : r.error.message));
+    return;
+  }
+  const templates = r.data.data;
+  setText('tpl-count', String(templates.length));
+  if (templates.length === 0) {
+    fill('tpl-list', muted('No templates are offered yet.'));
+    return;
+  }
+  const grid = h('ul', { class: 'tiles' }, ...templates.map(tile));
+  fill('tpl-list', grid);
+  const skus = await get<List<SKU>>('/skus');
+  const sold = skus.ok ? skus.data.data.filter((k) => k.available) : [];
+
+  const card = $('run')!;
+  const form = $<HTMLFormElement>('run-form')!;
+  const fields = $('run-fields')!;
+  let opener: HTMLElement | null = null;
+  const close = () => {
+    card.hidden = true;
+    fields.replaceChildren();
+    opener?.focus();
+  };
+  $('run-cancel')!.addEventListener('click', close);
+
+  let current: Template | null = null;
+  function open(t: Template, from: HTMLElement) {
+    current = t;
+    opener = from;
+    const can = (f: string) => t.overridable.includes(f);
+    setText('run-title', `Run ${t.title}`);
+    setText('run-sub', `${t.id} · ${t.description}`);
+    const nodes: HTMLElement[] = [];
+    t.inputs.forEach((m, i) => {
+      nodes.push(
+        field(`in-${i}`, `Input for ${m.mount}`, h('input', { type: 'url', inputmode: 'url', autocomplete: 'off', placeholder: 'https://…/file', required: true }), `${m.description} An https:// URL ending in a file name; the file is mounted at ${m.mount}.`),
+      );
+    });
+    if (can('sku')) {
+      const options = sold.some((k) => k.id === t.sku) ? sold : [{ id: t.sku, price_usd_per_hour: '', available: true }, ...sold];
+      const select = h('select', {}, ...options.map((k) => h('option', { value: k.id, selected: k.id === t.sku }, k.price_usd_per_hour ? `${k.id} · USD ${k.price_usd_per_hour}/h` : k.id)));
+      nodes.push(field('run-sku', 'GPU (SKU)', select, `The template runs on ${t.sku} unless you choose another.`));
+      if (can('providers')) {
+        const box = h('fieldset', { class: 'field', id: 'run-providers' }, h('legend', {}, 'Providers (optional)'));
+        const render = () => {
+          for (const el of Array.from(box.querySelectorAll('label'))) el.remove();
+          const k = sold.find((x) => x.id === select.value);
+          for (const p of k?.providers ?? []) {
+            box.append(h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'provider', value: p.cloud }), p.cloud));
+          }
+          box.hidden = !(k?.providers ?? []).length;
+        };
+        select.addEventListener('change', render);
+        render();
+        nodes.push(box);
+      }
+    }
+    if (can('spec.env')) {
+      for (const [k, v] of Object.entries(t.env)) {
+        nodes.push(field(`env-${k}`, `Environment: ${k}`, h('input', { type: 'text', autocomplete: 'off', value: v }), undefined));
+        (nodes[nodes.length - 1].querySelector('input') as HTMLInputElement).value = v;
+      }
+    }
+    if (can('spec.max_runtime_seconds')) {
+      const n = h('input', { type: 'number', inputmode: 'numeric', min: '1', step: '1', autocomplete: 'off' });
+      n.value = String(t.max_runtime_seconds);
+      nodes.push(field('run-runtime', 'Maximum runtime (seconds)', n, 'The job is stopped at this limit, and the hold on your balance is sized by it.'));
+    }
+    if (can('spec.command')) {
+      const ta = h('textarea', { rows: '4', spellcheck: 'false' });
+      ta.value = t.command.join('\n');
+      nodes.push(field('run-command', 'Command', ta, 'One argument per line, as the template\'s command is run in the image.'));
+    }
+    fields.replaceChildren(...nodes);
+    clearErrors(form);
+    card.hidden = false;
+    $('run-title')!.focus();
+    form.querySelector<HTMLInputElement>('input, select, textarea')?.focus();
+  }
+
+  grid.addEventListener('click', (e) => {
+    const b = (e.target as Element).closest<HTMLButtonElement>('button[data-run]');
+    const t = b && templates.find((x) => x.id === b.dataset.run);
+    if (t) open(t, b);
+  });
+
+  onSubmit(form, async () => {
+    const t = current;
+    if (!t) return;
+    const spec: Record<string, unknown> = {};
+    const body: Record<string, unknown> = { template: t.id, spec };
+    const inputs: { source: string; mount: string }[] = [];
+    let bad = false;
+    t.inputs.forEach((m, i) => {
+      const v = input(`in-${i}`)!.value.trim();
+      if (!/^https:\/\/\S+\/[^/?#]+$/.test(v)) {
+        setFieldError(`in-${i}`, 'Enter an https:// URL that ends in a file name.');
+        bad = true;
+      }
+      inputs.push({ source: v, mount: m.mount });
+    });
+    if (bad) return focusFirstInvalid(form);
+    if (inputs.length) spec.inputs = inputs;
+    const sku = $<HTMLSelectElement>('run-sku');
+    if (sku && sku.value !== t.sku) body.sku = sku.value;
+    const providers = Array.from(form.querySelectorAll<HTMLInputElement>('input[name=provider]:checked')).map((c) => c.value);
+    if (providers.length) body.providers = providers;
+    if (t.overridable.includes('spec.env')) {
+      const env: Record<string, string> = {};
+      let changed = false;
+      for (const [k, v] of Object.entries(t.env)) {
+        env[k] = input(`env-${k}`)?.value ?? v;
+        if (env[k] !== v) changed = true;
+      }
+      if (changed) spec.env = env;
+    }
+    const runtime = input('run-runtime');
+    if (runtime) {
+      const n = Number(runtime.value);
+      if (!Number.isInteger(n) || n < 1) {
+        setFieldError('run-runtime', 'Whole seconds, at least 1.');
+        return runtime.focus();
+      }
+      if (n !== t.max_runtime_seconds) spec.max_runtime_seconds = n;
+    }
+    const command = $<HTMLTextAreaElement>('run-command');
+    if (command) {
+      const argv = command.value.split('\n').map((l) => l.trim()).filter(Boolean);
+      if (argv.join('\n') !== t.command.join('\n')) spec.command = argv;
+    }
+    busy(form, true);
+    const r = await send<Job>('POST', '/jobs', body);
+    if (!r.ok) {
+      const e = r.error;
+      const target: Record<string, string> = { 'spec.inputs': 'in-0', sku: 'run-sku', 'spec.env': `env-${Object.keys(t.env)[0] ?? ''}`, 'spec.max_runtime_seconds': 'run-runtime', 'spec.command': 'run-command' };
+      const id = e.param && target[e.param];
+      if (id && setFieldError(id, e.message)) return input(id)?.focus();
+      if (e.code === 'insufficient_balance') return setFormError(e.message, { href: '/billing', text: 'Top up' });
+      if (e.code === 'compute_not_enabled') return setFormError(e.message, { href: CONTACT, text: 'Contact us' });
+      return showApiError(e);
+    }
+    location.assign(`/jobs/${encodeURIComponent(r.data.id)}`);
+    await new Promise(() => {});
+  });
+}
+
+// ---------------------------------------------------------------- listings
+
+const LISTING_STATE: Record<Listing['review_state'], [string, Tone]> = {
+  pending: ['In review', 'warning'],
+  approved: ['Approved', 'success'],
+  rejected: ['Rejected', 'danger'],
+};
+
+const SKELETON = {
+  id: 'my-template',
+  title: '',
+  description: '',
+  image: 'registry/image:tag@sha256:…',
+  image_licence: '',
+  image_source: '',
+  command: ['python', 'run.py'],
+  env: {},
+  sku: 'a10g-24gb-x1',
+  max_runtime_seconds: 3600,
+  inputs: [{ mount: '/mnt/in', description: '' }],
+  outputs: [{ mount: '/mnt/out', description: '' }],
+  overridable: ['sku', 'spec.env', 'spec.max_runtime_seconds'],
+  available: true,
+};
+
+async function listings() {
+  const me = await shell();
+  if (!me) return;
+  const openButton = $<HTMLButtonElement>('new-open')!;
+  const card = $('edit')!;
+  const form = $<HTMLFormElement>('edit-form')!;
+  const area = $<HTMLTextAreaElement>('listing-json')!;
+  const save = $<HTMLButtonElement>('edit-save')!;
+  const status = $('lst-status')!;
+  let editing: Listing | null = null;
+  let opener: HTMLElement = openButton;
+
+  async function load() {
+    const r = await get<ListingList>('/listings');
+    if (!r.ok) {
+      setText('lst-count', '—');
+      openButton.hidden = true;
+      fill('lst-list', muted(notBuilt(r.error) ? 'Listings will appear here once the marketplace is live in the dashboard.' : r.error.message));
+      return;
+    }
+    $('closed-note')!.hidden = r.data.open;
+    const list = r.data.data;
+    setText('lst-count', String(list.filter((l) => l.listed).length));
+    if (list.length === 0) {
+      fill('lst-list', muted('No listings yet. Submit a template to publish it.'));
+      return;
+    }
+    fill(
+      'lst-list',
+      table(
+        'Listings',
+        [{ text: 'Template' }, { text: 'Review' }, { text: 'On the market' }, { text: 'Runs', num: true }, { text: 'Updated' }, { text: '' }],
+        list.map((l) => {
+          const [word, tone] = LISTING_STATE[l.review_state] ?? [l.review_state, 'muted'];
+          const review = h('span', {}, state(word, tone), l.review_reason ? h('span', { class: 'reason' }, l.review_reason) : null);
+          const actions = h('span', { class: 'row-actions' }, h('button', { type: 'button', class: 'link', 'data-edit': l.id, 'aria-label': `Edit ${l.template_id}` }, 'Edit'));
+          if (l.listed) actions.append(' ', h('button', { type: 'button', class: 'link', 'data-unlist': l.id, 'data-display': l.template_id, 'aria-label': `Unlist ${l.template_id}` }, 'Unlist'));
+          return [h('span', {}, mono(l.template_id), h('span', { class: 'reason' }, l.template.title)), review, l.public ? 'Live' : l.listed ? 'Listed, not live' : 'Unlisted', String(l.runs), when(l.updated_at), actions];
+        }),
+      ),
+    );
+    return list;
+  }
+
+  const closeEdit = () => {
+    card.hidden = true;
+    editing = null;
+    openButton.hidden = false;
+    opener.focus();
+  };
+  const openEdit = (l: Listing | null, from: HTMLElement) => {
+    editing = l;
+    opener = from;
+    clearErrors(form);
+    const t: Record<string, unknown> = l ? { ...l.template } : SKELETON;
+    delete t.object;
+    delete t.publisher;
+    delete t.unavailable_reason;
+    area.value = JSON.stringify(t, null, 2);
+    setText('edit-title', l ? `Edit ${l.template_id}` : 'New listing');
+    save.textContent = l ? 'Save and ask for review' : 'Submit for review';
+    openButton.hidden = true;
+    card.hidden = false;
+    $('edit-title')!.focus();
+  };
+  openButton.addEventListener('click', () => openEdit(null, openButton));
+  $('edit-cancel')!.addEventListener('click', closeEdit);
+
+  onSubmit(form, async () => {
+    let template: unknown;
+    try {
+      template = JSON.parse(area.value);
+    } catch (e) {
+      setFieldError('listing-json', `Not valid JSON: ${(e as Error).message}`);
+      return area.focus();
+    }
+    if (!template || typeof template !== 'object' || Array.isArray(template)) {
+      setFieldError('listing-json', 'The template must be a JSON object.');
+      return area.focus();
+    }
+    busy(form, true);
+    const r = editing ? await send<Listing>('PATCH', `/listings/${encodeURIComponent(editing.id)}`, { template }) : await send<Listing>('POST', '/listings', { template });
+    if (!r.ok) {
+      if (r.error.param?.startsWith('template')) {
+        setFieldError('listing-json', r.error.message);
+        return area.focus();
+      }
+      if (r.error.code === 'compute_not_enabled') return setFormError(r.error.message, { href: CONTACT, text: 'Contact us' });
+      return showApiError(r.error);
+    }
+    status.textContent = editing ? `${r.data.template_id} saved; it is back in review.` : `${r.data.template_id} submitted for review.`;
+    card.hidden = true;
+    editing = null;
+    openButton.hidden = false;
+    await load();
+    openButton.focus();
+  });
+
+  const dialog = $<HTMLDialogElement>('unlist-dialog')!;
+  const dialogForm = $<HTMLFormElement>('unlist-form')!;
+  const dialogError = $('unlist-error')!;
+  let target: { id: string; opener: HTMLElement } | null = null;
+  $('lst-list')!.addEventListener('click', async (e) => {
+    const edit = (e.target as Element).closest<HTMLButtonElement>('button[data-edit]');
+    if (edit) {
+      const l = (await load())?.find((x) => x.id === edit.dataset.edit);
+      if (l) openEdit(l, edit);
+      return;
+    }
+    const b = (e.target as Element).closest<HTMLButtonElement>('button[data-unlist]');
+    if (!b) return;
+    target = { id: b.dataset.unlist!, opener: b };
+    setText('unlist-display', b.dataset.display ?? '');
+    dialogError.hidden = true;
+    dialog.showModal();
+  });
+  dialogForm.addEventListener('submit', async (e) => {
+    if (!target || dialogForm.returnValue === 'cancel' || (e.submitter as HTMLButtonElement | null)?.value !== 'unlist') return;
+    e.preventDefault();
+    const confirm = $<HTMLButtonElement>('unlist-confirm')!;
+    confirm.disabled = true;
+    const r = await send<Listing>('POST', `/listings/${encodeURIComponent(target.id)}/unlist`);
+    confirm.disabled = false;
+    if (!r.ok) {
+      dialogError.querySelector('p')!.textContent = r.error.message;
+      dialogError.hidden = false;
+      return;
+    }
+    dialog.close();
+    status.textContent = `${r.data.template_id} is off the market.`;
+    await load();
+    openButton.focus();
+  });
+  dialog.addEventListener('close', () => {
+    target?.opener.focus();
+    target = null;
+  });
+
+  await load();
+}
+
+export const dashboard: Record<string, () => Promise<void>> = { overview, keys, jobs, job, usage, billing, account, marketplace, listings };
