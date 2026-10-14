@@ -90,7 +90,10 @@ type balanceView struct {
 	Currency     string       `json:"currency"`
 	AvailableUSD string       `json:"available_usd"`
 	HeldUSD      string       `json:"held_usd"`
-	Limits       balanceLimit `json:"limits"`
+	// LowBalanceUSD is the low-balance warning's threshold, 2 places; "0.00"
+	// is off. The dashboard shows its banner while available is below it.
+	LowBalanceUSD string       `json:"low_balance_usd"`
+	Limits        balanceLimit `json:"limits"`
 }
 
 type balanceLimit struct {
@@ -106,10 +109,14 @@ func (h *Handler) balance(w http.ResponseWriter, r *http.Request, _ accounts.Ses
 		h.internal(w, "balance", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, balanceView{Object: "compute.balance", Currency: "USD",
-		AvailableUSD: billing.USD(a.Available), HeldUSD: billing.USD(a.Held),
+	writeJSON(w, http.StatusOK, viewBalance(a))
+}
+
+func viewBalance(a accounts.Account) balanceView {
+	return balanceView{Object: "compute.balance", Currency: "USD",
+		AvailableUSD: billing.USD(a.Available), HeldUSD: billing.USD(a.Held), LowBalanceUSD: billing.ThresholdUSD(a.LowBalance),
 		Limits: balanceLimit{TopupMinUSD: centsUSD(a.TopupMinCents), TopupMaxUSD: centsUSD(a.TopupMaxCents),
-			BalanceMaxUSD: centsUSD(a.BalanceMaxCents), TopupsPerDay: a.TopupsPerDay}})
+			BalanceMaxUSD: centsUSD(a.BalanceMaxCents), TopupsPerDay: a.TopupsPerDay}}
 }
 
 type entryRef struct {
