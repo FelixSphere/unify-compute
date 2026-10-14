@@ -371,7 +371,7 @@ export function lowBalanceBanner(b: Balance) {
   const text = h(
     'p',
     {},
-    `Your available balance is USD ${b.available_usd}, below your low-balance alert of USD ${b.low_balance_usd}. New jobs need enough balance for their hold. `,
+    `Your available balance is USD ${usd(b.available_usd)}, below your low-balance alert of USD ${usd(b.low_balance_usd)}. New jobs need enough balance for their hold. `,
     onBilling ? 'Add credit to keep jobs running.' : h('a', { href: '/billing' }, 'Top up'),
   );
   if (!el) {
