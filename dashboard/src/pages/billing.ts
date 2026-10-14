@@ -1,5 +1,5 @@
 import { $, busy, clearFieldError, focusFirstInvalid, GENERIC, input, onSubmit, setFieldError, setFormError, showApiError } from '../lib';
-import { cents, type Child, fill, get, h, jobLink, type List, listOf, mono, muted, notBuilt, send, setText, shell, showBalance, state, table, type Tone, when } from '../shell';
+import { type Balance, cents, type Child, fill, get, h, jobLink, type List, listOf, lowBalanceBanner, mono, muted, notBuilt, send, setText, shell, showBalance, state, table, type Tone, when } from '../shell';
 
 type Topup = {
   id: string;
@@ -96,6 +96,34 @@ export async function billing() {
   more.addEventListener('click', () => void load(true));
   kindSel?.addEventListener('change', () => void load(false));
 
+  // --- The low-balance alert (W6). Hidden on a compute-api that does not
+  // report a threshold yet.
+  const alertCard = $('alert')!;
+  const alertForm = $<HTMLFormElement>('alert-form')!;
+  const alertField = input('low_balance_usd')!;
+  const alertStatus = $('alert-status')!;
+  void balance.then((b) => {
+    if (b?.low_balance_usd === undefined) {
+      alertCard.hidden = true;
+      return;
+    }
+    alertField.value = b.low_balance_usd;
+  });
+  onSubmit(alertForm, async () => {
+    alertStatus.textContent = '';
+    const c = cents(alertField.value);
+    if (c === null || c > 1_000_000) {
+      setFieldError('low_balance_usd', 'Enter an amount in US dollars from 0 to 10000, like 5 or 5.00.');
+      return focusFirstInvalid(alertForm);
+    }
+    busy(alertForm, true);
+    const r = await send<Balance>('PATCH', '/balance', { low_balance_usd: (c / 100).toFixed(2) });
+    if (!r.ok) return showApiError(r.error);
+    alertField.value = r.data.low_balance_usd ?? alertField.value;
+    alertStatus.textContent = c === 0 ? 'Low-balance alert turned off.' : `Saved. We'll alert you below USD ${r.data.low_balance_usd}.`;
+    lowBalanceBanner(r.data);
+  });
+
   // --- Card top-ups (B1). The page never credits anything: it sends the
   // browser to Stripe's Checkout page and, on the way back, waits for the
   // webhook to have done it.
@@ -180,7 +208,7 @@ export async function billing() {
       if (r.ok && r.data.status !== 'open') {
         status.textContent =
           r.data.status === 'credited' ? `USD ${r.data.amount_usd} added to your balance.` : 'This payment did not go through. Nothing was charged.';
-        void showBalance();
+        void showBalance(true);
         void loadTopups();
         void load(false);
         return;
