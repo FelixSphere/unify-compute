@@ -230,6 +230,7 @@ func TestMembersCannotManageOrTopUp(t *testing.T) {
 		f.sessionReq(http.MethodPost, "/members/invitations", member, map[string]string{"email": "x@example.com", "role": "member"}),
 		f.sessionReq(http.MethodGet, "/members/invitations", member, nil),
 		f.sessionReq(http.MethodPost, "/topups", member, map[string]string{"amount_usd": "20.00"}),
+		f.sessionReq(http.MethodPatch, "/balance", member, map[string]string{"low_balance_usd": "1.00"}),
 		f.sessionReq(http.MethodPatch, "/account", member, map[string]string{"name": "Mine now"}),
 		f.sessionReq(http.MethodPatch, "/members/"+strconv.FormatInt(f.userID("owner@example.com"), 10), member, map[string]string{"role": "member"}),
 		f.sessionReq(http.MethodDelete, "/members/"+strconv.FormatInt(f.userID("owner@example.com"), 10), member, nil),

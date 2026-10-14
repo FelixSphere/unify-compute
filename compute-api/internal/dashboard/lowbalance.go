@@ -18,6 +18,11 @@ type lowBalanceRequest struct {
 // unlike a key's cap it controls only an email and a banner, not spending.
 // Any user of the account may set it; there is only the owner today.
 func (h *Handler) setLowBalance(w http.ResponseWriter, r *http.Request, _ accounts.Session, u accounts.User) {
+	// A money setting of the account, like topping up: owners and admins.
+	if !accounts.CanManage(u.Role) {
+		writeAccountsError(w, accounts.ErrRoleRequired)
+		return
+	}
 	var req lowBalanceRequest
 	if !decode(w, r, &req) {
 		return

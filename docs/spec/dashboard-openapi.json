@@ -1601,7 +1601,7 @@
             }
           },
           "403": {
-            "description": "csrf_failed: Origin is not APP_ORIGIN (every non-GET), or X-CSRF-Token does not match the session (session routes).",
+            "description": "role_required (permission_error): a member; owners and admins set the threshold. csrf_failed: Origin is not APP_ORIGIN (every non-GET), or X-CSRF-Token does not match the session (session routes).",
             "content": {
               "application/json": {
                 "schema": {

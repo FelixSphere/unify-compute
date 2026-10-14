@@ -604,7 +604,8 @@ Rules:
 
 Built in A5b (migration `0013_members.sql`, `internal/accounts/members.go`,
 `internal/dashboard/members.go`, pages `/members` and `/accept-invitation`).
-The role checks on existing routes: `POST /topups` is owner or admin, and a
+The role checks on existing routes: `POST /topups` and `PATCH /balance` (the
+low-balance threshold) are owner or admin, and a
 member's `DELETE /keys/{id}` succeeds only for keys it created (`403
 role_required` otherwise). The last-owner rule counts active owners. Two
 choices beyond the text above: an admin invites, sends again and withdraws
