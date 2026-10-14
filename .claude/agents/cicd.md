@@ -88,13 +88,13 @@ account. Two consequences:
   (37142414668).
   `DNS_CUTOVER=done`, and production's `PUBLIC_ORIGIN` is
   `https://compute.unifyai.us`.
-- **2026-10-14, hosts differ on purpose:** staging runs dashboard-w8-w9
-  (compute-api `05ba021c…`, site `8879ce5a…`, main `494f43d`, schema
-  0011–0014 applied; run 38622405389). Production is held at
-  marketplace-m3 (`de7ce94d…` / `b9da4d90…`, schema `0010_listings`)
-  because two staging checks failed. See
-  `deploy/releases/2026-10-14-staging-dashboard-w8-w9.md`. The G/VT quota
-  is now 4 vCPU, so a staging job can launch a real GPU.
+- **2026-10-14, both hosts on banner-rtl-fix:** compute-api `05ba021c…`
+  (`494f43d`) and site `b3871cfc…` (`db3c771`), schema 0011–0014 applied on
+  both (staging run 38627456906, production 38628621483). Records:
+  `deploy/releases/2026-10-14-{staging,production}-banner-rtl-fix.md`.
+  Production's `PREVIOUS_RELEASE` is m3, which cannot read 0011–0014:
+  restore the backup's dump before rolling back. The G/VT quota is 4 vCPU,
+  so a staging job can launch a real GPU.
 - **IMDS lockdown:** applied to both hosts on 2026-10-03 (staging, then
   production): firewall unit, credentials timer, `docker-compose.imds.yml`,
   hop limit 1 by Terraform. `check-imds.sh` gave `CHECK_IMDS_OK` before and after
