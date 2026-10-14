@@ -25,6 +25,10 @@ RUN npm run build \
  && test -f dist/client/privacy.txt \
  && test -f dist/client/start.html \
  && test -f dist/client/start.txt \
+ && test -f dist/client/marketplace.html \
+ && test -f dist/client/marketplace.txt \
+ && test -f dist/client/marketplace/batch-embed.html \
+ && test -f dist/client/marketplace/batch-embed.txt \
  && test -f dist/client/404.html \
  && rm -rf dist/client/.vite dist/client/vinext-client-entry-manifest.json \
  && for page in index signup login verify forgot-password reset-password 404 keys jobs job usage billing account; do \

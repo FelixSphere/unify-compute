@@ -3,7 +3,7 @@ import { BrandLockup, CompanyLine } from './brand';
 import { AccountLink } from './account-link';
 import { LOG_IN_URL, SIGN_UP_URL, TERMS_URL } from './links';
 
-export function SiteFooter({ homeHref = '/', current }: { homeHref?: string; current?: '/start' | '/privacy' }) {
+export function SiteFooter({ homeHref = '/', current }: { homeHref?: string; current?: '/start' | '/privacy' | '/marketplace' }) {
   const here = (href: string) => (current === href ? 'page' : undefined);
   return (
     <footer className="wrap">
@@ -12,6 +12,9 @@ export function SiteFooter({ homeHref = '/', current }: { homeHref?: string; cur
       </Link>
       <span>Compute beyond chat.</span>
       <nav aria-label="Footer" className="footer-links">
+        <Link href="/marketplace" aria-current={here('/marketplace')}>
+          Marketplace
+        </Link>
         <Link href="/start" aria-current={here('/start')}>
           Quick start
         </Link>

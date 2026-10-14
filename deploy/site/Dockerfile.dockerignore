@@ -14,4 +14,7 @@
 !lib/
 !public/
 !dashboard/
+# The marketplace pages are generated from the catalogue compute-api serves (ADR-0012).
+!compute-api/config/skus.json
+!compute-api/config/templates.json
 !deploy/site/Caddyfile
