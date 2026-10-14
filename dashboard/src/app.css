@@ -1344,6 +1344,23 @@ a.ghost {
   white-space: normal;
 }
 
+/* Members (/members). */
+.focal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.tag {
+  margin-left: 8px;
+  font-size: var(--u-text-xs);
+  color: var(--u-text-muted);
+}
+
+#members-status:empty {
+  display: none;
+}
+
 /* Overview: the getting-started checklist and the two cards under the
    balance. Status colours only on the step marks, which are status. */
 .progress {
@@ -1983,4 +2000,34 @@ a.primary.topbar-signup {
   .topbar + .page {
     padding-top: 24px;
   }
+}
+
+/* The low-balance banner (shell.ts lowBalanceBanner): the form-error box's
+   shape with the warning colour, since it is a warning and not an error. */
+.balance-alert {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 24px;
+  padding: 12px;
+  background: var(--u-surface);
+  border: 1px solid var(--u-warning);
+  border-radius: var(--u-radius);
+  font-size: var(--u-text-sm);
+}
+
+.balance-alert svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--u-warning);
+}
+
+.balance-alert p {
+  margin: 0;
+  color: var(--u-text);
+}
+
+.page-head .page-actions {
+  flex: none;
+  margin: 0;
 }

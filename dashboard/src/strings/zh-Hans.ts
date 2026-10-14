@@ -453,6 +453,7 @@ const c: Record<string, string> = {
   'common.loading-this-month-s-usage': '正在加载本月用量…',
   'common.loading-usage': '正在加载用量…',
   'common.loading-your-balance': '正在加载你的余额…',
+  'nav.members': '成员',
 };
 
 export default c;

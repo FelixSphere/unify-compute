@@ -453,6 +453,7 @@ const c: Record<string, string> = {
   'verify.resend-code': 'Reenviar código',
   'verify.title': 'Verifique seu e-mail',
   'verify.verify-email': 'Verificar e-mail',
+  'nav.members': 'Membros',
 };
 
 export default c;

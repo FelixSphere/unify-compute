@@ -46,6 +46,22 @@
           </div>
         </form>
       </section>
+      <section class="card narrow" id="alert" aria-labelledby="alert-title">
+        <h2 id="alert-title">Low-balance alert</h2>
+        <p class="muted">When your available balance drops below this amount we email you once and show a banner on every page. You get another email only after a top-up brings the balance back up. Set it to 0 to turn the alert off.</p>
+        <p class="status-line" id="alert-status" role="status"></p>
+        <form id="alert-form" novalidate>
+          <div class="field">
+            <label for="low_balance_usd">Alert below (USD)</label>
+            <input id="low_balance_usd" name="low_balance_usd" type="text" inputmode="decimal" autocomplete="off" required aria-describedby="low_balance_usd-hint low_balance_usd-error" />
+            <p class="hint" id="low_balance_usd-hint">From 0 to 10000. The default is 5.00.</p>
+            <p class="field-error" id="low_balance_usd-error" hidden></p>
+          </div>
+          <div class="actions">
+            <button class="secondary" type="submit">Save alert</button>
+          </div>
+        </form>
+      </section>
       <section class="section" id="topups-section" aria-labelledby="topups-title" hidden>
         <h2 id="topups-title" data-i18n="billing.card-top-ups">Card top-ups</h2>
         <div id="topups" aria-live="polite"></div>

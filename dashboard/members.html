@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <!-- @head -->
+    <title>Members — Unify Compute</title>
+    <link rel="stylesheet" href="/src/app.css" />
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body class="app" data-page="members">
+    <!-- @shell:members -->
+    <main class="content" id="main" tabindex="-1">
+      <!-- @form-error -->
+      <div class="page-head">
+        <div>
+          <p class="eyebrow" id="focal-label">Members</p>
+          <h1 id="account-name">—</h1>
+          <p class="page-desc" id="account-sub">Everyone here shares this account's balance, API keys and jobs.</p>
+        </div>
+        <div class="actions page-actions">
+          <button class="ghost" type="button" id="rename-open" hidden>Rename</button>
+          <button class="primary" type="button" id="invite-open" hidden>Invite someone</button>
+        </div>
+      </div>
+
+      <section class="card" id="invite" aria-labelledby="invite-title" hidden>
+        <h2 id="invite-title" tabindex="-1">Invite someone</h2>
+        <p class="muted">We email them a link that works once and expires in 7 days. They choose a password and join this account; no verification code is needed.</p>
+        <form id="invite-form" novalidate>
+          <div class="field">
+            <label for="invite-email">Email</label>
+            <input id="invite-email" name="email" type="email" autocomplete="off" maxlength="254" required aria-describedby="invite-email-error" />
+            <p class="field-error" id="invite-email-error" hidden></p>
+          </div>
+          <fieldset class="field" id="invite-role-field">
+            <legend>Role</legend>
+            <label class="check"><input type="radio" name="role" value="member" checked /> Member: sees everything, creates and revokes their own API keys</label>
+            <label class="check" id="invite-role-admin"><input type="radio" name="role" value="admin" /> Admin: also tops up, revokes any key and manages members</label>
+          </fieldset>
+          <div class="actions">
+            <button class="primary" type="submit">Send invitation</button>
+            <button class="ghost" type="button" id="invite-cancel">Cancel</button>
+          </div>
+        </form>
+      </section>
+
+      <p class="status-line" id="members-status" role="status"></p>
+
+      <section class="section" aria-labelledby="members-title">
+        <h2 id="members-title" tabindex="-1">Members</h2>
+        <div id="members-list" aria-live="polite"><p class="muted">Loading members…</p></div>
+      </section>
+
+      <section class="section" id="invitations" aria-labelledby="invitations-title" hidden>
+        <h2 id="invitations-title" tabindex="-1">Pending invitations</h2>
+        <div id="invitations-list" aria-live="polite"><p class="muted">Loading invitations…</p></div>
+      </section>
+
+      <section class="section" aria-labelledby="roles-title">
+        <h2 id="roles-title">Roles</h2>
+        <div id="roles-table"></div>
+      </section>
+
+      <dialog id="rename-dialog" aria-labelledby="rename-title">
+        <form method="dialog" id="rename-form" novalidate>
+          <h2 id="rename-title">Rename this account</h2>
+          <div class="field">
+            <label for="rename-name">Account name</label>
+            <input id="rename-name" name="name" type="text" maxlength="64" autocomplete="organization" required aria-describedby="rename-hint rename-name-error" />
+            <p class="hint" id="rename-hint">Shown to members here and in the emails we send them.</p>
+            <p class="field-error" id="rename-name-error" hidden></p>
+          </div>
+          <div class="actions">
+            <button class="primary" type="submit" value="save" id="rename-save">Save</button>
+            <button class="ghost" type="submit" value="cancel">Cancel</button>
+          </div>
+        </form>
+      </dialog>
+
+      <dialog id="role-dialog" aria-labelledby="role-title">
+        <form method="dialog" id="role-form" novalidate>
+          <h2 id="role-title">Change the role of <span id="role-email"></span></h2>
+          <fieldset class="field">
+            <legend class="sr-only">Role</legend>
+            <label class="check"><input type="radio" name="member-role" value="owner" /> Owner: everything, including roles and ownership</label>
+            <label class="check"><input type="radio" name="member-role" value="admin" /> Admin: tops up, revokes any key, manages members</label>
+            <label class="check"><input type="radio" name="member-role" value="member" /> Member: sees everything, manages their own keys</label>
+          </fieldset>
+          <div class="form-error" id="role-error" role="alert" hidden><p></p></div>
+          <div class="actions">
+            <button class="primary" type="submit" value="save" id="role-save">Save</button>
+            <button class="ghost" type="submit" value="cancel">Cancel</button>
+          </div>
+        </form>
+      </dialog>
+
+      <dialog id="remove-dialog" aria-labelledby="remove-title">
+        <form method="dialog" id="remove-form">
+          <h2 id="remove-title">Remove this member?</h2>
+          <p id="remove-text"></p>
+          <div class="form-error" id="remove-error" role="alert" hidden><p></p></div>
+          <div class="actions">
+            <button class="ghost" type="submit" value="remove" id="remove-confirm">Remove</button>
+            <button class="ghost" type="submit" value="cancel">Cancel</button>
+          </div>
+        </form>
+      </dialog>
+      <!-- @reauth -->
+    </main>
+  </body>
+</html>

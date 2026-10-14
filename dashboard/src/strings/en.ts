@@ -457,6 +457,7 @@ const en: Record<string, string> = {
   'verify.resend-code': 'Resend code',
   'verify.title': 'Check your email',
   'verify.verify-email': 'Verify email',
+  'nav.members': 'Members',
 };
 
 export default en;

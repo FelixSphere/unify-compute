@@ -453,6 +453,7 @@ const c: Record<string, string> = {
   'verify.resend-code': 'コードを再送',
   'verify.title': 'メールをご確認ください',
   'verify.verify-email': 'メールアドレスを確認',
+  'nav.members': 'メンバー',
 };
 
 export default c;

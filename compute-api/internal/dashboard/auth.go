@@ -43,13 +43,19 @@ func (p honeypot) tripped() bool { return p.Website != "" }
 
 type userView struct {
 	Email     string `json:"email"`
+	Role      string `json:"role"`
 	CreatedAt int64  `json:"created_at"`
 }
 
 type accountView struct {
 	ID             int64  `json:"id"`
+	Name           string `json:"name"`
 	Status         string `json:"status"`
 	ComputeEnabled bool   `json:"compute_enabled"`
+}
+
+func viewAccount(a accounts.Account) accountView {
+	return accountView{ID: a.ID, Name: a.Name, Status: a.Status, ComputeEnabled: a.ComputeEnabled}
 }
 
 type sessionView struct {
@@ -64,8 +70,8 @@ func (h *Handler) sessionBody(ctx context.Context, u accounts.User, csrf string)
 		return sessionView{}, err
 	}
 	return sessionView{
-		User:      userView{Email: u.Email, CreatedAt: u.CreatedAt.Unix()},
-		Account:   accountView{ID: a.ID, Status: a.Status, ComputeEnabled: a.ComputeEnabled},
+		User:      userView{Email: u.Email, Role: u.Role, CreatedAt: u.CreatedAt.Unix()},
+		Account:   viewAccount(a),
 		CSRFToken: csrf,
 	}, nil
 }

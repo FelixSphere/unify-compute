@@ -15,8 +15,11 @@
   `internal/payments`, the dashboard's `/topups` routes and the Stripe
   webhook, the Billing page's "Add credit"). All of it is behind
   `ACCOUNTS_BACKEND=local`, which no environment sets, and top-ups also need
-  the Stripe keys, which no environment has yet. Refunds and disputes (B2),
-  the top-up receipt email, `admin account limits`, `GET /compute/v1/balance`,
+  the Stripe keys, which no environment has yet. Refunds and disputes (B2:
+  migration `0012_refunds_disputes.sql`, `internal/payments/refunds.go`,
+  `admin topup refund`, the refund, suspension and operator emails) are on
+  the branch `feat/refunds-and-disputes`, tested against the Stripe fake
+  only. The top-up receipt email, `admin account limits`, `GET /compute/v1/balance`,
   account export and close do not exist yet.
 - Task breakdown: [`plan-own-accounts.md`](../plan-own-accounts.md).
 - Depends on: [`job-api.md`](job-api.md) (error envelope, job routes),
@@ -65,10 +68,12 @@ marked **append-only** get the same refusing trigger as `usage_events`.
 | `name` | `text` | 1–64 chars, how the tenant appears in the dashboard and in member emails. Defaults to the first user's email at signup; owners and admins rename it (`PATCH /account`) |
 | `status` | `text` | `active`, `suspended`, `closed` |
 | `compute_enabled` | `boolean` | Default from `ACCOUNTS_COMPUTE_DEFAULT` (`false` while starting small; ADR-0011 D3) |
-| `available` | `bigint` | Quota units. `CHECK (available >= 0 OR status = 'suspended')`; only a chargeback drives it negative |
+| `available` | `bigint` | Quota units. May be negative: a dispute or a refund larger than the unused balance drives it below zero (0005's `CHECK (available >= 0 OR status = 'suspended')` was dropped by 0012, because a refund made at Stripe has already returned the money and does not suspend). A negative balance refuses every hold |
 | `held` | `bigint` | Quota units, `>= 0` |
 | `topup_min_cents`, `topup_max_cents`, `balance_max_cents`, `topups_per_day` | `integer` | Defaults 1000, 10000, 20000, 3 |
 | `stripe_customer_id` | `text` unique, null | Created on first top-up |
+| `low_balance_quota` | `bigint` | Quota units, `>= 0`, default 2 500 000 (USD 5, operator decision 2026-10-14); `0` is off. Migration 0014. See [Low-balance warning](#low-balance-warning) |
+| `low_balance_armed` | `boolean` | The next drop of `available` below `low_balance_quota` is emailed. Migration 0014 |
 | `suspended_reason` | `text` null | `dispute`, `abuse`, `operator` |
 | `created_at`, `closed_at` | `timestamptz` | |
 
@@ -217,7 +222,7 @@ After the cutover its `user_id` holds the account id and `token_id` the key id.
 | `stripe_customer_id` | `text` | The account's Customer (also on `accounts`) |
 | `stripe_payment_intent_id`, `stripe_charge_id` | `text` | The PaymentIntent from the completed session; the charge and receipt looked up after the credit |
 | `receipt_url` | `text` | Stripe's hosted receipt |
-| `refunded_cents`, `disputed_cents` | `integer` | B2 |
+| `refunded_cents`, `disputed_cents` | `integer` | Refunded so far (the charge's cumulative `amount_refunded` last applied) and the amount under open disputes (B2) |
 | `created_at`, `paid_at`, `expires_at` | `timestamptz` | `expires_at` = Checkout's, one hour after creation (`payments.CheckoutTTL`) |
 
 ### `stripe_events`
@@ -226,6 +231,31 @@ After the cutover its `user_id` holds the account id and `token_id` the key id.
 `received_at`, `processed_at`. Inserted first in the same transaction as the
 effect, so a redelivered event, even one delivered concurrently, is a no-op.
 Only compute's own events are stored; see [Stripe webhook](#stripe-webhook-post-dashboardv1stripewebhook).
+
+### `topup_disputes`
+
+`id` (Stripe's `dp_…`) PK, `topup_id`, `account_id`, `amount_cents`,
+`status` (`open` → `won` | `lost`; Stripe's `warning_closed` is recorded as
+`won`), `reason`, `suspended_account` (whether this dispute moved the
+account from `active` to `suspended`), `opened_event_id`,
+`closed_event_id`, `created_at`, `closed_at`. Keyed on the dispute, so a
+dispute is debited and reinstated at most once whatever order its events
+arrive in.
+
+### `payment_emails`
+
+`(event_id, kind, recipient)` PK, `account_id`, `detail jsonb`,
+`created_at`, `claimed_at`, `sent_at`. The messages a Stripe event causes,
+inserted in the event's transaction and sent after it commits; the Stripe
+event id is the idempotency key. A send claims the row first (a claim older
+than 15 minutes is taken as dead) and marks it sent after, so each message
+goes out at most once; a failed one is unclaimed and retried when Stripe
+delivers the event again. It is separate from W2's `notifications`
+(`internal/notify`) because these messages are rendered from what the
+event's transaction saw and retried on redelivery, when that data is no
+longer at hand; notify retries only from a later trigger that brings its
+own data. Folding them together means storing the message detail in
+`notifications`.
 
 ### `audit_events` (**append-only**)
 
@@ -238,7 +268,8 @@ Only compute's own events are stored; see [Stripe webhook](#stripe-webhook-post-
 `account_renamed`, `topup_created`,
 `topup_credited`, `refund`, `dispute_opened`, `dispute_closed`,
 `account_suspended`, `account_reinstated`, `compute_enabled`,
-`limits_changed`, `admin_credit`, `admin_debit`, `export`, `account_closed`.
+`limits_changed`, `admin_credit`, `admin_debit`, `export`, `account_closed`,
+`low_balance_changed` (detail `low_balance_usd`).
 
 ### Changes to existing tables
 
@@ -315,21 +346,55 @@ key is `401 invalid_key`, with no cache.
   payment went through and its webhook will credit it: `409 topup_open`.
 - `failed` cannot happen with cards only; it is handled because the event
   exists.
-- Refunds and disputes (below) are B2. Until B2, their events on a top-up
-  are stored (`outcome = recorded`) and logged as errors for the operator,
-  and nothing moves.
-- `disputed` debits `disputed_cents` immediately; `won` writes a
-  `dispute_reversal` entry; `lost` writes nothing more.
-- A refund is created by the admin CLI (`refund` entry, top-up →
-  `refunded` or `partially_refunded`), confirmed by `charge.refunded`. A
-  refund larger than the account's `available` is refused: the customer
-  cannot be refunded money already spent on GPUs.
+- **Refund policy** (operator, 2026-10-14; wording pending legal review):
+  unused prepaid balance can be refunded on request; compute already used
+  is not refunded.
+- A refund is created by `admin topup refund`, which only calls Stripe
+  (`POST /v1/refunds`, idempotency key on the top-up, what was refunded so
+  far and the amount). It refuses more than is left on the top-up (amount −
+  refunded − disputed) and more than the account's `available`. The balance
+  moves only when `charge.refunded` arrives, the same path a refund made in
+  the Stripe dashboard takes: the debit is the charge's cumulative
+  `amount_refunded` minus `refunded_cents`, as a `refund` entry keyed
+  `refund:<topup>:<cumulative cents>`, so a duplicate or stale event debits
+  nothing. Top-up → `partially_refunded` or `refunded` (left `disputed` or
+  `lost` if it is). A refund larger than `available` (made in the Stripe
+  dashboard, or racing a settle) is debited in full: the balance goes
+  negative, the operator is emailed, the account is **not** suspended and
+  running jobs are not cancelled. The customer gets "Refund issued".
+- `charge.dispute.created` debits the disputed amount at once (`dispute`
+  entry, key `dispute:<dp_…>`), adds it to `disputed_cents`, moves the
+  top-up to `disputed`, suspends an `active` account
+  (`suspended_reason = dispute`), records a cancel for every live job of the
+  account in the same transaction and then carries them out through the
+  normal cancel path (`jobs.Service.Cancel`: metering stops at the
+  dispute, the hold settles what was used), emails "Account suspended" to
+  the account (only if this dispute suspended it) and a notice to the
+  operator.
+- `charge.dispute.closed` with `won` (or `warning_closed`) writes a
+  `dispute_reversal` entry and returns the top-up to `credited` /
+  `partially_refunded` / `refunded`. The suspension is lifted only if this
+  dispute caused it, the account is still suspended for `dispute`, no other
+  dispute on it is open, and `available >= 0`; otherwise it stays for the
+  operator. `lost` writes nothing more, the top-up becomes `lost` and the
+  account stays suspended until `admin account reinstate`. A close that
+  arrives before its open is applied as open-then-close when lost, and only
+  recorded when won (no money moved).
+- An event that cannot be applied as it is (not USD, a charge amount that
+  differs from the top-up, a disputed amount outside it) is stored with
+  `outcome = recorded` and logged as an error: the money has moved at
+  Stripe, so the operator reconciles it by hand.
+- Not handled: a refund that later fails (`charge.refund.updated` with
+  `status = failed`) stays debited; Stripe's `charge.dispute.funds_*`
+  events are not used.
 
 ### Account
 
-`active ⇄ suspended → closed`. Suspension is automatic on a dispute that
-leaves `available < 0`, otherwise an admin action. Reinstatement is always an
-admin action.
+`active ⇄ suspended → closed`. Suspension is automatic on a dispute
+(`suspended_reason = dispute`), otherwise an admin action (`operator`). A
+won dispute lifts only the suspension it caused (above); every other
+reinstatement is `admin account reinstate`, which refuses a negative
+balance.
 
 ## Errors
 
@@ -370,10 +435,16 @@ named by `param`, or in the form-level box when `param` is absent
 | 403 | `permission_error` | `csrf_failed` | Missing or wrong `X-CSRF-Token`, or foreign `Origin` |
 | 403 | `permission_error` | `topup_limit_exceeded` | Below the minimum, above the per-top-up maximum, would exceed the balance maximum (`param: amount_usd` for these three), or over the daily count (no `param`). `message` says which and invites contact for a review |
 | 403 | `permission_error` | `key_limit_reached` | 10 active keys already |
+| 403 | `permission_error` | `role_required` | The user's role does not allow the action ([Members and roles](#members-and-roles)): a member topping up, inviting, renaming, or revoking a key another user created; an admin inviting an admin or removing a non-member; a non-owner changing roles |
+| 403 | `permission_error` | `member_limit_reached` | Members plus live invitations would exceed the account's `member_limit` |
+| 400 | `invalid_request` | `invalid_role` | Invitation role not `admin`/`member`, or member role not `owner`/`admin`/`member` |
 | 400 | `invalid_request` | `invalid_month` | `/usage`: `month` not `YYYY-MM` |
 | 400 | `invalid_request` | `invalid_cursor`, `invalid_limit`, `invalid_status` | List routes: `after` not one of this account's entries or jobs, `limit` out of range, unknown job status (`param` names it) |
 | 404 | `not_found` | `not_found` | Key or top-up not in this account |
 | 404 | `not_found` | `job_not_found` | Job not in this account, on the dashboard as on the job API |
+| 409 | `conflict` | `already_member` | Inviting an address that is already a user of this account (`param: email`) |
+| 409 | `conflict` | `last_owner` | Demoting or removing the account's last active owner |
+| 409 | `conflict` | `email_in_use` | Accepting an invitation for an address that already has a login, in this or another account |
 | 409 | `conflict` | `topup_open` | The account's `open` top-up was already paid at Stripe and its webhook has not arrived; `error.topup_id` names it. An unpaid open top-up never blocks: it is expired and replaced |
 | 429 | `rate_limited` | `rate_limited` | Any throttle; always with `Retry-After` |
 | 502 | `payment_provider_error` | `stripe_unavailable` | Stripe did not create the Checkout Session (or the Customer, or did not answer the expiry of an open session); nothing was charged and no top-up is kept |
@@ -425,20 +496,21 @@ after the response, so neither the status nor the time depends on it.
 | `POST /login` | `{ email, password, website }` | `200 { user, account, csrf_token }` + `Set-Cookie` | Rotates any existing session |
 | `POST /password/forgot` | `{ email, website }` | `202 { status: "reset_requested" }` | Always `202` |
 | `POST /password/reset` | `{ token, password, password_confirm }` | `200 { status: "password_reset" }`, cookie cleared | Ends every session; does not log in |
-| `GET /invitations/{token}` | — | `200 { account_name, email, role, invited_by_email, expires_at }` | What the accept page shows. Expired, revoked or used is `404 not_found` |
-| `POST /invitations/accept` | `{ token, password, password_confirm }` | `200 { user, account, csrf_token }` + `Set-Cookie` | Creates an `active` user (the link proves the address) and logs in. An address that already belongs to a user is `409 email_in_use`: a user belongs to exactly one account, and the person logs in instead. Counts against the signup throttles |
+| `POST /invitations/lookup` | `{ token }` | `200 { account_name, email, role, invited_by_email, expires_at }` | What the accept page shows, without using the token. Expired, withdrawn, superseded, used or unknown is `404 not_found`. A POST body, not the `GET /invitations/{token}` first specified here: a token in a path lands in access logs and is enough to join the account. Built (A5b) |
+| `POST /invitations/accept` | `{ token, password, password_confirm }` | `200 { user, account, csrf_token }` + `Set-Cookie` | Creates an `active` user (the link proves the address) and logs in. An address that already belongs to a user is `409 email_in_use`: a user belongs to exactly one account, and the person logs in instead. Counts against the signup throttles. Emails the inviter. Built (A5b) |
 
 ### Session (cookie `__Host-uc_session` + `X-CSRF-Token`)
 
 | Route | Body | Success |
 |---|---|---|
-| `GET /me` | — | `{ user: { email, role, created_at }, account: { id, name, status, compute_enabled }, csrf_token }` |
+| `GET /me` | — | `{ user: { email, role, created_at }, account: { id, name, status, compute_enabled }, csrf_token }`. `role` and `name` built (A5b) |
 | `POST /logout` | — | `204`, cookie cleared |
 | `POST /password` | `{ current_password, password, password_confirm }` | `204`; other sessions ended. `current_password` is the recent-password check and counts as a reauth; wrong is `401 invalid_credentials` with `param: current_password` |
 | `POST /reauth` | `{ password }` | `204`; sets `reauth_at` |
 | `GET /sessions` | — | `{ other_sessions }`: the user's live sessions other than this one (not idle, not past the absolute lifetime). Read-limited. Built (W7) |
 | `POST /sessions/end-others` | — | `200 { ended }`: every other session of the user is deleted and this one kept; `ended` counts the live ones. No reauth (it only removes access). Audited as `sessions_ended`. Built (W7) |
-| `GET /balance` | — | `{ object: "compute.balance", currency: "USD", available_usd, held_usd, limits: { topup_min_usd, topup_max_usd, balance_max_usd, topups_per_day } }`, from the account row. Built (A7d) |
+| `GET /balance` | — | `{ object: "compute.balance", currency: "USD", available_usd, held_usd, low_balance_usd, limits: { topup_min_usd, topup_max_usd, balance_max_usd, topups_per_day } }`, from the account row. `low_balance_usd` has 2 places, `"0.00"` when off. Built (A7d; `low_balance_usd` W6) |
+| `PATCH /balance` | `{ low_balance_usd }` (dollars, two decimals, 0 to 10000) | `200`, the balance as `GET`; `400 invalid_low_balance` (`param: low_balance_usd`). No reauth: it controls a banner and an email, not spending. Re-arms the warning exactly when `available` is at or above the new value. Writes `low_balance_changed`. Built (W6) |
 | `GET /transactions?after=&limit=&kind=` | — | `kind` repeatable, any of the entry kinds (`400 invalid_kind` otherwise); absent is every kind.  `{ object: "list", data, has_more, next? }`, balance entries newest first, `limit` 1–100 (default 20), `after` an entry id: `{ id, object: "compute.balance_entry", kind, amount_usd, available_delta_usd, held_delta_usd, available_after_usd, held_after_usd, job_id, ref, created_at, detail }`. `amount_usd` is what a `settle` took out of held (negative), and for every other kind the change in available. `ref` is `{ type: "job" \| "topup", id }` or `null`: a hold's id is replaced by its job, and an operator adjustment's audit id and reason are never returned. `detail` holds only `sku`. Built (A7d) |
 | `GET /keys` | — | `[{ id, name, display, scopes, created_at, expires_at, last_used_at, revoked_at, monthly_cap_usd, spent_this_month_usd }]`, a bare array, newest first, revoked and expired keys included. Built (A5) |
 | `POST /keys` | `{ name, scopes, expires_at?, monthly_cap_usd? }` | `201 { …key, secret: "uck_…" }`; the secret is never returned again. Needs reauth after 10 min (`401 reauth_required`, checked before the body). Emails "key created". Built (A5) |
@@ -459,13 +531,14 @@ after the response, so neither the status nor the time depends on it.
 | `POST /stripe/webhook` | Stripe event | Not for the pages: see [Stripe webhook](#stripe-webhook-post-dashboardv1stripewebhook). Built (B1) |
 | `GET /usage/jobs?month=|from=&to=&sku=&key=&after=&limit=` | — | The per-job view of the same settles: `{ object: "list", data: [{ object: "compute.job_usage", job_id, sku, status, key: { id, name, display }, started_at, finished_at, settled_at, gpu_seconds, usd }], has_more, next? }`, newest settle first, keyset on `(settled_at, job_id)`, `limit` 1–100 (default 20). `sku` and `key` (an API key id) filter; the page's `usd` values sum to `/usage`'s `gpu_usd` when unfiltered. Errors: `invalid_month`, `invalid_key`, `invalid_limit`, `invalid_cursor`. The console's per-request log, at the job grain |
 | `GET /usage/export?month=|from=&to=` | — | The same rows as `/usage/jobs`, unfiltered, as a CSV attachment named `unify-compute-usage-<from>-<to>.csv` with FOCUS 1.0 column names (`BillingAccountId`, `BillingPeriodStart/End`, `ChargePeriodStart/End`, `ChargeCategory`, `ServiceName`, `ResourceId`, `SkuId`, `ConsumedQuantity`, `ConsumedUnit`, `BilledCost`, `EffectiveCost`, …) plus `x_ApiKeyId`, `x_ApiKeyName`, `x_JobStatus`. At most 10 000 rows. Product-design C10 |
-| `PATCH /account` | `{ name }` | `200 { account }`; owner or admin |
-| `GET /members` | — | `[{ user_id, email, role, status, created_at, last_login_at }]`, oldest first; any role may read |
-| `GET /members/invitations` | — | `[{ id, email, role, invited_by_email, created_at, expires_at }]`, live invitations only; owner or admin |
-| `POST /members/invitations` | `{ email, role }` | `201 { id, email, role, expires_at }`; owner or admin; `role` is `admin` or `member`. Needs reauth after 10 min. Emails the invitation. An address that is already a member is `409 already_member`; the 21st member (live invitations counted) is `403 member_limit_reached` |
-| `DELETE /members/invitations/{id}` | — | `204`; owner or admin |
-| `PATCH /members/{user_id}` | `{ role }` | `200`; owner only. Demoting the last `owner` is `409 last_owner`. Needs reauth after 10 min |
-| `DELETE /members/{user_id}` | — | `204`; owner removes anyone, admin removes members, anyone removes themself. Removing the last `owner` is `409 last_owner`. The user's sessions end and the user is `closed` with its address tombstoned; keys it created stay, because they belong to the account. Emails the removed address. Needs reauth after 10 min |
+| `PATCH /account` | `{ name }` | `200 { account }`; owner or admin; needs reauth after 10 min; `400 invalid_name` for 0 or over 64 characters, a control, format or angle-bracket character. Built (A5b) |
+| `GET /members` | — | `[{ user_id, email, role, status, created_at, last_login_at }]`, oldest first, closed users left out; any role may read. Built (A5b) |
+| `GET /members/invitations` | — | `[{ id, email, role, status, invited_by_email, created_at, expires_at }]`, newest first: invitations not accepted, withdrawn or superseded, live (`status: pending`) or expired within the last 30 days (`status: expired`, kept so the page can offer "Send again"); owner or admin. Built (A5b) |
+| `POST /members/invitations` | `{ email, role }` | `201 { id, email, role, expires_at }`; owner or admin; `role` is `admin` or `member`. Needs reauth after 10 min. Emails the invitation. An address that is already a member is `409 already_member`; the 21st member (live invitations counted; the account's `member_limit`, 20 by default) is `403 member_limit_reached`. An admin may invite only `member` (`403 role_required`). A new invitation for an address supersedes its open one. 20 invitations, resends included, per account per 24 h. The email is sent before the answer: if SES refuses it the invitation is kept and the answer is `503 email_unavailable`. Built (A5b) |
+| `POST /members/invitations/{id}/resend` | — | `201 { …invitation }` with a new id: "Send again". The open invitation, live or expired, is superseded and a new one for the same address and role, with a new link valid 7 days, is emailed. Same roles, reauth, cap and throttle as inviting. Built (A5b) |
+| `DELETE /members/invitations/{id}` | — | `204`; owner or admin (an admin withdraws member invitations only); live or expired. No reauth. Built (A5b) |
+| `PATCH /members/{user_id}` | `{ role }` | `200`; owner only. Demoting the last active `owner` is `409 last_owner`. Needs reauth after 10 min. Built (A5b) |
+| `DELETE /members/{user_id}` | — | `204`; owner removes anyone, admin removes members, anyone removes themself. Removing the last `owner` is `409 last_owner`. The user's sessions end and the user is `closed` with its address tombstoned; keys it created stay, because they belong to the account. Emails the removed address. Needs reauth after 10 min. Built (A5b) |
 | `GET /listings` | — | `{ object: "list", data: [listing…], open }`: the account's marketplace listings (`marketplace.md` M2), oldest first |
 | `POST /listings` | `{ template }` (one templates.json entry) | `201` pending listing; needs `compute_enabled`; `400 invalid_listing` / `listing_id_taken`, `409 listing_exists`; 20 writes an hour per account |
 | `PATCH /listings/{id}` | `{ template }` | `200`; relisted and pending again; `400 listing_id_fixed` if the id changes |
@@ -512,8 +585,10 @@ Rules:
 - Signing up creates an account with its first `owner`. There is always at
   least one `owner`; the last one cannot be demoted or removed (`409
   last_owner`). Ownership changes hands by promoting another member first.
-- A member cap of 20 per account (live invitations included), raised by the
-  operator on request like the top-up limits (`admin account limits`).
+- A member cap of 20 per account (live invitations included), stored as
+  `accounts.member_limit` and raised by the operator on request like the
+  top-up limits. `admin account limits` is not built for either yet; until
+  it is, the operator raises it in SQL with an audit row by hand.
 - An email belongs to at most one user, and a user to exactly one account.
   Membership in several accounts, and organisations above accounts, are not
   planned; a person who needs two tenants uses two addresses.
@@ -526,6 +601,16 @@ Rules:
 - Job API keys carry no user identity: the job's owner is `account:<id>`
   and `created_by` on the key is for the dashboard's key list and the audit
   log. Per-user attribution of spend is not in scope.
+
+Built in A5b (migration `0013_members.sql`, `internal/accounts/members.go`,
+`internal/dashboard/members.go`, pages `/members` and `/accept-invitation`).
+The role checks on existing routes: `POST /topups` and `PATCH /balance` (the
+low-balance threshold) are owner or admin, and a
+member's `DELETE /keys/{id}` succeeds only for keys it created (`403
+role_required` otherwise). The last-owner rule counts active owners. Two
+choices beyond the text above: an admin invites, sends again and withdraws
+`member` invitations only, and `GET /keys` does not say who created a key,
+so the keys page still offers Revoke to a member and the server refuses it.
 
 ## Job API changes (`/compute/v1`)
 
@@ -587,15 +672,20 @@ PaymentIntent and its charge) carries `metadata.product = unify-compute`,
    - `checkout.session.expired`: `open` → `expired`.
    - `checkout.session.async_payment_failed`: `open` → `failed`.
    - `charge.refunded`, `charge.dispute.created`, `charge.dispute.closed`
-     on a top-up: stored as `recorded` and logged as an error for the
-     operator. Applying them is B2.
+     on a top-up: applied as [Top-up](#top-up) describes, with outcomes
+     `refunded`, `disputed`, `dispute_won`, `dispute_lost`, `no_change`
+     (already applied), or `recorded` (could not be applied; logged as an
+     error).
 5. Commit, then look up the PaymentIntent with `latest_charge` expanded and
    store the charge id and `receipt_url` (outside the transaction; a failure
    leaves the top-up credited without a receipt link). Then the "Top-up
    received" email goes to the account's owners, once per top-up
    (`notifications.md`, "Sent once"), with the receipt link if the lookup
    found one. Both run in the background after the response; neither can
-   undo the credit or change the webhook's answer. Built (W2).
+   undo the credit or change the webhook's answer. Built (W2). After a refund or
+   dispute: carry out the recorded job cancels, then send the event's queued
+   emails (`payment_emails`; also on a duplicate delivery, which retries any
+   that failed).
 
 The response body is `{ received: true, outcome }`, so Stripe's delivery log
 says what happened. A `5xx` from us makes Stripe retry for up to 3 days,
@@ -614,7 +704,7 @@ admin account enable-compute|disable-compute <id> --reason …
 admin account suspend|reinstate <id> --reason …
 admin account limits <id> [--topup-max-usd N] [--balance-max-usd N] [--topups-per-day N] --reason …
 admin balance credit|debit <id> --usd 12.50 --reason …      # admin_credit / admin_debit entries
-admin topup refund <tu_…> [--usd N] --reason …               # Stripe refund + refund entry
+admin topup refund <tu_…> [--usd N] --reason …               # Stripe refund; the webhook writes the refund entry
 admin audit [--account <id>]                                  # checks the balance invariant
 ```
 
@@ -628,8 +718,50 @@ after the change commits; a failed email is reported and does not undo it.
 Built (A6): `account show|enable-compute|disable-compute|suspend|reinstate`,
 `balance show|credit|debit`, `audit`. Not yet: `account limits` (the per-
 account top-up columns exist and are read; until the verb exists the
-operator changes them with SQL and an audit row) and `topup refund` (B2). Suspending does not stop running jobs yet (B2).
+operator changes them with SQL and an audit row). `topup refund` (B2) is built: it creates the refund at Stripe (`--amount` is accepted
+for `--usd`; without either, everything left on the top-up), writes a
+`refund` audit row with `stage: requested`, and changes no balance. An
+operator's `account suspend` still does not stop running jobs; only a
+dispute cancels them.
 The CLI never migrates; the service does at boot.
+
+## Low-balance warning
+
+Built (W6). Each account has a threshold, `low_balance_quota`, default USD 5
+and set on the Billing page (`PATCH /balance`); `0` turns the warning off.
+
+- **Banner.** Every signed-in page shows a warning box first in its content
+  while `available_usd` is below `low_balance_usd`, with a "Top up" link to
+  `/billing` (on Billing itself, a line pointing at "Add credit"). It reads
+  `GET /balance`, so it appears and goes away with the balance, whatever
+  the email has done.
+- **Email.** One to the account's active owners each time `available`
+  crosses the threshold downward. The local biller decides it in the
+  transaction that moves the balance, under the account lock: the account
+  must be *armed* and the movement must leave `available` below the
+  threshold. It then disarms the account and, after the commit, hands the
+  crossing to `billing.LowBalanceMailer`, which sends through `notify` with
+  subject `balance` and the crossing's balance entry id as `subject_id`
+  (`notifications.md`, "Sent once"). The send runs in the background; a mail
+  failure never fails the hold or extend.
+- **Re-arming.** A credit (`topup`, `admin_credit`, `dispute_reversal`) that leaves `available`
+  at or above the threshold arms the account again. A hold released or
+  expired at a job's end does not: holds take `available` down at every
+  submit and give the unused part back at every end, and re-arming there
+  would mail an account near its threshold once per job. Changing the
+  threshold sets armed to `available >= new value`, so raising it over the
+  balance sends nothing at that moment (the banner shows) and waits for the
+  next top-up.
+- **What crosses.** Holds and extends, the movements that take `available`
+  down in the biller's own transactions. A settle moves held, not
+  `available`. An operator debit (`admin_debit`) runs in the admin CLI's
+  transaction, so it is not reported and leaves the account armed: the next
+  hold or extend below the threshold sends the email. A Stripe refund or
+  dispute (`ReverseTx`, in the webhook's transaction) behaves the same way:
+  the refund and suspension emails already tell the owner, and the
+  low-balance email follows on the next hold or extend.
+- **Not built.** Console accounts get nothing (no addresses here). The
+  threshold is in USD only, per account, not per member.
 
 ## Emails
 
@@ -647,21 +779,22 @@ something the subject does not say.
 | Password changed | change or reset | none (no CTA; safety line says what to do) | `Your Unify Compute password was changed` |
 | API key created | `POST /keys` | CTA "Review keys" | `A new Unify Compute API key was created` |
 | Top-up received | webhook credits | CTA "View receipt" (Stripe `receipt_url`), or "View billing" (`/billing`) when the receipt lookup failed; details: amount, new balance, top-up id, paid. Built (W2) | `Unify Compute: USD 20.00 added to your balance` |
-| Refund issued | admin refund | CTA "View balance" | `Unify Compute: refund of USD 20.00 issued` |
-| Account suspended | dispute or admin | CTA "Contact us" (mailto `contactus@felixsphere.com`, per UI-STANDARD) | `Your Unify Compute account is suspended` |
+| Low balance | `available` crosses below `low_balance_quota` (see [Low-balance warning](#low-balance-warning)) | CTA "Top up" (`/billing`); details: available balance, held by running jobs, alert below. Built (W6) | `Unify Compute: your balance is below USD 5.00` |
+| Refund issued | `charge.refunded` applied (from the CLI or the Stripe dashboard); states the refund policy | CTA "View balance" (`/billing`) | `Unify Compute: refund of USD 20.00 issued` |
+| Account suspended | a dispute that suspends the account (not sent for an admin suspension yet) | CTA "Contact us" (mailto `contactus@felixsphere.com`, per UI-STANDARD) | `Your Unify Compute account is suspended` |
 | Compute enabled | admin `enable-compute` | CTA "Create an API key" | `Your Unify Compute account can now run jobs` |
 | Invitation | `POST /members/invitations` | CTA "Accept invitation" (link with token in the fragment); details: account name, inviter, role | `<inviter> invited you to <account> on Unify Compute` |
 | Invitation accepted | `POST /invitations/accept` (to the inviter) | CTA "View members" | `<email> joined <account> on Unify Compute` |
 | Removed from account | `DELETE /members/{id}` (to the removed address) | none (safety line names the account and who to contact) | `You were removed from <account> on Unify Compute` |
 | Job finished / failed / billing stopped | as `notifications.md` | as `notifications.md` | as `notifications.md`; the safety lines' "Unify API console" becomes the Unify Compute dashboard. Built (W2) |
 | Storage arrears started / artifacts deletion scheduled / deleted | ADR-0008 | CTA "Top up" | `Unify Compute: storage unpaid, artifacts deleted on <date>` (and variants) |
-| Operator: top-up review request, dispute opened | limit refusal is not emailed; disputes are | — (plain operator notice to the operator address) | `[Unify Compute ops] dispute opened on tu_…` |
+| Operator: dispute opened, dispute won/lost, refund left a balance negative | B2 webhook; limit refusals are not emailed | — (plain operator notice to `OPERATOR_EMAIL`) | `[Unify Compute ops] dispute opened on tu_…` |
 
 The links open these dashboard pages on `APP_ORIGIN`: `/login`,
 `/forgot-password`, `/reset-password#token=…`, `/keys`, `/members` and
 `/accept-invitation#token=…`
 (`compute-api/internal/mailer/messages.go`), and `/jobs/{id}` and `/billing`
-(`messages_jobs.go`). A7b and A7c build the pages at those paths or change
+(`messages_jobs.go`, `messages_balance.go`). A7b and A7c build the pages at those paths or change
 them there.
 
 `{{footer_reason}}` for account messages: "You're receiving this because
@@ -686,6 +819,7 @@ line.
 | `MAIL_OUTBOX_DIR` | Only with `ENVIRONMENT=development` and no `SES_SENDER`: where messages are written as `.eml` files instead of sent (default `outbox`) |
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET` | Cloudflare; test keys in development |
 | `STRIPE_SECRET_KEY` | Compute's own restricted key on the shared Stripe account: `rk_test_…` with any `ENVIRONMENT` but `production`, `rk_live_…` only with `ENVIRONMENT=production` (and only after O5/O6). B1 needs Checkout Sessions write, Customers write, PaymentIntents read and Charges read (the receipt lookup expands `latest_charge`); B2 adds Refunds write and Disputes read. A key in the wrong environment, a malformed one, or one without its webhook secret is logged as an error and top-ups answer `503 topups_unavailable`; compute-api still boots |
+| `OPERATOR_EMAIL` | Where operator notices go (disputes, a refund that leaves a negative balance). Unset: `contactus@felixsphere.com` |
 | `STRIPE_WEBHOOK_SECRET` | `whsec_…` of compute's own endpoint (`https://<app host>/dashboard/v1/stripe/webhook`), never Unify API's |
 
 Secrets come from SSM under the stack's prefix, like the existing ones
@@ -708,8 +842,10 @@ Two known gaps, left for the legal review before the first live top-up
 
 1. **Refunds.** The document is a generic template whose refund clause is
    written for physical goods (returns, shipping), not for prepaid compute
-   credit that is spent per second. Refunds of unused balance, including at
-   account close, are not covered.
+   credit that is spent per second. The operator decided the policy on
+   2026-10-14 (unused prepaid balance can be refunded on request; compute
+   already used is not), and the refund email states it; the terms and the
+   email's wording still need the legal review.
 2. **Acceptable use.** It has no acceptable-use policy: nothing forbids
    cryptocurrency mining, abuse of GPUs, or the other uses the upstream GPU
    providers' own terms require us to prohibit and enforce.

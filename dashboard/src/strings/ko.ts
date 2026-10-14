@@ -453,6 +453,7 @@ const c: Record<string, string> = {
   'verify.resend-code': '코드 다시 보내기',
   'verify.title': '이메일을 확인하세요',
   'verify.verify-email': '이메일 인증',
+  'nav.members': '구성원',
 };
 
 export default c;

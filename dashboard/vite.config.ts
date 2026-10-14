@@ -47,8 +47,8 @@ const CLOSE = `<svg class="icon-close" ${ICON_ATTRS}><path d="M18 6 6 18"/><path
 const HELP = `<svg ${ICON_ATTRS}><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>`;
 
 // The signed-in pages, in sidebar order. `path` is what the browser shows;
-// /keys is also where the mailer's "Review keys" link points
-// (compute-api/internal/mailer/messages.go).
+// /keys and /members are also where the mailer's "Review keys" and "View
+// members" links point (compute-api/internal/mailer/).
 const NAV: { id: string; path: string; label: string; key: string }[] = [
   { id: 'overview', path: '/', label: 'Overview', key: 'nav.overview' },
   { id: 'jobs', path: '/jobs', label: 'Jobs', key: 'nav.jobs' },
@@ -57,6 +57,7 @@ const NAV: { id: string; path: string; label: string; key: string }[] = [
   { id: 'keys', path: '/keys', label: 'API keys', key: 'nav.keys' },
   { id: 'usage', path: '/usage', label: 'Usage', key: 'nav.usage' },
   { id: 'billing', path: '/billing', label: 'Billing', key: 'nav.billing' },
+  { id: 'members', path: '/members', label: 'Members', key: 'nav.members' },
   { id: 'account', path: '/account', label: 'Account', key: 'nav.account' },
 ];
 // lucide LogOut (ISC), beside the "Log out" label in the header.

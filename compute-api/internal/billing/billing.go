@@ -72,6 +72,9 @@ func refuse(status int, code string) error { return &console.Error{Status: statu
 type Local struct {
 	db  *pgxpool.Pool
 	now func() time.Time
+	// lowBalance is told of each downward crossing after its transaction
+	// commits (lowbalance.go); nil drops them.
+	lowBalance func(LowBalanceCrossing)
 }
 
 func New(db *pgxpool.Pool, now func() time.Time) *Local {
@@ -87,11 +90,16 @@ func (l *Local) unix() time.Time { return time.Unix(l.now().Unix(), 0) }
 
 type account struct {
 	id, available, held int64
+	// The low-balance warning's threshold and whether the next drop below it
+	// is emailed (migration 0014).
+	lowBalance int64
+	armed      bool
 }
 
 func lockAccount(ctx context.Context, tx pgx.Tx, id int64) (*account, error) {
 	a := &account{id: id}
-	err := tx.QueryRow(ctx, `SELECT available, held FROM accounts WHERE id = $1 FOR UPDATE`, id).Scan(&a.available, &a.held)
+	err := tx.QueryRow(ctx, `SELECT available, held, low_balance_quota, low_balance_armed FROM accounts WHERE id = $1 FOR UPDATE`, id).
+		Scan(&a.available, &a.held, &a.lowBalance, &a.armed)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrUnknownAccount
 	}
@@ -116,16 +124,23 @@ func (l *Local) move(ctx context.Context, tx pgx.Tx, a *account, e entry) error 
 	if e.detail == nil {
 		detail = []byte(`{}`)
 	}
-	if _, err := tx.Exec(ctx, `UPDATE accounts SET available = $2, held = $3 WHERE id = $1`, a.id, a.available, a.held); err != nil {
+	id := store.NewID("be_", l.now())
+	crossed := l.lowBalanceStep(tx, a, e)
+	if _, err := tx.Exec(ctx, `UPDATE accounts SET available = $2, held = $3, low_balance_armed = $4 WHERE id = $1`,
+		a.id, a.available, a.held, a.armed); err != nil {
 		return fmt.Errorf("billing: update balance: %w", err)
 	}
 	_, err = tx.Exec(ctx, `
 		INSERT INTO balance_entries (id, account_id, kind, available_delta, held_delta, available_after, held_after,
 			ref_type, ref_id, idempotency_key, detail)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-		store.NewID("be_", l.now()), a.id, e.kind, e.available, e.held, a.available, a.held, e.refType, e.refID, e.idemp, detail)
+		id, a.id, e.kind, e.available, e.held, a.available, a.held, e.refType, e.refID, e.idemp, detail)
 	if err != nil {
 		return fmt.Errorf("billing: balance entry: %w", err)
+	}
+	if crossed != nil {
+		crossed.out = append(crossed.out, LowBalanceCrossing{AccountID: a.id, EntryID: id,
+			Available: a.available, Held: a.held, Threshold: a.lowBalance})
 	}
 	return nil
 }
@@ -231,10 +246,15 @@ func active(h *holdRow) error {
 // expired on the way stay expired and their remainder stays returned, as
 // with the console's sweep. Rolling that back would leave the balance short
 // until the next call or sweep.
+//
+// Low-balance crossings the transaction recorded are reported only after it
+// commits, so an email never announces a movement that was rolled back.
 func (l *Local) tx(ctx context.Context, fn func(pgx.Tx) error) error {
 	var refusal error
+	var ct *crossingTx
 	err := pgx.BeginFunc(ctx, l.db, func(tx pgx.Tx) error {
-		err := fn(tx)
+		ct = &crossingTx{Tx: tx}
+		err := fn(ct)
 		var ce *console.Error
 		if errors.As(err, &ce) {
 			refusal = err
@@ -245,6 +265,7 @@ func (l *Local) tx(ctx context.Context, fn func(pgx.Tx) error) error {
 	if err != nil {
 		return err
 	}
+	l.reportCrossings(ct.out)
 	return refusal
 }
 
