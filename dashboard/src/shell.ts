@@ -200,21 +200,33 @@ export function wireMenus() {
   };
   menu.addEventListener('click', () => setMenu(menu.getAttribute('aria-expanded') !== 'true'));
 
-  const account = $<HTMLButtonElement>('account-button')!;
-  const panel = $('account-panel')!;
-  const setAccount = (open: boolean) => {
-    account.setAttribute('aria-expanded', String(open));
-    panel.hidden = !open;
+  // The Help and account buttons each open a panel under the header; one
+  // at a time, closed by a click elsewhere or Escape.
+  const dropdowns = (['help', 'account'] as const).map((name) => ({
+    button: $<HTMLButtonElement>(`${name}-button`)!,
+    panel: $(`${name}-panel`)!,
+  }));
+  const setOpen = (d: (typeof dropdowns)[number], open: boolean) => {
+    d.button.setAttribute('aria-expanded', String(open));
+    d.panel.hidden = !open;
   };
-  account.addEventListener('click', () => setAccount(account.getAttribute('aria-expanded') !== 'true'));
+  for (const d of dropdowns) {
+    d.button.addEventListener('click', () => {
+      const open = d.button.getAttribute('aria-expanded') !== 'true';
+      for (const other of dropdowns) if (other !== d) setOpen(other, false);
+      setOpen(d, open);
+    });
+  }
   document.addEventListener('click', (e) => {
-    if (!panel.hidden && !(e.target as Element).closest('.account-menu')) setAccount(false);
+    const inside = (e.target as Element).closest('.header-menu');
+    for (const d of dropdowns) if (!d.panel.hidden && !inside?.contains(d.panel)) setOpen(d, false);
   });
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
-    if (!panel.hidden) {
-      setAccount(false);
-      account.focus();
+    const open = dropdowns.find((d) => !d.panel.hidden);
+    if (open) {
+      setOpen(open, false);
+      open.button.focus();
     } else if (menu.getAttribute('aria-expanded') === 'true') {
       setMenu(false);
       menu.focus();

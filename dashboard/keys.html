@@ -35,6 +35,12 @@
             <p class="hint" id="key-cap-hint">The most this key may spend or hold per calendar month. A job that would go past it is refused; other keys are unaffected.</p>
             <p class="field-error" id="key-cap-error" hidden></p>
           </div>
+          <div class="field">
+            <label for="key-expires">Expires (optional)</label>
+            <input id="key-expires" name="expires_at" type="date" autocomplete="off" aria-describedby="key-expires-hint key-expires-error" />
+            <p class="hint" id="key-expires-hint">The key stops working at the end of this day, your local time. Leave it empty for a key that doesn't expire.</p>
+            <p class="field-error" id="key-expires-error" hidden></p>
+          </div>
           <fieldset class="field">
             <legend>Access</legend>
             <label class="check"><input type="radio" name="scope" value="jobs" checked /> Submit, cancel and read jobs</label>

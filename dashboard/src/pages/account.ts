@@ -1,5 +1,5 @@
 import { $, busy, checkConfirm, checkNewPassword, focusFirstInvalid, input, onSubmit, setFieldError, showApiError, wireConfirm } from '../lib';
-import { fill, logout, mono, send, setText, shell } from '../shell';
+import { fill, get, logout, mono, notBuilt, send, setText, shell } from '../shell';
 
 export async function account() {
   const me = await shell();
@@ -14,6 +14,32 @@ export async function account() {
   );
   const out = $<HTMLButtonElement>('logout-main')!;
   out.addEventListener('click', () => void logout(out));
+
+  // Copy from Unify Data's profile page ("Other sessions").
+  const end = $<HTMLButtonElement>('sessions-end')!;
+  const sessionsStatus = $('sessions-status')!;
+  async function loadSessions() {
+    const r = await get<{ other_sessions: number }>('/sessions');
+    if (!r.ok) {
+      setText('sessions-count', notBuilt(r.error) ? 'Other sessions will be listed here once this is live.' : r.error.message);
+      end.hidden = true;
+      return;
+    }
+    const n = r.data.other_sessions;
+    setText('sessions-count', n === 0 ? 'This is your only active session.' : `Active sessions on other devices or browsers: ${n}.`);
+    end.hidden = n === 0;
+  }
+  end.addEventListener('click', async () => {
+    sessionsStatus.textContent = '';
+    end.disabled = true;
+    const r = await send<{ ended: number }>('POST', '/sessions/end-others');
+    end.disabled = false;
+    if (!r.ok) return showApiError(r.error);
+    await loadSessions();
+    sessionsStatus.textContent = 'Signed out of every other session.';
+    $('sessions-title')?.focus();
+  });
+  void loadSessions();
 
   const form = $<HTMLFormElement>('form')!;
   const status = $('password-status')!;
@@ -34,5 +60,6 @@ export async function account() {
     if (!r.ok) return showApiError(r.error);
     form.reset();
     status.textContent = 'Password changed. Every other session has been logged out.';
+    void loadSessions();
   });
 }
