@@ -1304,3 +1304,102 @@ a.ghost {
   color: var(--u-text-2);
   white-space: normal;
 }
+
+/* Overview: the getting-started checklist and the two cards under the
+   balance. Status colours only on the step marks, which are status. */
+.progress {
+  margin: 0;
+  font-family: var(--u-font-mono);
+  font-size: var(--u-text-xs);
+  color: var(--u-text-muted);
+  white-space: nowrap;
+}
+
+.steps {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.step {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  gap: 4px 16px;
+  align-items: start;
+  padding: 16px 0;
+  border-top: var(--u-rule);
+}
+
+.step:last-child {
+  padding-bottom: 0;
+}
+
+.step-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--u-border);
+  border-radius: var(--u-radius-pill);
+  font-family: var(--u-font-mono);
+  font-size: var(--u-text-xs);
+  color: var(--u-text-2);
+}
+
+.step.done .step-mark {
+  border-color: var(--u-success);
+  background: var(--u-success);
+  color: var(--u-surface);
+}
+
+.step-title {
+  margin: 0 0 2px;
+  font-weight: 600;
+}
+
+.step.done .step-title {
+  color: var(--u-text-2);
+}
+
+.step-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding-top: 2px;
+  font-size: var(--u-text-sm);
+  white-space: nowrap;
+}
+
+.stat {
+  margin: 0 0 8px;
+  font-family: var(--u-font-display);
+  font-weight: 700;
+  font-size: var(--u-h2);
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.running-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin: 0 0 12px;
+  font-size: var(--u-text-sm);
+}
+
+.running-head + .facts + .muted {
+  margin-top: 12px;
+}
+
+@media (max-width: 580px) {
+  .step {
+    grid-template-columns: 24px minmax(0, 1fr);
+  }
+
+  .step-actions {
+    grid-column: 2;
+  }
+}
