@@ -64,10 +64,10 @@ check /start/ 308 "Location: /start"
 check /marketplace 200 "Content-Type: text/html" "Cache-Control: no-cache" "${common[@]}"
 grep -q '<title>Marketplace — Unify Compute</title>' "$tmp/body" \
   || { echo "FAIL /marketplace: title missing"; fail=1; }
-for id in $(sed -n 's/^      "id": "\([a-z0-9-]*\)",$/\1/p' "$(dirname "$0")/../../compute-api/config/templates.json"); do
+while read -r id; do
   grep -q "href=\"/marketplace/$id\"" "$tmp/body" \
     || { echo "FAIL /marketplace: no card for template $id"; fail=1; }
-done
+done < <(sed -n 's/^      "id": "\([a-z0-9-]*\)",$/\1/p' "$(dirname "$0")/../../compute-api/config/templates.json")
 check /marketplace/ 308 "Location: /marketplace"
 check /marketplace/batch-embed 200 "Content-Type: text/html" "Cache-Control: no-cache" "${common[@]}"
 grep -q '<title>Batch embeddings with vLLM — Unify Compute Marketplace</title>' "$tmp/body" \
