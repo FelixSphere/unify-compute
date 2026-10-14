@@ -9,18 +9,16 @@
   <body class="app" data-page="keys">
     <!-- @shell:keys -->
     <main class="content" id="main" tabindex="-1">
-      <h1 class="sr-only">API keys</h1>
       <!-- @form-error -->
-      <section class="focal" aria-labelledby="focal-label">
+      <div class="page-head">
         <div>
-          <p class="eyebrow" id="focal-label">Active API keys</p>
-          <p class="metric" id="keys-count" aria-live="polite">—</p>
-          <p class="sub">Up to 10 at a time. Each key submits and reads jobs on this account's balance.</p>
+          <h1>API keys</h1>
+          <p class="page-desc">A key submits and reads jobs on this account's balance. Up to 10 active at a time; the secret is shown once, when the key is created.</p>
         </div>
         <button class="primary" type="button" id="create-open">Create key</button>
-      </section>
+      </div>
 
-      <section class="card" id="create" aria-labelledby="create-title" hidden>
+      <section class="card narrow" id="create" aria-labelledby="create-title" hidden>
         <h2 id="create-title" tabindex="-1">Create an API key</h2>
         <form id="create-form" novalidate>
           <div class="field">
@@ -29,17 +27,19 @@
             <p class="hint" id="key-name-hint">So you can tell keys apart, e.g. "nightly pipeline".</p>
             <p class="field-error" id="key-name-error" hidden></p>
           </div>
-          <div class="field">
-            <label for="key-cap">Monthly cap (USD, optional)</label>
-            <input id="key-cap" name="monthly_cap_usd" type="text" inputmode="decimal" autocomplete="off" placeholder="No cap" aria-describedby="key-cap-hint key-cap-error" />
-            <p class="hint" id="key-cap-hint">The most this key may spend or hold per calendar month. A job that would go past it is refused; other keys are unaffected.</p>
-            <p class="field-error" id="key-cap-error" hidden></p>
-          </div>
-          <div class="field">
-            <label for="key-expires">Expires (optional)</label>
-            <input id="key-expires" name="expires_at" type="date" autocomplete="off" aria-describedby="key-expires-hint key-expires-error" />
-            <p class="hint" id="key-expires-hint">The key stops working at the end of this day, your local time. Leave it empty for a key that doesn't expire.</p>
-            <p class="field-error" id="key-expires-error" hidden></p>
+          <div class="field-row">
+            <div class="field">
+              <label for="key-cap">Monthly cap (USD, optional)</label>
+              <input id="key-cap" name="monthly_cap_usd" type="text" inputmode="decimal" autocomplete="off" placeholder="No cap" aria-describedby="key-cap-hint key-cap-error" />
+              <p class="hint" id="key-cap-hint">The most this key may spend or hold per calendar month.</p>
+              <p class="field-error" id="key-cap-error" hidden></p>
+            </div>
+            <div class="field">
+              <label for="key-expires">Expires (optional)</label>
+              <input id="key-expires" name="expires_at" type="date" autocomplete="off" aria-describedby="key-expires-hint key-expires-error" />
+              <p class="hint" id="key-expires-hint">Stops working at the end of that day, your local time.</p>
+              <p class="field-error" id="key-expires-error" hidden></p>
+            </div>
           </div>
           <fieldset class="field">
             <legend>Access</legend>
@@ -53,7 +53,7 @@
         </form>
       </section>
 
-      <section class="card reveal" id="reveal" aria-labelledby="reveal-title" hidden>
+      <section class="card narrow reveal" id="reveal" aria-labelledby="reveal-title" hidden>
         <h2 id="reveal-title" tabindex="-1">Copy your new key</h2>
         <p class="warning" id="reveal-warning">This is the only time the full key is shown. Store it somewhere safe now: if you lose it, revoke it and create another.</p>
         <div class="secret">
@@ -65,7 +65,10 @@
       </section>
 
       <section class="section" aria-labelledby="list-title">
-        <h2 id="list-title">Keys</h2>
+        <div class="section-head">
+          <h2 id="list-title">Keys</h2>
+          <p class="muted" id="keys-count" aria-live="polite"></p>
+        </div>
         <div id="keys-list" aria-live="polite"><p class="muted">Loading keys…</p></div>
       </section>
 

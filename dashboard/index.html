@@ -9,15 +9,30 @@
   <body class="app" data-page="overview">
     <!-- @shell:overview -->
     <main class="content" id="main" tabindex="-1">
-      <h1 class="sr-only">Overview</h1>
       <!-- @form-error -->
-      <section class="focal" aria-labelledby="focal-label">
+      <div class="page-head">
         <div>
-          <p class="eyebrow" id="focal-label">Available balance · USD</p>
-          <p class="metric" id="balance-available" aria-live="polite">—</p>
-          <p class="sub" id="balance-sub">Loading your balance…</p>
+          <h1>Overview</h1>
+          <p class="page-desc">Your balance, this month's spend and what is running right now.</p>
         </div>
-      </section>
+      </div>
+
+      <div class="stats">
+        <section class="card stat-card hero" aria-labelledby="focal-label">
+          <p class="eyebrow" id="focal-label">Available balance · USD</p>
+          <p class="stat-value" id="balance-available" aria-live="polite">—</p>
+          <p class="muted" id="balance-sub">Loading your balance…</p>
+        </section>
+        <section class="card stat-card" aria-labelledby="spend-label">
+          <p class="eyebrow" id="spend-label">Spent this month · USD</p>
+          <p class="stat-value" id="spend-total" aria-live="polite">—</p>
+          <p class="muted" id="spend-sub">Loading this month's usage…</p>
+        </section>
+        <section class="card stat-card" aria-labelledby="running-label">
+          <p class="eyebrow" id="running-label">Running now</p>
+          <div id="running" aria-live="polite"><p class="muted">Loading jobs…</p></div>
+        </section>
+      </div>
 
       <section class="card" id="onboarding" aria-labelledby="onboarding-title" hidden>
         <div class="section-head">
@@ -26,18 +41,6 @@
         </div>
         <ol class="steps" id="onboarding-steps"></ol>
       </section>
-
-      <div class="grid">
-        <section class="card" aria-labelledby="spend-label">
-          <p class="eyebrow" id="spend-label">Spent this month · USD</p>
-          <p class="stat" id="spend-total" aria-live="polite">—</p>
-          <p class="muted" id="spend-sub">Loading this month's usage…</p>
-        </section>
-        <section class="card" aria-labelledby="running-label">
-          <p class="eyebrow" id="running-label">Running now</p>
-          <div id="running" aria-live="polite"><p class="muted">Loading jobs…</p></div>
-        </section>
-      </div>
 
       <section class="card" id="access" aria-labelledby="access-title">
         <h2 id="access-title">Compute access</h2>

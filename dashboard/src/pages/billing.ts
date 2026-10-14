@@ -1,5 +1,5 @@
 import { $, busy, clearFieldError, focusFirstInvalid, GENERIC, input, onSubmit, setFieldError, setFormError, showApiError } from '../lib';
-import { cents, type Child, fill, get, h, jobLink, type List, listOf, mono, muted, notBuilt, send, setText, shell, showBalance, state, table, type Tone, when } from '../shell';
+import { cents, type Child, empty, fill, get, h, jobLink, type List, listOf, money, mono, muted, notBuilt, send, setText, shell, showBalance, state, table, type Tone, usd, when } from '../shell';
 
 type Topup = {
   id: string;
@@ -88,9 +88,9 @@ export async function billing() {
         ? table(
             'Balance history',
             [{ text: 'Date' }, { text: 'Entry' }, { text: 'Amount (USD)', num: true }, { text: 'Available after', num: true }, { text: 'Reference' }],
-            rows.map((e) => [when(e.created_at), KIND[e.kind] ?? e.kind, mono(e.amount_usd), mono(e.available_after_usd), refCell(e.ref)]),
+            rows.map((e) => [when(e.created_at), KIND[e.kind] ?? e.kind, money(e.amount_usd), money(e.available_after_usd), refCell(e.ref)]),
           )
-        : muted('Nothing yet.'),
+        : empty('No balance history yet', 'Every credit, hold, charge and release on your account will be listed here.'),
     );
   }
   more.addEventListener('click', () => void load(true));
@@ -121,7 +121,7 @@ export async function billing() {
         [{ text: 'Date' }, { text: 'Amount (USD)', num: true }, { text: 'Status' }, { text: 'Receipt' }],
         list.map((t) => [
           when(t.created_at),
-          mono(t.amount_usd),
+          money(t.amount_usd),
           state(...(TOPUP_STATUS[t.status] ?? [t.status, 'muted'])),
           t.receipt_url && t.receipt_url.startsWith('https://') ? h('a', { href: t.receipt_url, rel: 'noopener noreferrer', target: '_blank' }, 'View receipt') : '—',
         ]),
@@ -179,7 +179,7 @@ export async function billing() {
       const r = await get<Topup>(`/topups/${encodeURIComponent(id)}`);
       if (r.ok && r.data.status !== 'open') {
         status.textContent =
-          r.data.status === 'credited' ? `USD ${r.data.amount_usd} added to your balance.` : 'This payment did not go through. Nothing was charged.';
+          r.data.status === 'credited' ? `USD ${usd(r.data.amount_usd)} added to your balance.` : 'This payment did not go through. Nothing was charged.';
         void showBalance();
         void loadTopups();
         void load(false);

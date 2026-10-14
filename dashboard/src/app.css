@@ -1451,3 +1451,365 @@ a.ghost {
   line-height: 1.5;
   color: var(--u-text-2);
 }
+
+
+/* ------------------------------------------------------------ page composition
+   Every signed-in page opens the same way: the page name as its H1, one line
+   under it, and the page's one primary action at the right. Numbers live in
+   stat cards, not as 64px heroes; UI-STANDARD's focal number is the first
+   stat card. Lists that are empty say so in a block, not a bare sentence. */
+.page-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px 24px;
+  margin-bottom: 24px;
+}
+
+.page-head > div {
+  flex: 1 1 280px;
+  min-width: 0;
+  max-width: 560px;
+}
+
+.page-head h1 {
+  margin: 0 0 6px;
+  font-family: var(--u-font-display);
+  font-weight: 700;
+  font-size: var(--u-h2);
+  line-height: 1.25;
+}
+
+.page-head .crumb {
+  margin: 0 0 6px;
+}
+
+.page-desc {
+  margin: 0;
+  font-size: var(--u-text-sm);
+  line-height: 1.6;
+  color: var(--u-text-2);
+}
+
+.page-head .primary,
+.page-head .ghost,
+.page-head .toolbar {
+  flex: none;
+}
+
+.head-stat {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  font-size: var(--u-text-sm);
+  color: var(--u-text-2);
+}
+
+.head-stat-value {
+  font-family: var(--u-font-display);
+  font-weight: 700;
+  font-size: var(--u-h2);
+  line-height: 1;
+  color: var(--u-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.stats.one {
+  max-width: 420px;
+}
+
+body.app .card.stat-card {
+  margin: 0;
+  padding: 20px 24px 18px;
+}
+
+.stat-card .eyebrow {
+  margin-bottom: 8px;
+}
+
+.stat-value {
+  margin: 0 0 6px;
+  font-family: var(--u-font-display);
+  font-weight: 700;
+  font-size: 32px;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.stat-card.hero .stat-value {
+  font-size: var(--u-h1);
+}
+
+.stat-card .muted {
+  font-size: 13px;
+}
+
+.stat-card .running-head {
+  margin-bottom: 8px;
+}
+
+.stat-card .facts {
+  gap: 6px 16px;
+}
+
+.section-head {
+  margin-bottom: 12px;
+}
+
+.section-head h2 {
+  margin: 0;
+}
+
+.section-head .muted {
+  white-space: nowrap;
+}
+
+.section-head .filters {
+  margin: 0;
+}
+
+/* Native selects and date fields, in the app's own clothes: 36px, one rule,
+   a chevron drawn here so the browser's is never seen. */
+body.app select,
+body.app input[type='date'] {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 36px;
+  padding: 0 12px;
+  font-family: var(--u-font-body);
+  font-size: var(--u-text-sm);
+  color: var(--u-text);
+  background: var(--u-input-bg);
+  border: 1px solid var(--u-btn-ghost-border);
+  border-radius: var(--u-radius);
+}
+
+body.app select {
+  padding-right: 32px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%230E0E0E' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  cursor: pointer;
+}
+
+body.app select:focus-visible,
+body.app input[type='date']:focus-visible {
+  outline: none;
+  border-color: var(--u-input-border-focus);
+  box-shadow: var(--u-focus);
+}
+
+.filters label {
+  white-space: nowrap;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (min-width: 1100px) {
+  .page-head .toolbar {
+    flex-wrap: nowrap;
+  }
+}
+
+.toolbar-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar-group[hidden] {
+  display: none;
+}
+
+.icon-button {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--u-btn-ghost-border);
+  border-radius: var(--u-radius);
+  background: var(--u-surface);
+  color: var(--u-text);
+  cursor: pointer;
+}
+
+.icon-button:hover {
+  background: var(--u-bg);
+}
+
+.icon-button:disabled {
+  color: var(--u-text-muted);
+  background: var(--u-surface);
+  cursor: default;
+}
+
+.ghost.small,
+.secondary.small {
+  height: 36px;
+  padding: 0 14px;
+  font-size: var(--u-text-sm);
+}
+
+.empty {
+  padding: 40px 24px;
+  background: var(--u-surface);
+  border: var(--u-rule);
+  border-radius: var(--u-radius);
+  text-align: center;
+}
+
+.empty h3 {
+  margin: 0 0 6px;
+  font-family: var(--u-font-body);
+  font-size: var(--u-text-md);
+  font-weight: 600;
+}
+
+.empty p {
+  max-width: 52ch;
+  margin: 0 auto;
+  font-size: var(--u-text-sm);
+  line-height: 1.6;
+  color: var(--u-text-2);
+}
+
+.zero {
+  color: var(--u-text-muted);
+}
+
+.cell-stack strong {
+  display: block;
+  font-weight: 500;
+}
+
+.cell-stack .mono {
+  font-size: var(--u-text-xs);
+  color: var(--u-text-muted);
+}
+
+.field-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  gap: 0 20px;
+}
+
+body.app .card.narrow {
+  max-width: 560px;
+}
+
+/* Account: who, then the log-in rows. One card, a rule between rows, each
+   row's action at its right; the password form opens under its row. */
+.profile-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.avatar.large {
+  width: 48px;
+  height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--u-radius-pill);
+  background: var(--u-btn-secondary-bg);
+  color: var(--u-btn-secondary-fg);
+  font-weight: 600;
+  font-size: var(--u-text-lg);
+}
+
+.profile-email {
+  margin: 0 0 2px;
+  font-size: var(--u-text-lg);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+body.app .card.settings {
+  max-width: 640px;
+  padding: 4px 24px 0;
+}
+
+.settings h2 {
+  margin: 0;
+  padding: 16px 0 12px;
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px 24px;
+  padding: 16px 0;
+  border-top: var(--u-rule);
+}
+
+.row > div {
+  min-width: 0;
+}
+
+.row strong {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.row strong:focus {
+  outline: none;
+}
+
+.row .muted {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.row .status-line {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+
+.row .ghost {
+  flex: none;
+}
+
+.row-form {
+  padding: 0 0 20px;
+}
+
+.row-form .field {
+  max-width: 420px;
+}
+
+.row-form .actions {
+  margin-top: 4px;
+}
+
+@media (max-width: 580px) {
+  .row {
+    flex-wrap: wrap;
+  }
+
+  .stat-card.hero .stat-value {
+    font-size: 32px;
+  }
+}

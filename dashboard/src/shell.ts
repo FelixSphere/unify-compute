@@ -155,6 +155,19 @@ export const JOB_STATUS: Record<string, [string, Tone]> = {
 };
 export const jobState = (s: string) => state(...(JOB_STATUS[s] ?? [s, 'muted']));
 
+// Amounts the API returns as strings with up to four decimals; people read
+// dollars and cents. Parsing stays on the raw string (cents()).
+const usdFmt = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+export function usd(s: string | number | null | undefined): string {
+  if (s === null || s === undefined || s === '') return '—';
+  const n = Number(s);
+  return Number.isFinite(n) ? usdFmt.format(n) : String(s);
+}
+export const money = (s: string | number | null | undefined) => h('span', { class: Number(s) === 0 ? 'mono zero' : 'mono' }, usd(s));
+
+// An empty list: a titled block in the card style, never a bare sentence.
+export const empty = (title: string, ...more: Child[]) => h('div', { class: 'empty' }, h('h3', {}, title), more.length ? h('p', {}, ...more) : null);
+
 export const dateFmt = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 export const when = (t: number | null | undefined) => (t ? dateFmt.format(new Date(t * 1000)) : '—');
 
@@ -308,12 +321,12 @@ export async function withReauth<T>(action: () => Promise<Result<T>>): Promise<R
 export async function showBalance(): Promise<Balance | null> {
   const r = await get<Balance>('/balance');
   if (r.ok) {
-    setText('balance-available', r.data.available_usd);
+    setText('balance-available', usd(r.data.available_usd));
     setText(
       'balance-sub',
       /^0(\.0+)?$/.test(r.data.held_usd)
         ? 'Nothing is held for running jobs.'
-        : `USD ${r.data.held_usd} more is held for running jobs and comes back when they finish.`,
+        : `USD ${usd(r.data.held_usd)} more is held for running jobs and comes back when they finish.`,
     );
     return r.data;
   } else if (notBuilt(r.error)) {
@@ -334,7 +347,7 @@ export function jobsTable(label: string, jobs: Job[]) {
       mono(j.sku),
       when(j.created_at),
       mono(duration(j.usage?.gpu_seconds ?? 0)),
-      mono(j.usage?.settled_cost_usd ?? '—'),
+      money(j.usage?.settled_cost_usd),
     ]),
   );
 }

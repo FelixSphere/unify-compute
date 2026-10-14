@@ -1,19 +1,14 @@
 import { $, busy, checkConfirm, checkNewPassword, focusFirstInvalid, input, onSubmit, setFieldError, showApiError, wireConfirm } from '../lib';
-import { fill, get, logout, mono, notBuilt, send, setText, shell } from '../shell';
+import { get, initials, notBuilt, send, setText, shell } from '../shell';
 
 export async function account() {
   const me = await shell();
   if (!me) return;
   setText('me-email', me.user.email);
-  fill(
-    'me-sub',
-    'Account ',
-    mono(String(me.account.id)),
-    ` · since ${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(me.user.created_at * 1000))}`,
-    me.account.status !== 'active' ? ` · ${me.account.status}` : '',
-  );
-  const out = $<HTMLButtonElement>('logout-main')!;
-  out.addEventListener('click', () => void logout(out));
+  setText('me-email-row', me.user.email);
+  setText('me-avatar', initials(me.user.email));
+  const since = new Intl.DateTimeFormat(undefined, { dateStyle: 'long' }).format(new Date(me.user.created_at * 1000));
+  setText('me-sub', `Member since ${since}` + (me.account.status !== 'active' ? ` · account ${me.account.status}` : ''));
 
   // Copy from Unify Data's profile page ("Other sessions").
   const end = $<HTMLButtonElement>('sessions-end')!;
@@ -43,6 +38,23 @@ export async function account() {
 
   const form = $<HTMLFormElement>('form')!;
   const status = $('password-status')!;
+  const wrap = $('password-form-wrap')!;
+  const open = $<HTMLButtonElement>('password-open')!;
+  const setOpen = (on: boolean) => {
+    wrap.hidden = !on;
+    open.setAttribute('aria-expanded', String(on));
+    if (on) input('current_password')?.focus();
+  };
+  open.addEventListener('click', () => {
+    status.textContent = '';
+    form.reset();
+    setOpen(wrap.hidden);
+  });
+  $('password-cancel')!.addEventListener('click', () => {
+    form.reset();
+    setOpen(false);
+    open.focus();
+  });
   wireConfirm();
   onSubmit(form, async () => {
     status.textContent = '';
@@ -59,7 +71,9 @@ export async function account() {
     });
     if (!r.ok) return showApiError(r.error);
     form.reset();
+    setOpen(false);
     status.textContent = 'Password changed. Every other session has been logged out.';
+    open.focus();
     void loadSessions();
   });
 }

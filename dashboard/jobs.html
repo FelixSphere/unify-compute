@@ -9,17 +9,16 @@
   <body class="app" data-page="jobs">
     <!-- @shell:jobs -->
     <main class="content" id="main" tabindex="-1">
-      <h1 class="sr-only">Jobs</h1>
       <!-- @form-error -->
-      <section class="focal" aria-labelledby="focal-label">
+      <div class="page-head">
         <div>
-          <p class="eyebrow" id="focal-label">Running now</p>
-          <p class="metric" id="jobs-running" aria-live="polite">—</p>
-          <p class="sub">Jobs are submitted with an API key: see the <a href="https://compute.unifyai.us/start">quick start</a>.</p>
+          <h1>Jobs</h1>
+          <p class="page-desc">Every job on this account, newest first. Run a template from the <a href="/marketplace">Marketplace</a>, or submit your own with an <a href="/keys">API key</a> and the <a href="https://compute.unifyai.us/start">quick start</a>.</p>
         </div>
-      </section>
+        <p class="head-stat" aria-live="polite"><span class="head-stat-value" id="jobs-running">—</span> running now</p>
+      </div>
       <section class="section" aria-labelledby="list-title">
-        <h2 id="list-title">Jobs</h2>
+        <h2 class="sr-only" id="list-title">Jobs</h2>
         <div class="chips" role="group" aria-label="Filter by status" id="filters">
           <button type="button" class="chip" data-status="" aria-pressed="true">All</button>
           <button type="button" class="chip" data-status="running" aria-pressed="false">Running</button>
