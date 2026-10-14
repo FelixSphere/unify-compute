@@ -142,7 +142,7 @@
         ],
         "security": [],
         "summary": "List job templates",
-        "description": "Public, like /skus. Every curated template (docs/spec/templates.md), including unavailable ones and their reasons, sorted by id. Not paginated.",
+        "description": "Public, like /skus. Every curated template (docs/spec/templates.md), including unavailable ones and their reasons, sorted by id. Not paginated. Where the deployment serves account listings (ADR-0012 M2; staging only until §4 holds), approved, listed account listings follow the platform templates, indistinguishable except by id.",
         "responses": {
           "200": {
             "description": "The templates.",
@@ -2028,6 +2028,10 @@
           "unavailable_reason": {
             "type": "string",
             "description": "Present when `available` is false."
+          },
+          "publisher": {
+            "type": "string",
+            "description": "Who the buyer sees as the template's publisher: always \"Unify Compute\" (ADR-0012 §2, one publisher of record), for platform templates and approved account listings alike."
           }
         }
       },

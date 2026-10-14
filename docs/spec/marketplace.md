@@ -37,14 +37,24 @@ Rules the pages follow, held by `deploy/site/smoke.sh`:
 A change to either JSON file changes these pages, so it needs a site release
 as well as an API release (ADR-0012, *Consequences*).
 
-## M2 — account listings (design)
+## M2 — account listings (built; open on staging only)
+
+Built in `compute-api/internal/listings` (store and rules), the dashboard
+routes below, and `compute-api admin listing …`. It ports Unify Data's
+brokered market (its ADR-0011: `products.review_state`, `reviewed_by`,
+`listed`, a reason on every decision, rejection unlists, the seller never
+crosses to the buyer) onto compute's tables. Account listings are **closed
+in production** (`ENVIRONMENT=production`): `GET /templates` serves none and
+`admin listing approve` refuses, until ADR-0012 §4 holds. Submitting,
+editing, unlisting and the queue work everywhere, so the flow is exercised
+on staging first.
 
 ### Store
 
 ```sql
 CREATE TABLE listings (
   id            text PRIMARY KEY,           -- lst_<ulid>
-  account_id    text NOT NULL REFERENCES accounts(id),
+  account_id    bigint NOT NULL REFERENCES accounts(id),
   template_id   text NOT NULL UNIQUE,       -- the slug buyers submit; may not collide with templates.json
   template      jsonb NOT NULL,             -- one templates.json entry, validated by internal/template
   review_state  text NOT NULL CHECK (review_state IN ('pending','approved','rejected')),
@@ -68,9 +78,9 @@ as a curated template cannot be submitted. Approval also checks the
 |---|---|---|
 | `GET /dashboard/v1/listings` | session | The caller's listings, with review state and reason, and run counts once jobs record their template id |
 | `POST /dashboard/v1/listings` | session, compute enabled | Submit; `pending` |
-| `PATCH /dashboard/v1/listings/{id}` | session, owner | Edit; any change listed in ADR-0012 §2 returns it to `pending` and hides it |
+| `PATCH /dashboard/v1/listings/{id}` | session, owner | Replace the template; the listing is relisted and returns to `pending` whatever changed (a relisting after an unlisting is a new request, as in Unify Data). The template id cannot change |
 | `POST /dashboard/v1/listings/{id}/unlist` | session, owner | `listed = false`; never refused |
-| `GET /compute/v1/templates` | public | Approved, listed account listings join the curated ones; every entry gains `publisher: "Unify Compute"` (an additive field) |
+| `GET /compute/v1/templates` | public | Approved, listed account listings join the curated ones where the deployment is open; every entry gains `publisher: "Unify Compute"` (an additive field). A submit may name an approved listing's id |
 
 ### Admin CLI
 
@@ -85,10 +95,15 @@ compute-api admin listing unlist <id> --reason TEXT
 As with every mutating admin verb, each one writes its change and an
 `audit_events` row in one transaction.
 
+### What the first review must check by hand
+
+`admin listing show` prints the template as buyers would see it and the
+`image_source` the publisher gave. Approval is the reviewer attesting to
+ADR-0012 §4: nothing checks the image's source automatically.
+
 ### Before M2 reaches production
 
-- Jobs record `template` (the id they were submitted with). `templates.md`
-  already plans this.
+- ~~Jobs record `template`~~ Done: `jobs.template_id`, set on every template submit; listings count runs by it.
 - One of ADR-0012 decision 4's two conditions holds: egress control, or
   images built from reviewed source.
 

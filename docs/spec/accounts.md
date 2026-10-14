@@ -461,6 +461,10 @@ after the response, so neither the status nor the time depends on it.
 | `DELETE /members/invitations/{id}` | — | `204`; owner or admin |
 | `PATCH /members/{user_id}` | `{ role }` | `200`; owner only. Demoting the last `owner` is `409 last_owner`. Needs reauth after 10 min |
 | `DELETE /members/{user_id}` | — | `204`; owner removes anyone, admin removes members, anyone removes themself. Removing the last `owner` is `409 last_owner`. The user's sessions end and the user is `closed` with its address tombstoned; keys it created stay, because they belong to the account. Emails the removed address. Needs reauth after 10 min |
+| `GET /listings` | — | `{ object: "list", data: [listing…], open }`: the account's marketplace listings (`marketplace.md` M2), oldest first |
+| `POST /listings` | `{ template }` (one templates.json entry) | `201` pending listing; needs `compute_enabled`; `400 invalid_listing` / `listing_id_taken`, `409 listing_exists`; 20 writes an hour per account |
+| `PATCH /listings/{id}` | `{ template }` | `200`; relisted and pending again; `400 listing_id_fixed` if the id changes |
+| `POST /listings/{id}/unlist` | — | `200`; never refused for the account's own listing |
 | `GET /account/export` | — | `200` JSON attachment: account, members (metadata), keys (metadata), jobs, balance entries, top-ups; owner or admin |
 | `POST /account/close` | `{ password }` | `202`; owner only. Jobs cancelled, keys revoked, artifacts deleted, every member's sessions ended and every address tombstoned |
 

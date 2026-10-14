@@ -24,6 +24,7 @@ import (
 
 	"github.com/FelixSphere/unify-compute/compute-api/internal/accounts"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/billing"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/listings"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/sku"
 )
 
@@ -38,6 +39,7 @@ const Usage = `usage: compute-api admin <command>
   balance credit <account_id> --usd AMOUNT --reason TEXT
   balance debit <account_id> --usd AMOUNT --reason TEXT
   audit [--account <account_id>]
+  listing queue | show <lst_id> | approve|reject|unlist <lst_id> --reason …
 
 AMOUNT is USD with at most 4 decimals, e.g. 12.50.`
 
@@ -65,6 +67,9 @@ type CLI struct {
 	// Mailer is nil when the deployment sends no account mail; then
 	// enable-compute says so and changes nothing else.
 	Mailer Mailer
+	// Listings is the marketplace's account side; nil when the deployment
+	// has no local accounts (then `listing` says so).
+	Listings *listings.Store
 	// Actor is who ran the command, recorded as the audit event's actor_id.
 	Actor string
 	Out   io.Writer
@@ -86,6 +91,8 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		return c.balance(ctx, args[1:])
 	case "audit":
 		return c.audit(ctx, args[1:])
+	case "listing":
+		return c.listing(ctx, args[1:])
 	}
 	return usage("unknown command %q", args[0])
 }

@@ -48,6 +48,7 @@ type Server struct {
 	// Templates is set after New so existing callers keep their signature; nil
 	// serves an empty list and refuses every `template` on submit.
 	Templates *template.Set
+	Listings  ListingSource
 	Log       *slog.Logger
 
 	// Quota, when set, refuses an over-quota submit before anything is held
@@ -245,8 +246,21 @@ func (s *Server) listUpstreams(w http.ResponseWriter, _ *http.Request) {
 
 // listTemplates is public like /skus: a template is what a customer reads
 // before they have a key worth using.
-func (s *Server) listTemplates(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": s.Templates.List()})
+func (s *Server) listTemplates(w http.ResponseWriter, r *http.Request) {
+	data := append([]template.Template{}, s.Templates.List()...)
+	for i := range data {
+		data[i].Publisher = template.PublisherOfRecord
+	}
+	if s.Listings != nil {
+		extra, err := s.Listings.Approved(r.Context())
+		if err != nil {
+			s.Log.Error("account listings", "err", err)
+			writeError(w, http.StatusInternalServerError, apiError{Type: "internal_error", Code: "internal_error", Message: "the template list could not be read"})
+			return
+		}
+		data = append(data, extra...)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
 }
 
 // submitRequest decodes optional fields as pointers or nil-able collections so
@@ -274,6 +288,28 @@ type submission struct {
 	providers []string
 	spec      backend.Spec
 	metadata  map[string]string
+	// template is the id the submit named, recorded on the job; empty for
+	// a hand-written spec.
+	template string
+}
+
+// ListingSource is the template marketplace's account side (ADR-0012 §2):
+// approved, listed account listings served beside the platform templates
+// and resolvable on submit. Nil means platform templates only.
+type ListingSource interface {
+	Approved(ctx context.Context) ([]template.Template, error)
+	Template(ctx context.Context, id string) (template.Template, error)
+}
+
+// templateByID finds a platform template, or an approved account listing.
+func (s *Server) templateByID(ctx context.Context, id string) (template.Template, error) {
+	if t, err := s.Templates.Get(id); err == nil {
+		return t, nil
+	}
+	if s.Listings == nil {
+		return template.Template{}, template.ErrUnknown
+	}
+	return s.Listings.Template(ctx, id)
 }
 
 // submitJob validates everything the catalogue and registry can decide
@@ -315,9 +351,10 @@ func (s *Server) resolveSubmit(w http.ResponseWriter, r *http.Request) (submissi
 		return submission{}, false
 	}
 	var (
-		skuID     string
-		providers = raw.Providers
-		spec      backend.Spec
+		skuID      string
+		providers  = raw.Providers
+		spec       backend.Spec
+		templateID string
 	)
 	if raw.Template == "" {
 		if raw.SKU != nil {
@@ -337,11 +374,16 @@ func (s *Server) resolveSubmit(w http.ResponseWriter, r *http.Request) (submissi
 			spec.MaxRuntimeSeconds = clampRuntime(*raw.Spec.MaxRuntimeSeconds)
 		}
 	} else {
-		t, err := s.Templates.Get(raw.Template)
-		if err != nil {
+		t, err := s.templateByID(r.Context(), raw.Template)
+		if errors.Is(err, template.ErrUnknown) {
 			invalid(w, "unknown_template", "template", fmt.Sprintf("template %q is not offered; see GET /compute/v1/templates", raw.Template))
 			return submission{}, false
 		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, apiError{Type: "internal_error", Code: "template_resolution_failed", Message: err.Error()})
+			return submission{}, false
+		}
+		templateID = t.ID
 		if !t.Available {
 			invalid(w, "template_unavailable", "template", fmt.Sprintf("template %q is listed but not currently runnable: %s", t.ID, t.UnavailableReason))
 			return submission{}, false
@@ -390,7 +432,7 @@ func (s *Server) resolveSubmit(w http.ResponseWriter, r *http.Request) (submissi
 		invalid(w, "runtime_over_ceiling", "spec.max_runtime_seconds", fmt.Sprintf("max_runtime_seconds %d exceeds the platform ceiling of %d", rt, s.runtimeCeiling()))
 		return submission{}, false
 	}
-	return submission{raw: body, item: item, providers: providers, spec: spec, metadata: raw.Metadata}, true
+	return submission{raw: body, item: item, providers: providers, spec: spec, metadata: raw.Metadata, template: templateID}, true
 }
 
 func (s *Server) runtimeCeiling() int64 {

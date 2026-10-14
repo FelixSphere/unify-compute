@@ -173,6 +173,9 @@ type Submission struct {
 	Spec        backend.Spec
 	Metadata    map[string]string
 	Idempotency *store.Idempotency
+	// TemplateID is the template the submit named, recorded on the job so a
+	// listing can count its runs (marketplace.md). Empty for a plain spec.
+	TemplateID string
 }
 
 // Submit runs job-api.md's submit flow after validation: quota and the
@@ -232,6 +235,9 @@ func (s *Service) Submit(ctx context.Context, sub Submission) (job store.Job, cr
 	nj := store.NewJob{
 		ID: id, Owner: sub.Owner, TokenID: &tokenID, SKU: sub.SKU.ID, Spec: spec, Metadata: sub.Metadata,
 		Candidates: candidates, Events: []store.NewEvent{*queued},
+	}
+	if sub.TemplateID != "" {
+		nj.TemplateID = &sub.TemplateID
 	}
 	switch {
 	case s.quota != nil && s.quota.Platform != nil:

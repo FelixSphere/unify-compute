@@ -84,7 +84,7 @@ func (s *Server) submitWired(w http.ResponseWriter, r *http.Request, sub submiss
 
 	job, created, err := s.JobService.Submit(r.Context(), jobs.Submission{
 		Owner: owner, UserID: c.billingID, TokenID: c.tokenID, SKU: sub.item, Candidates: candidates,
-		Spec: sub.spec, Metadata: sub.metadata, Idempotency: idem,
+		Spec: sub.spec, Metadata: sub.metadata, Idempotency: idem, TemplateID: sub.template,
 	})
 	var exceeded *quota.ExceededError
 	var refused *ledger.InsufficientBalanceError
