@@ -48,7 +48,7 @@ export async function account() {
   open.addEventListener('click', () => {
     status.textContent = '';
     form.reset();
-    setOpen(wrap.hidden);
+    setOpen(!!wrap.hidden);
   });
   $('password-cancel')!.addEventListener('click', () => {
     form.reset();
