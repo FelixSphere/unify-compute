@@ -6,18 +6,18 @@
     <link rel="stylesheet" href="/src/app.css" />
     <script type="module" src="/src/main.ts"></script>
   </head>
-  <body class="app" data-page="account">
+  <body class="app" data-page="account" data-i18n-title="account.page-title">
     <!-- @shell:account -->
     <main class="content" id="main" tabindex="-1">
       <!-- @form-error -->
       <div class="page-head">
         <div>
-          <h1>Account</h1>
-          <p class="page-desc">Who you are signed in as, and how you log in.</p>
+          <h1 data-i18n="nav.account">Account</h1>
+          <p class="page-desc" data-i18n="account.who-you-are-signed-in">Who you are signed in as, and how you log in.</p>
         </div>
       </div>
 
-      <section class="profile-head" aria-label="Signed in as">
+      <section class="profile-head" aria-label="Signed in as" data-i18n-attr="aria-label:account.signed-in-as">
         <span class="avatar large" id="me-avatar" aria-hidden="true"></span>
         <div>
           <p class="profile-email" id="me-email">—</p>
@@ -26,25 +26,25 @@
       </section>
 
       <section class="card settings" aria-labelledby="security-title">
-        <h2 id="security-title">Log-in and security</h2>
+        <h2 id="security-title" data-i18n="account.security">Log-in and security</h2>
         <div class="row">
           <div>
-            <strong>Email</strong>
+            <strong data-i18n="common.email">Email</strong>
             <p class="muted" id="me-email-row">—</p>
           </div>
         </div>
         <div class="row">
           <div>
-            <strong id="password-title">Password</strong>
-            <p class="muted">Changing it logs out every other session; this one stays logged in.</p>
+            <strong id="password-title" data-i18n="common.password">Password</strong>
+            <p class="muted" data-i18n="account.changing-it-logs-out-every">Changing it logs out every other session; this one stays logged in.</p>
             <p class="status-line" id="password-status" role="status"></p>
           </div>
-          <button class="ghost small" type="button" id="password-open" aria-expanded="false" aria-controls="password-form-wrap">Change password</button>
+          <button class="ghost small" type="button" id="password-open" aria-expanded="false" aria-controls="password-form-wrap" data-i18n="account.change-password">Change password</button>
         </div>
         <div class="row-form" id="password-form-wrap" hidden>
           <form id="form" novalidate>
             <div class="field">
-              <label for="current_password">Current password</label>
+              <label for="current_password" data-i18n="account.current-password">Current password</label>
               <div class="password">
                 <input id="current_password" name="current_password" type="password" autocomplete="current-password" required aria-describedby="current_password-error" />
                 <!-- @toggle:current_password -->
@@ -52,16 +52,16 @@
               <p class="field-error" id="current_password-error" hidden></p>
             </div>
             <div class="field">
-              <label for="password">New password</label>
+              <label for="password" data-i18n="account.new-password">New password</label>
               <div class="password">
                 <input id="password" name="password" type="password" autocomplete="new-password" required aria-describedby="password-hint password-error" />
                 <!-- @toggle:password -->
               </div>
-              <p class="hint" id="password-hint">At least 12 characters.</p>
+              <p class="hint" id="password-hint" data-i18n="common.password-hint">At least 12 characters.</p>
               <p class="field-error" id="password-error" hidden></p>
             </div>
             <div class="field">
-              <label for="password_confirm">Confirm new password</label>
+              <label for="password_confirm" data-i18n="account.confirm-new-password">Confirm new password</label>
               <div class="password">
                 <input id="password_confirm" name="password_confirm" type="password" autocomplete="new-password" required aria-describedby="password_confirm-error" />
                 <!-- @toggle:password_confirm -->
@@ -69,18 +69,18 @@
               <p class="field-error" id="password_confirm-error" hidden></p>
             </div>
             <div class="actions">
-              <button class="primary" type="submit">Change password</button>
-              <button class="ghost" type="button" id="password-cancel">Cancel</button>
+              <button class="primary" type="submit" data-i18n="account.change-password">Change password</button>
+              <button class="ghost" type="button" id="password-cancel" data-i18n="common.cancel">Cancel</button>
             </div>
           </form>
         </div>
         <div class="row">
           <div>
-            <strong id="sessions-title" tabindex="-1">Other sessions</strong>
-            <p class="muted" id="sessions-count" aria-live="polite">Checking for other sessions…</p>
+            <strong id="sessions-title" tabindex="-1" data-i18n="account.other-sessions">Other sessions</strong>
+            <p class="muted" id="sessions-count" aria-live="polite" data-i18n="account.checking-sessions">Checking for other sessions…</p>
             <p class="status-line" id="sessions-status" role="status"></p>
           </div>
-          <button class="ghost small" type="button" id="sessions-end" hidden>Log out other sessions</button>
+          <button class="ghost small" type="button" id="sessions-end" hidden data-i18n="account.log-out-other-sessions">Log out other sessions</button>
         </div>
       </section>
     </main>

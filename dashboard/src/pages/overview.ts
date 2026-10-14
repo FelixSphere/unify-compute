@@ -1,28 +1,6 @@
+import { t, tag } from '../i18n';
 import { $ } from '../lib';
-import {
-  type Balance,
-  CONTACT,
-  type Child,
-  duration,
-  empty,
-  fill,
-  get,
-  h,
-  type Job,
-  jobLink,
-  jobsTable,
-  jobState,
-  type List,
-  listOf,
-  mono,
-  muted,
-  notBuilt,
-  setText,
-  shell,
-  showBalance,
-  usd,
-  when,
-} from '../shell';
+import { type Balance, type Child, CONTACT, duration, empty, fill, get, h, type Job, jobLink, jobsTable, jobState, type List, listOf, mono, muted, notBuilt, rich, setText, shell, showBalance, usd, when } from '../shell';
 
 const QUICK_START = 'https://compute.unifyai.us/start';
 const ACTIVE = ['queued', 'provisioning', 'running'];
@@ -47,7 +25,7 @@ function stepItem(s: Step, n: number): HTMLElement {
     h(
       'div',
       { class: 'step-body' },
-      h('p', { class: 'step-title' }, h('span', { class: 'sr-only' }, s.done ? 'Done: ' : 'To do: '), s.title),
+      h('p', { class: 'step-title' }, h('span', { class: 'sr-only' }, s.done ? t('overview.done') : t('overview.to-do')), s.title),
       muted('', ...(s.done ? s.doneText : s.todoText)),
     ),
     s.done || s.actions.length === 0 ? null : h('div', { class: 'step-actions' }, ...s.actions),
@@ -58,31 +36,31 @@ const positive = (usd: string | undefined) => Number(usd ?? 0) > 0;
 const monthName = (ym: string | undefined) => {
   if (!ym) return 'this month';
   const [y, m] = ym.split('-').map(Number);
-  return new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(Date.UTC(y, m - 1, 1)));
+  return new Intl.DateTimeFormat(tag(), { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(Date.UTC(y, m - 1, 1)));
 };
 
 function showAccess(status: string, computeEnabled: boolean) {
-  const contact = h('a', { href: CONTACT }, 'contact us');
+  const contactLink = `<a href="${CONTACT}">${t('common.contact-us-lower')}</a>`;
   $('access-state')!.hidden = false;
   if (status !== 'active') {
     $('access-dot')!.className = 'dot dot-danger';
-    setText('access-word', 'Suspended');
-    fill('access-text', "Your account is suspended: you can see your balance and jobs, but can't submit jobs or create keys. To sort it out, ", contact, '.');
+    setText('access-word', t('overview.suspended'));
+    fill('access-text', rich('overview.access-suspended', { contact: contactLink }));
   } else if (computeEnabled) {
     $('access-dot')!.className = 'dot dot-success';
-    setText('access-word', 'Enabled');
-    fill('access-text', 'Your account can run jobs. Submit them with an ', h('a', { href: '/keys' }, 'API key'), '.');
+    setText('access-word', t('overview.enabled'));
+    fill('access-text', rich('overview.access-enabled'));
   } else {
     $('access-dot')!.className = 'dot dot-warning';
-    setText('access-word', 'Awaiting enablement');
-    fill('access-text', "We're turning compute on account by account while we start small, so your account can't run jobs yet. To ask for access, ", contact, '.');
+    setText('access-word', t('overview.awaiting-enablement'));
+    fill('access-text', rich('overview.access-awaiting', { contact: contactLink }));
   }
 }
 
 async function showSpend() {
   const r = await get<Usage>('/usage');
   if (!r.ok) {
-    setText('spend-sub', notBuilt(r.error) ? "This month's spend will show here once usage is live in the dashboard." : r.error.message);
+    setText('spend-sub', notBuilt(r.error) ? t('overview.this-month-s-spend-will') : r.error.message);
     return;
   }
   const u = r.data;
@@ -90,21 +68,24 @@ async function showSpend() {
   fill(
     'spend-sub',
     u.jobs === 0
-      ? `Nothing charged in ${monthName(u.month)} yet. `
-      : `Settled charges for ${u.jobs} ${u.jobs === 1 ? 'job' : 'jobs'} in ${monthName(u.month)} (UTC). `,
-    h('a', { href: '/usage' }, 'Usage'),
+      ? t('overview.nothing-charged-yet', { month: monthName(u.month) })
+      : u.jobs === 1
+        ? t('overview.settled-one-job', { month: monthName(u.month) })
+        : t('overview.settled-jobs', { n: u.jobs, month: monthName(u.month) }),
+    ' ',
+    h('a', { href: '/usage' }, t('nav.usage')),
   );
 }
 
 async function showRunning() {
   const r = await get<List<Job>>('/jobs?' + ACTIVE.map((s) => 'status=' + s).join('&') + '&limit=10');
   if (!r.ok) {
-    fill('running', muted(notBuilt(r.error) ? 'A running job will show here.' : r.error.message));
+    fill('running', muted(notBuilt(r.error) ? t('overview.a-running-job-will-show') : r.error.message));
     return;
   }
   const [j, ...rest] = r.data.data;
   if (!j) {
-    fill('running', h('p', { class: 'stat-value' }, '0'), muted('Nothing is running. ', h('a', { href: '/jobs' }, 'All jobs')));
+    fill('running', h('p', { class: 'stat-value' }, '0'), muted(t('overview.nothing-is-running'), ' ', h('a', { href: '/jobs' }, t('overview.all-jobs'))));
     return;
   }
   const now = Date.now() / 1000;
@@ -117,11 +98,11 @@ async function showRunning() {
       { class: 'facts' },
       h('div', {}, h('dt', {}, 'GPU'), h('dd', {}, mono(j.sku))),
       j.started_at
-        ? h('div', {}, h('dt', {}, 'Running for'), h('dd', {}, mono(duration(now - j.started_at))))
-        : h('div', {}, h('dt', {}, 'Submitted'), h('dd', {}, when(j.created_at))),
-      est ? h('div', {}, h('dt', {}, 'Estimated so far'), h('dd', {}, mono('USD ' + usd(est)))) : null,
+        ? h('div', {}, h('dt', {}, t('overview.running-for')), h('dd', {}, mono(duration(now - j.started_at))))
+        : h('div', {}, h('dt', {}, t('overview.submitted')), h('dd', {}, when(j.created_at))),
+      est ? h('div', {}, h('dt', {}, t('overview.estimated-so-far')), h('dd', {}, mono('USD ' + usd(est)))) : null,
     ),
-    rest.length || r.data.has_more ? muted('Other jobs are queued or running too. ', h('a', { href: '/jobs' }, 'All jobs')) : null,
+    rest.length || r.data.has_more ? muted(t('overview.other-jobs-too'), ' ', h('a', { href: '/jobs' }, t('overview.all-jobs'))) : null,
   );
 }
 
@@ -133,47 +114,47 @@ async function showOnboarding(email: string, computeEnabled: boolean, balance: P
   const link = (href: string, text: string) => h('a', { href }, text);
   const steps: Step[] = [
     {
-      title: 'Verify your email',
+      title: t('overview.verify-your-email'),
       done: true,
-      doneText: [`You confirmed ${email}.`],
+      doneText: [t('overview.you-confirmed', { email })],
       todoText: [],
       actions: [],
     },
     {
-      title: 'Get compute enabled',
+      title: t('overview.get-compute-enabled'),
       done: computeEnabled,
-      doneText: ['Your account can run jobs.'],
+      doneText: [t('overview.your-account-can-run-jobs')],
       todoText: [
-        "UnifyAI turns compute on by hand, account by account, while we start small. Until then a job is refused, but you can add credit and create keys.",
+        t('overview.unifyai-turns-compute-on-by'),
       ],
-      actions: [link(CONTACT, 'Ask for access')],
+      actions: [link(CONTACT, t('overview.ask-for-access'))],
     },
     {
-      title: 'Add credit',
+      title: t('billing.add-credit'),
       // A job needs a hold on the balance, so any job means credit was added.
       done: positive(b.available_usd) || positive(b.held_usd) || hasJob,
-      doneText: ['Jobs are paid from your prepaid balance.'],
-      todoText: ['Jobs are paid from a prepaid balance in USD. Top it up by card on Billing.'],
-      actions: [link('/billing', 'Add credit')],
+      doneText: [t('overview.jobs-are-paid-from-your')],
+      todoText: [t('overview.jobs-are-paid-from-a')],
+      actions: [link('/billing', t('billing.add-credit'))],
     },
     {
-      title: 'Create an API key',
+      title: t('keys.create-an-api-key'),
       done: listOf(k.data).data.length > 0,
-      doneText: ['Your key submits jobs from your own code.'],
-      todoText: ['A key lets your own code submit jobs to the job API. You see the secret once, when you create it.'],
-      actions: [link('/keys', 'Create a key')],
+      doneText: [t('overview.your-key-submits-jobs-from')],
+      todoText: [t('overview.a-key-lets-your-own')],
+      actions: [link('/keys', t('overview.create-a-key'))],
     },
     {
-      title: 'Run your first job',
+      title: t('overview.run-your-first-job'),
       done: hasJob,
-      doneText: ['Its status, logs and cost are under Jobs.'],
-      todoText: ['Run a template from the Marketplace, or submit your own job with the quick start.'],
-      actions: [link('/marketplace', 'Marketplace'), link(QUICK_START, 'Quick start')],
+      doneText: [t('overview.its-status-logs-and-cost')],
+      todoText: [t('overview.run-a-template-from-the')],
+      actions: [link('/marketplace', t('nav.marketplace')), link(QUICK_START, t('overview.quick-start'))],
     },
   ];
   const done = steps.filter((s) => s.done).length;
   if (done === steps.length) return;
-  setText('onboarding-progress', `${done} of ${steps.length} done`);
+  setText('onboarding-progress', t('overview.n-of-m-done', { done, total: steps.length }));
   fill('onboarding-steps', ...steps.map((s, i) => stepItem(s, i + 1)));
   $('onboarding')!.hidden = false;
   // The checklist's second step says the same as the access card.
@@ -195,12 +176,12 @@ export async function overview() {
 
   const r = await recent;
   if (!r.ok) {
-    fill('recent-jobs', muted(notBuilt(r.error) ? 'Your most recent jobs will appear here.' : r.error.message));
+    fill('recent-jobs', muted(notBuilt(r.error) ? t('overview.your-most-recent-jobs-will') : r.error.message));
     return;
   }
   if (r.data.data.length === 0) {
-    fill('recent-jobs', empty('No jobs yet', 'Run a template from the ', h('a', { href: '/marketplace' }, 'Marketplace'), ', or create an ', h('a', { href: '/keys' }, 'API key'), ' and follow the ', h('a', { href: QUICK_START }, 'quick start'), '.'));
+    fill('recent-jobs', empty(t('jobs.no-jobs-yet'), rich('overview.no-jobs-yet-text', { quickstart: QUICK_START })));
     return;
   }
-  fill('recent-jobs', jobsTable('Recent jobs', r.data.data));
+  fill('recent-jobs', jobsTable(t('overview.recent-jobs'), r.data.data));
 }

@@ -6,22 +6,23 @@
     <link rel="stylesheet" href="/src/app.css" />
     <script type="module" src="/src/main.ts"></script>
   </head>
-  <body data-page="login">
+  <body data-page="login" data-i18n-title="login.page-title">
+    <!-- @topbar:login -->
     <main class="page">
       <div class="card">
         <!-- @brand -->
-        <h1>Log in to Unify Compute</h1>
+        <h1 data-i18n="login.title">Log in to Unify Compute</h1>
         <!-- @form-error -->
         <form id="form" method="post" novalidate>
           <div class="field">
-            <label for="email">Email</label>
+            <label for="email" data-i18n="common.email">Email</label>
             <input id="email" name="email" type="email" autocomplete="email" required aria-describedby="email-error" />
             <p class="field-error" id="email-error" hidden></p>
           </div>
           <div class="field">
             <div class="label-row">
-              <label for="password">Password</label>
-              <a href="/forgot-password">Forgot password?</a>
+              <label for="password" data-i18n="common.password">Password</label>
+              <a href="/forgot-password" data-i18n="login.forgot">Forgot password?</a>
             </div>
             <div class="password">
               <input id="password" name="password" type="password" autocomplete="current-password" required aria-describedby="password-error" />
@@ -30,9 +31,9 @@
             <p class="field-error" id="password-error" hidden></p>
           </div>
           <!-- @honeypot -->
-          <button class="primary" type="submit">Log in</button>
+          <button class="primary" type="submit" data-i18n="common.log-in">Log in</button>
         </form>
-        <p class="switch">No account? <a href="/signup">Sign up</a></p>
+        <p class="switch" data-i18n="login.no-account-sign-up">No account? <a href="/signup">Sign up</a></p>
       </div>
       <!-- @below -->
     </main>

@@ -1,3 +1,4 @@
+import { t, tag } from '../i18n';
 import { $, API } from '../lib';
 import { duration, empty, fill, get, h, jobLink, jobState, money, mono, muted, notBuilt, setText, shell, table, usd, when } from '../shell';
 
@@ -31,7 +32,7 @@ type JobUsageList = { data: JobUsage[]; has_more: boolean; next?: string };
 
 function monthLabel(m: string) {
   const [y, mo] = m.split('-').map(Number);
-  return new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(Date.UTC(y, mo - 1, 1));
+  return new Intl.DateTimeFormat(tag(), { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(Date.UTC(y, mo - 1, 1));
 }
 function shiftMonth(m: string, by: number) {
   const [y, mo] = m.split('-').map(Number);
@@ -39,7 +40,7 @@ function shiftMonth(m: string, by: number) {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
-const keyLabel = (k: KeyRef) => (k.display ? `${k.display} · ${k.name || 'deleted key'}` : `key #${k.id} (deleted)`);
+const keyLabel = (k: KeyRef) => (k.display ? `${k.display} · ${k.name || t('usage.deleted-key')}` : t('usage.key-id-deleted', { id: k.id }));
 
 // One bar per day of the month, heights relative to the busiest day. Ink on
 // paper like the rest of the dashboard; amber stays for the focal number.
@@ -60,7 +61,7 @@ function dayChart(days: Usage['by_day'], total: string) {
   const label = (date: string) => (days.length <= 31 ? String(Number(date.slice(8))) : date.slice(5));
   return h(
     'div',
-    { class: 'chart-wrap', role: 'img', 'aria-label': `GPU charges by day from ${days[0]?.date} to ${days[days.length - 1]?.date}: USD ${usd(total)} in total` },
+    { class: 'chart-wrap', role: 'img', 'aria-label': t('usage.chart-label', { from: days[0]?.date ?? '', to: days[days.length - 1]?.date ?? '', total: usd(total) }) },
     h('div', { class: 'chart' }, ...bars),
     h('div', { class: 'chart-axis', 'aria-hidden': 'true' }, ...ticks.map((d) => h('span', {}, label(d)))),
   );
@@ -82,7 +83,7 @@ function fillSelect(id: string, options: { value: string; label: string }[]) {
   const sel = $<HTMLSelectElement>(id);
   if (!sel) return;
   const keep = sel.value;
-  sel.replaceChildren(h('option', { value: '' }, 'All'), ...options.map((o) => h('option', { value: o.value }, o.label)));
+  sel.replaceChildren(h('option', { value: '' }, t('common.all')), ...options.map((o) => h('option', { value: o.value }, o.label)));
   sel.value = options.some((o) => o.value === keep) ? keep : '';
 }
 
@@ -111,11 +112,11 @@ export async function usage() {
   function jobsTableView() {
     return rows.length
       ? table(
-          'Charged jobs',
-          [{ text: 'Job' }, { text: 'Status' }, { text: 'SKU' }, { text: 'API key' }, { text: 'Last charged' }, { text: 'GPU time', num: true }, { text: 'USD', num: true }],
+          t('usage.charged-jobs'),
+          [{ text: 'Job' }, { text: t('common.status') }, { text: 'SKU' }, { text: t('common.api-key') }, { text: t('usage.last-charged') }, { text: t('common.gpu-time'), num: true }, { text: 'USD', num: true }],
           rows.map((j) => [jobLink(j.job_id), jobState(j.status), mono(j.sku), mono(keyLabel(j.key)), when(j.settled_at), mono(duration(j.gpu_seconds)), money(j.usd)]),
         )
-      : empty('No charged jobs', 'No job was charged in this period with these filters.');
+      : empty(t('usage.no-charged-jobs'), t('usage.no-job-was-charged-in'));
   }
 
   async function loadJobs(append: boolean) {
@@ -130,7 +131,7 @@ export async function usage() {
     if (cursor) q.set('after', cursor);
     const r = await get<JobUsageList>(`/usage/jobs?${q}`);
     if (!r.ok) {
-      fill('usage-jobs', muted(notBuilt(r.error) ? 'Charged jobs will be listed here.' : r.error.message));
+      fill('usage-jobs', muted(notBuilt(r.error) ? t('usage.charged-jobs-will-be-listed') : r.error.message));
       more.hidden = true;
       return;
     }
@@ -152,45 +153,45 @@ export async function usage() {
       setText('usage-total', '—');
       fill(
         'usage-breakdown',
-        muted(notBuilt(r.error) ? 'Monthly usage will appear here, totalled from the settled charges in your balance history.' : r.error.message),
+        muted(notBuilt(r.error) ? t('usage.monthly-usage-will-appear-here') : r.error.message),
       );
       return;
     }
     const u = r.data;
     setText('usage-total', usd(u.total_usd));
-    setText('usage-sub', `${u.from} to ${u.to}, UTC.`);
+    setText('usage-sub', t('usage.from-to-utc', { from: u.from, to: u.to }));
     setText('usage-gpu-time', duration(u.gpu_seconds));
-    setText('usage-gpu-sub', `${u.jobs} job${u.jobs === 1 ? '' : 's'} charged.`);
+    setText('usage-gpu-sub', u.jobs === 1 ? t('usage.one-job-charged') : t('usage.jobs-charged', { n: u.jobs }));
     // A period with no charges says so once, instead of four empty sections.
     const nothing = u.jobs === 0 && Number(u.total_usd) === 0;
     emptyBlock.hidden = !nothing;
     detail.hidden = nothing;
     if (nothing) return;
-    fill('usage-days', u.by_day?.length ? dayChart(u.by_day, u.gpu_usd) : muted('Nothing was charged in this period.'));
+    fill('usage-days', u.by_day?.length ? dayChart(u.by_day, u.gpu_usd) : muted(t('usage.nothing-was-charged-in-this')));
     fill(
       'usage-keys',
       u.by_key?.length
         ? table(
-            'GPU time by API key',
-            [{ text: 'API key' }, { text: 'Jobs', num: true }, { text: 'GPU time', num: true }, { text: 'USD', num: true }],
+            t('usage.gpu-time-by-api-key'),
+            [{ text: t('common.api-key') }, { text: t('nav.jobs'), num: true }, { text: t('common.gpu-time'), num: true }, { text: 'USD', num: true }],
             u.by_key.map((k) => [mono(keyLabel(k.key)), mono(String(k.jobs)), mono(duration(k.gpu_seconds)), money(k.usd)]),
           )
-        : muted('No API key was charged in this period.'),
+        : muted(t('usage.no-api-key-was-charged')),
     );
     fillSelect('usage-sku', (u.by_sku ?? []).map((s) => ({ value: s.sku, label: s.sku })));
     fillSelect('usage-key', (u.by_key ?? []).map((k) => ({ value: String(k.key.id), label: keyLabel(k.key) })));
     void loadJobs(false);
     fill(
       'usage-breakdown',
-      table('Usage by meter', [{ text: 'Meter' }, { text: 'USD', num: true }], [
-        ['GPU time', money(u.gpu_usd)],
-        ['Artifact storage', money(u.storage_usd)],
-        ['Egress', money(u.egress_usd)],
+      table(t('usage.usage-by-meter'), [{ text: t('usage.meter') }, { text: 'USD', num: true }], [
+        [t('common.gpu-time'), money(u.gpu_usd)],
+        [t('usage.artifact-storage'), money(u.storage_usd)],
+        [t('usage.egress'), money(u.egress_usd)],
       ]),
       u.by_sku?.length
         ? table(
-            'GPU time by SKU',
-            [{ text: 'SKU' }, { text: 'GPU time', num: true }, { text: 'USD', num: true }],
+            t('usage.gpu-time-by-sku'),
+            [{ text: 'SKU' }, { text: t('common.gpu-time'), num: true }, { text: 'USD', num: true }],
             u.by_sku.map((s) => [mono(s.sku), mono(duration(s.gpu_seconds)), money(s.usd)]),
           )
         : null,

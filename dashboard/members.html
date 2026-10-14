@@ -10,17 +10,17 @@
     <!-- @shell:members -->
     <main class="content" id="main" tabindex="-1">
       <!-- @form-error -->
-      <section class="focal" aria-labelledby="focal-label">
+      <div class="page-head">
         <div>
-          <p class="eyebrow" id="focal-label">Account</p>
-          <h1 class="identity" id="account-name">—</h1>
-          <p class="sub" id="account-sub">Everyone here shares this account's balance, API keys and jobs.</p>
+          <p class="eyebrow" id="focal-label">Members</p>
+          <h1 id="account-name">—</h1>
+          <p class="page-desc" id="account-sub">Everyone here shares this account's balance, API keys and jobs.</p>
         </div>
-        <div class="focal-actions">
+        <div class="actions page-actions">
           <button class="ghost" type="button" id="rename-open" hidden>Rename</button>
           <button class="primary" type="button" id="invite-open" hidden>Invite someone</button>
         </div>
-      </section>
+      </div>
 
       <section class="card" id="invite" aria-labelledby="invite-title" hidden>
         <h2 id="invite-title" tabindex="-1">Invite someone</h2>

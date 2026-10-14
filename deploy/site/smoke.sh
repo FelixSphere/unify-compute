@@ -262,11 +262,12 @@ for app_host in app.compute.unifyai.us app.staging.compute.unifyai.us; do
   done
   # Terms and Conditions are FelixSphere's (app/links.ts TERMS_URL), both in
   # the sign-up consent line and under the card on every auth page.
-  grep -qF '<p class="legal">By signing up you agree to the <a href="https://felixsphere.com/legal/terms">Terms and Conditions</a> and <a href="https://compute.unifyai.us/privacy">Privacy Policy</a>.</p>' "$tmp/body" \
+  # The tags may carry data-i18n attributes (W9): match the links and words, not the exact tag.
+  grep -qE '<p[^>]*class="legal"[^>]*>By signing up you agree to the <a[^>]*href="https://felixsphere.com/legal/terms"[^>]*>Terms and Conditions</a> and <a[^>]*href="https://compute.unifyai.us/privacy"[^>]*>Privacy Policy</a>\.</p>' "$tmp/body" \
     || { echo "FAIL $app_host /signup: consent line does not link Terms and Conditions to https://felixsphere.com/legal/terms"; fail=1; }
   for path in /signup /login; do
     check "$path" 200
-    grep -qF '<a href="https://compute.unifyai.us/privacy">Privacy</a> · <a href="https://felixsphere.com/legal/terms">Terms</a></p>' "$tmp/body" \
+    grep -qE '<a[^>]*href="https://compute.unifyai.us/privacy"[^>]*>Privacy</a> · <a[^>]*href="https://felixsphere.com/legal/terms"[^>]*>Terms</a></p>' "$tmp/body" \
       || { echo "FAIL $app_host $path: footer Terms link is not https://felixsphere.com/legal/terms"; fail=1; }
   done
   for entry in "${app_pages[@]}"; do
@@ -311,9 +312,9 @@ for app_host in app.compute.unifyai.us app.staging.compute.unifyai.us; do
   for entry in "/|/" "/keys|/keys" "/jobs/job_1|/jobs" "/account|/account"; do
     path=${entry%%|*}; current=${entry#*|}
     check "$path" 200
-    grep -q "<a href=\"$current\" aria-current=\"page\">" "$tmp/body" \
+    grep -qE "<a[^>]*href=\"$current\" aria-current=\"page\"[^>]*>" "$tmp/body" \
       || { echo "FAIL $app_host $path: sidebar does not mark $current as the current page"; fail=1; }
-    grep -qE '<button class="menu-button" type="button" id="menu-button" aria-label="Menu" aria-expanded="false" aria-controls="app-nav">' "$tmp/body" \
+    grep -qE '<button[^>]*class="menu-button" type="button" id="menu-button" aria-label="Menu" aria-expanded="false" aria-controls="app-nav"[^>]*>' "$tmp/body" \
       || { echo "FAIL $app_host $path: no phone menu button"; fail=1; }
     grep -q 'id="account-button"' "$tmp/body" \
       || { echo "FAIL $app_host $path: no account button"; fail=1; }

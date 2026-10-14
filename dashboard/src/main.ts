@@ -1,3 +1,4 @@
+import { start, t } from './i18n';
 // One script for every app-host page; body[data-page] picks the behaviour.
 // Routes, bodies and error codes: docs/spec/accounts.md, "Dashboard API".
 
@@ -18,6 +19,7 @@ import {
   wireToggles,
 } from './lib';
 import { dashboard } from './dashboard';
+import { esc } from './shell';
 import { acceptInvitation } from './pages/accept-invitation';
 
 const PENDING_EMAIL = 'uc_pending_email';
@@ -48,11 +50,11 @@ const store = {
 function checkEmail(): string | null {
   const email = input('email')?.value.trim() ?? '';
   if (!email) {
-    setFieldError('email', 'Enter your email address.');
+    setFieldError('email', t('auth.enter-your-email-address'));
     return null;
   }
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-    setFieldError('email', 'Enter an email address like name@example.com.');
+    setFieldError('email', t('auth.enter-an-email-address-like'));
     return null;
   }
   return email;
@@ -85,7 +87,7 @@ const pages: Record<string, (form: HTMLFormElement | null) => void> = {
     onSubmit(form, async () => {
       const email = checkEmail();
       const password = input('password')?.value ?? '';
-      if (email && !password) setFieldError('password', 'Enter your password.');
+      if (email && !password) setFieldError('password', t('auth.enter-your-password'));
       if (!email || !password) return focusFirstInvalid(form);
       busy(form, true);
       const r = await call('POST', '/login', { email, password, website: honeypot() });
@@ -96,7 +98,7 @@ const pages: Record<string, (form: HTMLFormElement | null) => void> = {
       }
       if (r.error.code === 'email_unverified') {
         store.set(email);
-        return setFormError(r.error.message, { href: '/verify', text: 'Enter your code' });
+        return setFormError(r.error.message, { href: '/verify', text: t('auth.enter-your-code') });
       }
       showApiError(r.error);
     });
@@ -112,10 +114,7 @@ const pages: Record<string, (form: HTMLFormElement | null) => void> = {
       if (emailField) emailField.hidden = true;
       const lead = $('lead');
       if (lead) {
-        lead.textContent = 'Enter the 6-digit code we sent to ';
-        const strong = document.createElement('strong');
-        strong.textContent = known;
-        lead.append(strong, '. It expires in 15 minutes.');
+        lead.innerHTML = t('verify.lead-known', { email: `<strong>${esc(known)}</strong>` });
       }
     }
     const code = input('code')!;
@@ -135,11 +134,11 @@ const pages: Record<string, (form: HTMLFormElement | null) => void> = {
       const email = emailInput.value.trim();
       if (!email) {
         reveal();
-        setFieldError('email', 'Enter your email address.');
+        setFieldError('email', t('auth.enter-your-email-address'));
         return focusFirstInvalid(form);
       }
       if (!/^\d{6}$/.test(code.value)) {
-        setFieldError('code', 'Enter the 6 digits from the email.');
+        setFieldError('code', t('auth.enter-the-6-digits-from'));
         return focusFirstInvalid(form);
       }
       busy(form, true);
@@ -162,7 +161,7 @@ const pages: Record<string, (form: HTMLFormElement | null) => void> = {
       const email = emailInput.value.trim();
       if (!email) {
         reveal();
-        setFieldError('email', 'Enter your email address, then resend.');
+        setFieldError('email', t('auth.enter-your-email-address-then'));
         emailInput.focus();
         return;
       }
@@ -174,7 +173,7 @@ const pages: Record<string, (form: HTMLFormElement | null) => void> = {
         return showApiError(r.error);
       }
       store.set(email);
-      if (status) status.textContent = 'If that address is waiting for verification, we sent it a new code.';
+      if (status) status.textContent = t('auth.if-that-address-is-waiting');
       // The server allows one resend a minute per address.
       setTimeout(() => {
         resend.disabled = false;
@@ -205,12 +204,12 @@ const pages: Record<string, (form: HTMLFormElement | null) => void> = {
     // bar and history at once, so it cannot be copied, synced or shared.
     const token = new URLSearchParams(location.hash.slice(1)).get('token') ?? '';
     if (location.hash) history.replaceState(null, '', location.pathname);
-    const newLink = { href: '/forgot-password', text: 'Request a new link' };
-    if (!token) setFormError('This reset link is incomplete. Open the link from the email again, or request a new one.', newLink);
+    const newLink = { href: '/forgot-password', text: t('auth.request-a-new-link') };
+    if (!token) setFormError(t('auth.this-reset-link-is-incomplete'), newLink);
     wireConfirm();
     onSubmit(form, async () => {
       if (!token) {
-        setFormError('This reset link is incomplete. Open the link from the email again, or request a new one.', newLink);
+        setFormError(t('auth.this-reset-link-is-incomplete'), newLink);
         return;
       }
       const pwOk = checkNewPassword();
@@ -232,6 +231,7 @@ const pages: Record<string, (form: HTMLFormElement | null) => void> = {
 
 pages['accept-invitation'] = (form) => void acceptInvitation(form);
 
+await start();
 wireToggles();
 const page = document.body.dataset.page ?? '';
 if (page in dashboard) void dashboard[page]();

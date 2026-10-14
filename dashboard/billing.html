@@ -6,43 +6,43 @@
     <link rel="stylesheet" href="/src/app.css" />
     <script type="module" src="/src/main.ts"></script>
   </head>
-  <body class="app" data-page="billing">
+  <body class="app" data-page="billing" data-i18n-title="billing.page-title">
     <!-- @shell:billing -->
     <main class="content" id="main" tabindex="-1">
       <!-- @form-error -->
       <div class="page-head">
         <div>
-          <h1>Billing</h1>
-          <p class="page-desc">Jobs are paid from a prepaid balance in USD. A job holds an estimate when it starts and settles what it used when it finishes.</p>
+          <h1 data-i18n="nav.billing">Billing</h1>
+          <p class="page-desc" data-i18n="billing.jobs-are-paid-from-a">Jobs are paid from a prepaid balance in USD. A job holds an estimate when it starts and settles what it used when it finishes.</p>
         </div>
-        <a class="primary" id="contact-primary" href="mailto:contactus@felixsphere.com?subject=Unify%20Compute%20credit">Contact us</a>
-        <button class="primary" type="button" id="topup-open" hidden>Add credit</button>
+        <a class="primary" id="contact-primary" href="mailto:contactus@felixsphere.com?subject=Unify%20Compute%20credit" data-i18n="common.contact-us">Contact us</a>
+        <button class="primary" type="button" id="topup-open" hidden data-i18n="billing.add-credit">Add credit</button>
       </div>
       <p class="status-line" id="topup-status" role="status" tabindex="-1"></p>
       <div class="stats one">
         <section class="card stat-card hero" aria-labelledby="focal-label">
-          <p class="eyebrow" id="focal-label">Available balance · USD</p>
+          <p class="eyebrow" id="focal-label" data-i18n="common.available-balance-usd">Available balance · USD</p>
           <p class="stat-value" id="balance-available" aria-live="polite">—</p>
-          <p class="muted" id="balance-sub">Loading your balance…</p>
+          <p class="muted" id="balance-sub" data-i18n="common.loading-your-balance">Loading your balance…</p>
         </section>
       </div>
       <section class="card narrow" id="topup-off" aria-labelledby="topup-off-title">
-        <h2 id="topup-off-title">Adding credit</h2>
-        <p class="muted">Card top-ups are coming. Until then, contact us and we'll add credit to your balance by hand.</p>
+        <h2 id="topup-off-title" data-i18n="billing.adding-credit">Adding credit</h2>
+        <p class="muted" data-i18n="billing.card-top-ups-are-coming">Card top-ups are coming. Until then, contact us and we'll add credit to your balance by hand.</p>
       </section>
       <section class="card narrow" id="topup" aria-labelledby="topup-title" hidden>
-        <h2 id="topup-title" tabindex="-1">Add credit</h2>
-        <p class="muted">You pay by card on Stripe's payment page and come back here. The credit appears once Stripe confirms the payment, usually within seconds. Cards are not saved.</p>
+        <h2 id="topup-title" tabindex="-1" data-i18n="billing.add-credit">Add credit</h2>
+        <p class="muted" data-i18n="billing.you-pay-by-card-on">You pay by card on Stripe's payment page and come back here. The credit appears once Stripe confirms the payment, usually within seconds. Cards are not saved.</p>
         <form id="topup-form" novalidate>
           <div class="field">
-            <label for="amount_usd">Amount (USD)</label>
+            <label for="amount_usd" data-i18n="billing.amount-usd">Amount (USD)</label>
             <input id="amount_usd" name="amount_usd" type="text" inputmode="decimal" autocomplete="off" required aria-describedby="amount_usd-hint amount_usd-error" />
-            <p class="hint" id="amount_usd-hint">USD 10.00 to 100.00 per top-up.</p>
+            <p class="hint" id="amount_usd-hint" data-i18n="billing.usd-10-00-to-100">USD 10.00 to 100.00 per top-up.</p>
             <p class="field-error" id="amount_usd-error" hidden></p>
           </div>
           <div class="actions">
-            <button class="primary" type="submit">Continue to payment</button>
-            <button class="ghost" type="button" id="topup-cancel">Cancel</button>
+            <button class="primary" type="submit" data-i18n="billing.continue-to-payment">Continue to payment</button>
+            <button class="ghost" type="button" id="topup-cancel" data-i18n="common.cancel">Cancel</button>
           </div>
         </form>
       </section>
@@ -63,26 +63,26 @@
         </form>
       </section>
       <section class="section" id="topups-section" aria-labelledby="topups-title" hidden>
-        <h2 id="topups-title">Card top-ups</h2>
+        <h2 id="topups-title" data-i18n="billing.card-top-ups">Card top-ups</h2>
         <div id="topups" aria-live="polite"></div>
       </section>
       <section class="section" aria-labelledby="history-title">
         <div class="section-head">
-          <h2 id="history-title">Balance history</h2>
-          <div class="filters" role="group" aria-label="Filter balance history">
-            <label>Show
+          <h2 id="history-title" data-i18n="billing.balance-history">Balance history</h2>
+          <div class="filters" role="group" aria-label="Filter balance history" data-i18n-attr="aria-label:billing.filter-balance-history">
+            <label><span data-i18n="billing.show">Show</span>
               <select id="history-kind">
-                <option value="" selected>Everything</option>
-                <option value="settle">Charges</option>
-                <option value="topup,refund">Top-ups and refunds</option>
-                <option value="hold,extend,release">Holds and releases</option>
-                <option value="admin_credit,admin_debit,writeoff,dispute,dispute_reversal">Adjustments and disputes</option>
+                <option value="" selected data-i18n="billing.everything">Everything</option>
+                <option value="settle" data-i18n="billing.charges">Charges</option>
+                <option value="topup,refund" data-i18n="billing.top-ups-and-refunds">Top-ups and refunds</option>
+                <option value="hold,extend,release" data-i18n="billing.holds-and-releases">Holds and releases</option>
+                <option value="admin_credit,admin_debit,writeoff,dispute,dispute_reversal" data-i18n="billing.adjustments-and-disputes">Adjustments and disputes</option>
               </select>
             </label>
           </div>
         </div>
-        <div id="history" aria-live="polite"><p class="muted">Loading balance history…</p></div>
-        <button class="ghost more" type="button" id="history-more" hidden>Load more</button>
+        <div id="history" aria-live="polite"><p class="muted" data-i18n="common.loading-balance-history">Loading balance history…</p></div>
+        <button class="ghost more" type="button" id="history-more" hidden data-i18n="common.load-more">Load more</button>
       </section>
     </main>
   </body>

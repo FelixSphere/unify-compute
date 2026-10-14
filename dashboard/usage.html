@@ -6,77 +6,77 @@
     <link rel="stylesheet" href="/src/app.css" />
     <script type="module" src="/src/main.ts"></script>
   </head>
-  <body class="app" data-page="usage">
+  <body class="app" data-page="usage" data-i18n-title="usage.page-title">
     <!-- @shell:usage -->
     <main class="content" id="main" tabindex="-1">
       <!-- @form-error -->
       <div class="page-head">
         <div>
-          <h1>Usage</h1>
-          <p class="page-desc">Settled charges for GPU time, artifact storage and egress: by meter, by day, by API key and by job.</p>
+          <h1 data-i18n="nav.usage">Usage</h1>
+          <p class="page-desc" data-i18n="usage.settled-charges-for-gpu-time">Settled charges for GPU time, artifact storage and egress: by meter, by day, by API key and by job.</p>
         </div>
-        <div class="toolbar" role="group" aria-label="Period">
-          <select id="usage-range" aria-label="Period">
-            <option value="month" selected>Calendar month</option>
-            <option value="7d">Last 7 days</option>
-            <option value="30d">Last 30 days</option>
-            <option value="custom">Custom dates</option>
+        <div class="toolbar" role="group" aria-label="Period" data-i18n-attr="aria-label:usage.period">
+          <select id="usage-range" aria-label="Period" data-i18n-attr="aria-label:usage.period">
+            <option value="month" selected data-i18n="usage.calendar-month">Calendar month</option>
+            <option value="7d" data-i18n="usage.last-7-days">Last 7 days</option>
+            <option value="30d" data-i18n="usage.last-30-days">Last 30 days</option>
+            <option value="custom" data-i18n="usage.custom-dates">Custom dates</option>
           </select>
           <span class="toolbar-group" id="month-controls">
-            <button class="icon-button" type="button" id="month-prev" aria-label="Previous month"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m15 18-6-6 6-6"/></svg></button>
-            <button class="icon-button" type="button" id="month-next" aria-label="Next month"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m9 18 6-6-6-6"/></svg></button>
+            <button class="icon-button" type="button" id="month-prev" aria-label="Previous month" data-i18n-attr="aria-label:usage.previous-month"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m15 18-6-6 6-6"/></svg></button>
+            <button class="icon-button" type="button" id="month-next" aria-label="Next month" data-i18n-attr="aria-label:usage.next-month"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m9 18 6-6-6-6"/></svg></button>
           </span>
           <span class="toolbar-group" id="custom-controls" hidden>
-            <input type="date" id="usage-from" aria-label="From" />
+            <input type="date" id="usage-from" aria-label="From" data-i18n-attr="aria-label:usage.from" />
             <span class="muted">to</span>
-            <input type="date" id="usage-to" aria-label="To" />
-            <button class="ghost small" type="button" id="usage-apply">Apply</button>
+            <input type="date" id="usage-to" aria-label="To" data-i18n-attr="aria-label:usage.to" />
+            <button class="ghost small" type="button" id="usage-apply" data-i18n="usage.apply">Apply</button>
           </span>
-          <a class="ghost small" id="usage-export" href="#" download>Export CSV</a>
+          <a class="ghost small" id="usage-export" href="#" download data-i18n="usage.export-csv">Export CSV</a>
         </div>
       </div>
 
       <div class="stats">
         <section class="card stat-card hero" aria-labelledby="focal-label">
-          <p class="eyebrow" id="focal-label">Spent in <span id="usage-month-label"></span> · USD</p>
+          <p class="eyebrow" id="focal-label" data-i18n="usage.spent-in-usd">Spent in <span id="usage-month-label"></span> · USD</p>
           <p class="stat-value" id="usage-total" aria-live="polite">—</p>
-          <p class="muted" id="usage-sub">Loading usage…</p>
+          <p class="muted" id="usage-sub" data-i18n="common.loading-usage">Loading usage…</p>
         </section>
         <section class="card stat-card" aria-labelledby="gpu-label">
-          <p class="eyebrow" id="gpu-label">GPU time</p>
+          <p class="eyebrow" id="gpu-label" data-i18n="common.gpu-time">GPU time</p>
           <p class="stat-value" id="usage-gpu-time" aria-live="polite">—</p>
           <p class="muted" id="usage-gpu-sub"></p>
         </section>
       </div>
 
       <div class="empty" id="usage-empty" hidden>
-        <h3>Nothing charged in <span id="usage-empty-label"></span></h3>
-        <p>Charges appear here as jobs finish. Run a template from the <a href="/marketplace">Marketplace</a> to get started.</p>
+        <h3 data-i18n="usage.nothing-charged-in">Nothing charged in <span id="usage-empty-label"></span></h3>
+        <p data-i18n="usage.charges-appear-here-as-jobs">Charges appear here as jobs finish. Run a template from the <a href="/marketplace">Marketplace</a> to get started.</p>
       </div>
 
       <div id="usage-detail">
         <section class="section" aria-labelledby="breakdown-title">
-          <h2 id="breakdown-title">Breakdown</h2>
-          <div id="usage-breakdown" aria-live="polite"><p class="muted">Loading usage…</p></div>
+          <h2 id="breakdown-title" data-i18n="usage.breakdown">Breakdown</h2>
+          <div id="usage-breakdown" aria-live="polite"><p class="muted" data-i18n="common.loading-usage">Loading usage…</p></div>
         </section>
         <section class="section" aria-labelledby="days-title">
-          <h2 id="days-title">By day</h2>
+          <h2 id="days-title" data-i18n="usage.by-day">By day</h2>
           <div id="usage-days" aria-live="polite"></div>
         </section>
         <section class="section" aria-labelledby="keys-title">
-          <h2 id="keys-title">By API key</h2>
+          <h2 id="keys-title" data-i18n="usage.by-api-key">By API key</h2>
           <div id="usage-keys" aria-live="polite"></div>
         </section>
         <section class="section" aria-labelledby="jobs-title">
           <div class="section-head">
-            <h2 id="jobs-title">Charged jobs</h2>
-            <div class="filters" role="group" aria-label="Filter charged jobs">
-              <label>SKU <select id="usage-sku"><option value="">All</option></select></label>
-              <label>API key <select id="usage-key"><option value="">All</option></select></label>
+            <h2 id="jobs-title" data-i18n="usage.charged-jobs">Charged jobs</h2>
+            <div class="filters" role="group" aria-label="Filter charged jobs" data-i18n-attr="aria-label:usage.filter-charged-jobs">
+              <label><span data-i18n="common.sku">SKU</span> <select id="usage-sku"><option value="" data-i18n="common.all">All</option></select></label>
+              <label><span data-i18n="common.api-key">API key</span> <select id="usage-key"><option value="" data-i18n="common.all">All</option></select></label>
             </div>
           </div>
           <div id="usage-jobs" aria-live="polite"></div>
-          <button class="ghost more" type="button" id="usage-jobs-more" hidden>Load more</button>
+          <button class="ghost more" type="button" id="usage-jobs-more" hidden data-i18n="common.load-more">Load more</button>
         </section>
       </div>
     </main>
