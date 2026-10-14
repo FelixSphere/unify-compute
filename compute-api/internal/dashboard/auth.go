@@ -532,7 +532,7 @@ type sessionsView struct {
 }
 
 // sessions counts the user's other live sessions, for the account page's
-// "Sign out other sessions" (copied from Unify Data's profile page).
+// "Log out other sessions" (adapted from Unify Data's profile page).
 func (h *Handler) sessions(w http.ResponseWriter, r *http.Request, s accounts.Session, u accounts.User) {
 	n, err := h.acc.OtherSessions(r.Context(), u.ID, s.Token)
 	if err != nil {
