@@ -45,7 +45,13 @@ type Template struct {
 	// true: declared available and the default SKU is sold.
 	Available         bool   `json:"available"`
 	UnavailableReason string `json:"unavailable_reason,omitempty"`
+	// Publisher is who the buyer sees: "Unify Compute" on every template,
+	// platform or account listing (ADR-0012 §2, one publisher of record).
+	Publisher string `json:"publisher,omitempty"`
 }
+
+// PublisherOfRecord is the only publisher a buyer ever sees.
+const PublisherOfRecord = "Unify Compute"
 
 type Set struct {
 	Note      string     `json:"note,omitempty"`

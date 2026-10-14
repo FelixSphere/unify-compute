@@ -39,6 +39,7 @@ import (
 	"time"
 
 	"github.com/FelixSphere/unify-compute/compute-api/internal/accounts"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/listings"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/mailer"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/payments"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/ratelimit"
@@ -75,8 +76,11 @@ type Config struct {
 	// (api.Server.AccountJobs). Ledger reads the balance history and usage
 	// (billing.Local). Either nil answers its routes 501 not_implemented;
 	// main sets both.
-	Jobs   JobRoutes
-	Ledger Ledger
+	Jobs JobRoutes
+	// Listings is the template marketplace's account side (M2); nil answers
+	// its routes 501 not_implemented.
+	Listings *listings.Store
+	Ledger   Ledger
 	// Payments serves /topups and the Stripe webhook (internal/payments).
 	// Nil answers them 503 topups_unavailable; main sets it with
 	// ACCOUNTS_BACKEND=local, with or without Stripe keys.
@@ -84,16 +88,17 @@ type Config struct {
 }
 
 type Handler struct {
-	acc    *accounts.Service
-	mail   *mailer.Mailer
-	origin string
-	host   string
-	log    *slog.Logger
-	now    func() time.Time
-	jobs   JobRoutes
-	ledger Ledger
-	pay    *payments.Service
-	reads  *ratelimit.Limiter
+	acc      *accounts.Service
+	mail     *mailer.Mailer
+	origin   string
+	host     string
+	log      *slog.Logger
+	now      func() time.Time
+	jobs     JobRoutes
+	ledger   Ledger
+	listings *listings.Store
+	pay      *payments.Service
+	reads    *ratelimit.Limiter
 
 	mux      *http.ServeMux
 	patterns []string
@@ -112,7 +117,7 @@ func New(cfg Config) (*Handler, error) {
 		return nil, fmt.Errorf("APP_ORIGIN %q: the dashboard needs the app's origin, e.g. https://app.compute.unifyai.us (http only for localhost)", cfg.AppOrigin)
 	}
 	h := &Handler{acc: cfg.Accounts, mail: cfg.Mailer, origin: strings.ToLower(origin), host: strings.ToLower(u.Host),
-		log: cfg.Log, now: cfg.Now, jobs: cfg.Jobs, ledger: cfg.Ledger, pay: cfg.Payments, reads: ratelimit.New(readBurst, readWindow), mux: http.NewServeMux()}
+		log: cfg.Log, now: cfg.Now, jobs: cfg.Jobs, ledger: cfg.Ledger, listings: cfg.Listings, pay: cfg.Payments, reads: ratelimit.New(readBurst, readWindow), mux: http.NewServeMux()}
 	if h.now == nil {
 		h.now = time.Now
 	}
@@ -131,6 +136,10 @@ func New(cfg Config) (*Handler, error) {
 	h.handle("POST /keys", h.session(h.createKey))
 	h.handle("DELETE /keys/{id}", h.session(h.revokeKey))
 	h.handle("PATCH /keys/{id}", h.session(h.updateKey))
+	h.handle("GET /listings", h.session(h.read(h.listListings)))
+	h.handle("POST /listings", h.session(h.createListing))
+	h.handle("PATCH /listings/{id}", h.session(h.updateListing))
+	h.handle("POST /listings/{id}/unlist", h.session(h.unlistListing))
 	h.handle("GET /balance", h.session(h.read(h.balance)))
 	h.handle("GET /transactions", h.session(h.read(h.transactions)))
 	h.handle("GET /usage", h.session(h.read(h.usage)))
@@ -379,6 +388,7 @@ var statusOf = map[string]struct {
 	"account_suspended":   {http.StatusForbidden, "authentication_error"},
 	"key_limit_reached":   {http.StatusForbidden, "permission_error"},
 	"invalid_cap":         {http.StatusBadRequest, "invalid_request"},
+	"compute_not_enabled": {http.StatusForbidden, "permission_error"},
 }
 
 func writeAccountsError(w http.ResponseWriter, e *accounts.Error) {

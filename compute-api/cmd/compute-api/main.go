@@ -23,6 +23,7 @@ import (
 	"github.com/FelixSphere/unify-compute/compute-api/internal/console"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/dashboard"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/jobs"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/listings"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/mailer"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/payments"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/quota"
@@ -247,8 +248,12 @@ func main() {
 		// none of it is registered.
 		if backendName == backendLocal {
 			pay = paymentsService(log, st, acc, local)
+			// The template marketplace's account side (ADR-0012 M2). Closed
+			// in production until worker egress is controlled (§4).
+			lst := listings.New(st.Pool(), cat, platform.MaxRuntimeSeconds, templates, os.Getenv("ENVIRONMENT"), nil)
+			handler.Listings = lst
 			dash, err = dashboard.New(dashboard.Config{Accounts: acc, Mailer: mail, AppOrigin: os.Getenv("APP_ORIGIN"), Log: log,
-				Jobs: handler.AccountJobs(), Ledger: local, Payments: pay})
+				Jobs: handler.AccountJobs(), Ledger: local, Payments: pay, Listings: lst})
 			if err != nil {
 				log.Error("dashboard", "err", err)
 				os.Exit(1)
@@ -425,6 +430,26 @@ func runAdmin(args []string) int {
 	defer st.Close()
 	cli := &admin.CLI{DB: st.Pool(), Accounts: accounts.New(st.Pool(), accounts.Config{}), Biller: billing.New(st.Pool(), nil),
 		Actor: operator(), Out: os.Stdout}
+	// Listings need the catalogue and platform templates a listing is
+	// validated against, the same files the service loads.
+	if os.Getenv("ACCOUNTS_BACKEND") == backendLocal {
+		cat, err := sku.Load(env("SKU_FILE", "config/skus.json"))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "compute-api admin: sku catalogue:", err)
+			return 1
+		}
+		platform, err := quota.LoadPlatform(env("PLATFORM_FILE", "config/platform.json"))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "compute-api admin: platform limits:", err)
+			return 1
+		}
+		templates, err := template.Load(env("TEMPLATE_FILE", "config/templates.json"), cat, platform.MaxRuntimeSeconds)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "compute-api admin: templates:", err)
+			return 1
+		}
+		cli.Listings = listings.New(st.Pool(), cat, platform.MaxRuntimeSeconds, templates, os.Getenv("ENVIRONMENT"), nil)
+	}
 	// The same mailer the service builds; nil when this deployment sends no
 	// account mail, and enable-compute then says no email was sent.
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))

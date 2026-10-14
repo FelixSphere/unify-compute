@@ -91,6 +91,9 @@ type Job struct {
 	// Candidates is where the job may be placed, as resolved at submit (a
 	// JSON array of sku.Provider); nil for a job stored without them.
 	Candidates json.RawMessage
+	// TemplateID is the template the job was submitted with; nil for a
+	// hand-written spec. Listings count their runs by it (marketplace.md).
+	TemplateID *string
 	CreatedAt  time.Time
 	StartedAt  *time.Time
 	FinishedAt *time.Time
@@ -112,6 +115,8 @@ type NewJob struct {
 	// Candidates is kept so a job relaunched by another process goes where
 	// this submit allowed (backend.md, "Restart"). Nil stores nothing.
 	Candidates json.RawMessage
+	// TemplateID is the template the submit named, if any.
+	TemplateID *string
 	// Events are appended in the insert's transaction, so a job never
 	// exists without its job.queued event. JobID is filled in.
 	Events []NewEvent
@@ -130,14 +135,14 @@ type Idempotency struct {
 const IdempotencyRetention = 24 * time.Hour
 
 const jobColumns = `id, owner, token_id, sku, status, spec, metadata, error, placement, candidates,
-	created_at, started_at, finished_at, updated_at`
+	created_at, started_at, finished_at, updated_at, template_id`
 
 func scanJob(row pgx.Row) (Job, error) {
 	var j Job
 	var status string
 	var meta, jobErr []byte
 	err := row.Scan(&j.ID, &j.Owner, &j.TokenID, &j.SKU, &status, &j.Spec, &meta, &jobErr, &j.Placement, &j.Candidates,
-		&j.CreatedAt, &j.StartedAt, &j.FinishedAt, &j.UpdatedAt)
+		&j.CreatedAt, &j.StartedAt, &j.FinishedAt, &j.UpdatedAt, &j.TemplateID)
 	if err != nil {
 		return Job{}, err
 	}
@@ -200,10 +205,10 @@ func insertJob(ctx context.Context, tx pgx.Tx, nj NewJob, idem *Idempotency) (jo
 		id = NewJobID(time.Now())
 	}
 	job, err = scanJob(tx.QueryRow(ctx, `
-		INSERT INTO jobs (id, owner, token_id, sku, spec, metadata, candidates)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO jobs (id, owner, token_id, sku, spec, metadata, candidates, template_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING `+jobColumns,
-		id, nj.Owner, nj.TokenID, nj.SKU, []byte(nj.Spec), metaJSON, nullJSON(nj.Candidates)))
+		id, nj.Owner, nj.TokenID, nj.SKU, []byte(nj.Spec), metaJSON, nullJSON(nj.Candidates), nj.TemplateID))
 	if err != nil {
 		return Job{}, false, fmt.Errorf("store: insert job: %w", err)
 	}

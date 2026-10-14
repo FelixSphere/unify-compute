@@ -3002,6 +3002,449 @@
           }
         }
       }
+    },
+    "/dashboard/v1/listings": {
+      "get": {
+        "operationId": "listListings",
+        "summary": "The account's marketplace listings",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Oldest first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListingList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "reauth_required: the password was last entered more than 10 minutes ago; or session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: Host is not the app host. The whole prefix is 404 on any other host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: a throttle refused the attempt. Always with Retry-After (seconds).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "not_implemented: this deployment has no marketplace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createListing",
+        "summary": "Submit a template for review",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "description": "The listing starts pending and reaches buyers only once the super admin approves it (admin CLI). Needs an account that can run jobs. Throttled: 20 submits and edits an hour per account.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "template"
+                ],
+                "properties": {
+                  "template": {
+                    "type": "object",
+                    "description": "One templates.json entry (templates.md): id, title, description, digest-pinned image, command, env, sku, max_runtime_seconds, inputs, outputs, overridable. Validated exactly like the platform file; invalid_listing (param template) with the rule that failed, listing_id_taken for a platform template's id."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Pending.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Listing"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "malformed_body; invalid_listing (param template or a field path); listing_id_taken (param template.id).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "reauth_required: the password was last entered more than 10 minutes ago; or session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "csrf_failed; compute_not_enabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: Host is not the app host. The whole prefix is 404 on any other host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "listing_exists (param template.id): another listing already uses this template id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: a throttle refused the attempt. Always with Retry-After (seconds).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "not_implemented.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/listings/{id}": {
+      "patch": {
+        "operationId": "updateListing",
+        "summary": "Replace the listing's template",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "description": "Relists and returns the listing to pending whatever changed: approving one version is not approving another (ADR-0012 §2). The template id cannot change (listing_id_fixed).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "template"
+                ],
+                "properties": {
+                  "template": {
+                    "type": "object",
+                    "description": "One templates.json entry (templates.md): id, title, description, digest-pinned image, command, env, sku, max_runtime_seconds, inputs, outputs, overridable. Validated exactly like the platform file; invalid_listing (param template) with the rule that failed, listing_id_taken for a platform template's id."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Pending again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Listing"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "malformed_body; invalid_listing; listing_id_taken; listing_id_fixed (param template.id).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "reauth_required: the password was last entered more than 10 minutes ago; or session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "csrf_failed; account_suspended (authentication_error): a suspended account cannot create keys; key_limit_reached (permission_error): 10 active keys already.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no such listing on this account, or Host is not the app host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: a throttle refused the attempt. Always with Retry-After (seconds).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "not_implemented.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/listings/{id}/unlist": {
+      "post": {
+        "operationId": "unlistListing",
+        "summary": "Take the listing off the market",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "description": "Never refused for a listing the account owns; already unlisted answers the same 200. Relisting is a PATCH, which asks for review again.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Unlisted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Listing"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "reauth_required: the password was last entered more than 10 minutes ago; or session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "csrf_failed; account_suspended (authentication_error): a suspended account cannot create keys; key_limit_reached (permission_error): 10 active keys already.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: a throttle refused the attempt. Always with Retry-After (seconds).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "not_implemented.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3757,6 +4200,100 @@
           "next": {
             "type": "string",
             "description": "Pass as after to get the next page. Present only when has_more."
+          }
+        }
+      },
+      "Listing": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "object",
+          "template_id",
+          "review_state",
+          "reviewed_at",
+          "listed",
+          "public",
+          "runs",
+          "template",
+          "created_at",
+          "updated_at"
+        ],
+        "description": "A template an account asked to publish (ADR-0012 §2, marketplace.md M2), as its publisher sees it: review state and reason, whether it is listed, how many jobs ran it (never who), and the template as buyers would see it.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^lst_[0-9A-HJKMNP-TV-Z]{26}$"
+          },
+          "object": {
+            "const": "compute.listing"
+          },
+          "template_id": {
+            "type": "string",
+            "description": "The slug buyers submit as `template`."
+          },
+          "review_state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "rejected"
+            ]
+          },
+          "review_reason": {
+            "type": "string",
+            "description": "The super admin's reason; absent while pending."
+          },
+          "reviewed_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Unix seconds."
+          },
+          "listed": {
+            "type": "boolean"
+          },
+          "public": {
+            "type": "boolean",
+            "description": "listed and approved: what buyers see."
+          },
+          "runs": {
+            "type": "integer"
+          },
+          "template": {
+            "type": "object",
+            "description": "The template as GET /compute/v1/templates would show it, publisher \"Unify Compute\"."
+          },
+          "created_at": {
+            "type": "integer"
+          },
+          "updated_at": {
+            "type": "integer"
+          }
+        }
+      },
+      "ListingList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "object",
+          "data",
+          "open"
+        ],
+        "properties": {
+          "object": {
+            "const": "list"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Listing"
+            }
+          },
+          "open": {
+            "type": "boolean",
+            "description": "Whether this deployment serves account listings to buyers (false in production until ADR-0012 §4 holds). Submitting and review work either way."
           }
         }
       }
