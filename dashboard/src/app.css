@@ -1339,6 +1339,7 @@ a.ghost {
   font-size: var(--u-text-xs);
   color: var(--u-text-2);
   white-space: normal;
+}
 
 /* Members (/members). */
 .focal-actions {
