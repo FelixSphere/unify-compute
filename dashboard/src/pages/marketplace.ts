@@ -7,6 +7,30 @@ const PUBLISHER = 'Unify Compute';
 const summary = (text: string) => (text.length > 160 ? text.slice(0, 157).trimEnd() + '…' : text);
 const runtimeLabel = (secs: number) => (secs % 3600 === 0 ? `${secs / 3600} h` : secs % 60 === 0 ? `${secs / 60} min` : `${secs} s`);
 
+// ledger.InitialHoldSeconds: a submit holds at most this much GPU time up
+// front, and the hold is extended while the job runs, up to max runtime.
+const INITIAL_HOLD_SECONDS = 7200;
+// sku.QuotaPerUSD: holds are whole quota units, rounded half up.
+const QUOTA_PER_USD = 500000;
+
+// The hold the ledger places for `seconds` at `rate` (USD per hour, as the
+// SKU route returns it), in USD with the job API's four decimals; two when
+// the last two are zero. Exact: the same rounding as sku.EstimateQuota and
+// the job API's quotaUSD, so it matches a 402's figures.
+function holdUSD(rate: string, seconds: number): string | null {
+  const m = /^(\d+)(?:\.(\d+))?$/.exec(rate);
+  if (!m || !Number.isInteger(seconds) || seconds < 0) return null;
+  const frac = m[2] ?? '';
+  const num = BigInt(m[1] + frac) * BigInt(seconds) * BigInt(QUOTA_PER_USD);
+  const den = BigInt(10) ** BigInt(frac.length) * BigInt(3600);
+  const two = BigInt(2);
+  const quota = (two * num + den) / (two * den);
+  const tenThousandths = (two * quota * BigInt(10000) + BigInt(QUOTA_PER_USD)) / (two * BigInt(QUOTA_PER_USD));
+  const whole = tenThousandths / BigInt(10000);
+  const rest = String(tenThousandths % BigInt(10000)).padStart(4, '0');
+  return `${whole}.${rest.endsWith('00') ? rest.slice(0, 2) : rest}`;
+}
+
 function field(id: string, label: string, control: HTMLElement, hint?: string): HTMLElement {
   control.id = id;
   control.setAttribute('aria-describedby', `${id}-hint ${id}-error`);
@@ -58,7 +82,8 @@ export async function marketplace() {
   const grid = h('ul', { class: 'tiles' }, ...templates.map(tile));
   fill('tpl-list', grid);
   const skus = await get<List<SKU>>('/skus');
-  const sold = skus.ok ? skus.data.data.filter((k) => k.available) : [];
+  const catalogue = skus.ok ? skus.data.data : [];
+  const sold = catalogue.filter((k) => k.available);
 
   const card = $('run')!;
   const form = $<HTMLFormElement>('run-form')!;
@@ -72,6 +97,35 @@ export async function marketplace() {
   $('run-cancel')!.addEventListener('click', close);
 
   let current: Template | null = null;
+  // Signed-in pages may show the hourly rate (operator, 2026-10-14); the
+  // public pages still show none (ADR-0012).
+  const estimateEl = $('run-estimate')!;
+  function estimate() {
+    const t = current;
+    if (!t) return;
+    const id = $<HTMLSelectElement>('run-sku')?.value ?? t.sku;
+    const rate = catalogue.find((k) => k.id === id)?.price_usd_per_hour;
+    const runtimeField = input('run-runtime');
+    const secs = runtimeField ? Number(runtimeField.value) : t.max_runtime_seconds;
+    if (!rate) {
+      estimateEl.hidden = true;
+      return;
+    }
+    const hourly = holdUSD(rate, 3600);
+    if (!Number.isInteger(secs) || secs < 1) {
+      estimateEl.textContent = `${id} costs USD ${hourly} an hour of GPU time. Enter a maximum runtime to see the hold.`;
+      estimateEl.hidden = false;
+      return;
+    }
+    const held = holdUSD(rate, Math.min(secs, INITIAL_HOLD_SECONDS));
+    const most = holdUSD(rate, secs);
+    estimateEl.textContent =
+      secs <= INITIAL_HOLD_SECONDS
+        ? `${id} costs USD ${hourly} an hour of GPU time. Submitting holds USD ${held} of your balance, the most this job can cost; what it doesn't use comes back when it ends.`
+        : `${id} costs USD ${hourly} an hour of GPU time. Submitting holds USD ${held} of your balance for the first ${runtimeLabel(INITIAL_HOLD_SECONDS)}, extended while the job runs; over its ${runtimeLabel(secs)} maximum it can cost at most USD ${most}. What it doesn't use comes back when it ends.`;
+    estimateEl.hidden = false;
+  }
+
   function open(t: Template, from: HTMLElement) {
     current = t;
     opener = from;
@@ -120,6 +174,9 @@ export async function marketplace() {
       nodes.push(field('run-command', 'Command', ta, 'One argument per line, as the template\'s command is run in the image.'));
     }
     fields.replaceChildren(...nodes);
+    $('run-sku')?.addEventListener('change', estimate);
+    input('run-runtime')?.addEventListener('input', estimate);
+    estimate();
     clearErrors(form);
     card.hidden = false;
     $('run-title')!.focus();

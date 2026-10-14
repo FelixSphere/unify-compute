@@ -260,7 +260,7 @@ own data. Folding them together means storing the message detail in
 `id` (`ae_` + ULID), `seq`, `at`, `actor_type` (`user`, `admin`, `system`,
 `stripe`), `actor_id`, `account_id`, `action`, `ip`, `user_agent`, `reason`
 (required for `admin`), `detail jsonb`. Actions: `signup`, `verify`,
-`login`, `login_failed`, `logout`, `reset_requested`, `password_reset`,
+`login`, `login_failed`, `logout`, `sessions_ended`, `reset_requested`, `password_reset`,
 `password_changed`, `key_created`, `key_revoked`, `invited`,
 `invite_accepted`, `invite_revoked`, `member_removed`, `role_changed`,
 `account_renamed`, `topup_created`,
@@ -498,6 +498,8 @@ after the response, so neither the status nor the time depends on it.
 | `POST /logout` | — | `204`, cookie cleared |
 | `POST /password` | `{ current_password, password, password_confirm }` | `204`; other sessions ended. `current_password` is the recent-password check and counts as a reauth; wrong is `401 invalid_credentials` with `param: current_password` |
 | `POST /reauth` | `{ password }` | `204`; sets `reauth_at` |
+| `GET /sessions` | — | `{ other_sessions }`: the user's live sessions other than this one (not idle, not past the absolute lifetime). Read-limited. Built (W7) |
+| `POST /sessions/end-others` | — | `200 { ended }`: every other session of the user is deleted and this one kept; `ended` counts the live ones. No reauth (it only removes access). Audited as `sessions_ended`. Built (W7) |
 | `GET /balance` | — | `{ object: "compute.balance", currency: "USD", available_usd, held_usd, limits: { topup_min_usd, topup_max_usd, balance_max_usd, topups_per_day } }`, from the account row. Built (A7d) |
 | `GET /transactions?after=&limit=&kind=` | — | `kind` repeatable, any of the entry kinds (`400 invalid_kind` otherwise); absent is every kind.  `{ object: "list", data, has_more, next? }`, balance entries newest first, `limit` 1–100 (default 20), `after` an entry id: `{ id, object: "compute.balance_entry", kind, amount_usd, available_delta_usd, held_delta_usd, available_after_usd, held_after_usd, job_id, ref, created_at, detail }`. `amount_usd` is what a `settle` took out of held (negative), and for every other kind the change in available. `ref` is `{ type: "job" \| "topup", id }` or `null`: a hold's id is replaced by its job, and an operator adjustment's audit id and reason are never returned. `detail` holds only `sku`. Built (A7d) |
 | `GET /keys` | — | `[{ id, name, display, scopes, created_at, expires_at, last_used_at, revoked_at, monthly_cap_usd, spent_this_month_usd }]`, a bare array, newest first, revoked and expired keys included. Built (A5) |

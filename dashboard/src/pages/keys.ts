@@ -14,6 +14,16 @@ type Key = {
   spent_this_month_usd?: string | null;
 };
 
+// A date input's YYYY-MM-DD as the last second of that local day, so a key
+// set to expire "on the 31st" works through all of it and the Expires column
+// shows the 31st.
+function endOfDay(date: string): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!m) return null;
+  const next = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + 1);
+  return Number.isNaN(next.getTime()) ? null : Math.floor(next.getTime() / 1000) - 1;
+}
+
 export async function keys() {
   const me = await shell();
   if (!me) return;
@@ -42,7 +52,7 @@ export async function keys() {
       'keys-list',
       table(
         'API keys',
-        [{ text: 'Name' }, { text: 'Key' }, { text: 'Access' }, { text: 'This month / cap (USD)', num: true }, { text: 'Created' }, { text: 'Last used' }, { text: 'Status' }, { text: '' }],
+        [{ text: 'Name' }, { text: 'Key' }, { text: 'Access' }, { text: 'This month / cap (USD)', num: true }, { text: 'Created' }, { text: 'Expires' }, { text: 'Last used' }, { text: 'Status' }, { text: '' }],
         list.map((k) => {
           const live = active(k);
           const st = k.revoked_at ? state('Revoked', 'muted') : live ? state('Active', 'success') : state('Expired', 'muted');
@@ -60,7 +70,7 @@ export async function keys() {
               h('button', { type: 'button', class: 'link', 'data-revoke': String(k.id), 'data-display': k.display, 'aria-label': `Revoke ${k.name}` }, 'Revoke'),
             );
           }
-          return [k.name, mono(k.display), k.scopes.includes('jobs') ? 'Jobs' : 'Read only', capCell, when(k.created_at), when(k.last_used_at), st, actions];
+          return [k.name, mono(k.display), k.scopes.includes('jobs') ? 'Jobs' : 'Read only', capCell, when(k.created_at), k.expires_at ? when(k.expires_at) : 'Never', when(k.last_used_at), st, actions];
         }),
       ),
     );
@@ -73,6 +83,8 @@ export async function keys() {
   };
   openButton.addEventListener('click', () => {
     form.reset();
+    const today = new Date();
+    input('key-expires')!.min = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     reveal.hidden = true;
     create.hidden = false;
     // One primary per view: the form's "Create key" replaces this one.
@@ -97,11 +109,21 @@ export async function keys() {
       setFieldError('key-cap', 'Dollars with at most two decimals, e.g. 20 or 12.50.');
       return capField.focus();
     }
+    const expiresField = input('key-expires')!;
+    let expiresAt: number | null = null;
+    if (expiresField.value) {
+      expiresAt = endOfDay(expiresField.value);
+      if (expiresAt === null || expiresAt * 1000 <= Date.now()) {
+        setFieldError('key-expires', 'Choose today or a later date.');
+        return expiresField.focus();
+      }
+    }
     busy(form, true);
     const r = await withReauth(() =>
       send<Key & { secret: string }>('POST', '/keys', {
         name,
         scopes: scope === 'jobs' ? ['jobs', 'read'] : ['read'],
+        expires_at: expiresAt,
         monthly_cap_usd: cap || null,
       }),
     );
@@ -110,6 +132,10 @@ export async function keys() {
       if (r.error.param === 'name') {
         setFieldError('key-name', r.error.message);
         return nameField.focus();
+      }
+      if (r.error.param === 'expires_at') {
+        setFieldError('key-expires', r.error.message);
+        return expiresField.focus();
       }
       if (r.error.param === 'monthly_cap_usd') {
         setFieldError('key-cap', r.error.message);

@@ -149,3 +149,33 @@ func deleteSessions(ctx context.Context, db execer, userID int64, keep string) e
 	_, err := db.Exec(ctx, `DELETE FROM sessions WHERE user_id = $1 AND ($2::bytea IS NULL OR id_hash <> $2)`, userID, keepHash)
 	return err
 }
+
+// liveSession is the predicate LookupSession applies, for a sessions row
+// aliased s and $2 = now, $3 = now - SessionIdle.
+const liveSession = `s.expires_at > $2 AND s.last_seen_at > $3`
+
+// OtherSessions counts the user's live sessions other than keep (a cookie
+// value). Ended or expired rows that the sweeper has not reached yet are not
+// counted: they cannot be used.
+func (s *Service) OtherSessions(ctx context.Context, userID int64, keep string) (int, error) {
+	now := s.now()
+	var n int
+	err := s.db.QueryRow(ctx, `SELECT count(*) FROM sessions s
+		WHERE s.user_id = $1 AND `+liveSession+` AND s.id_hash <> $4`,
+		userID, now, now.Add(-SessionIdle), digest(keep)).Scan(&n)
+	return n, err
+}
+
+// EndOtherSessions ends every session of the user except keep and returns
+// how many of the ended ones were still live, so the answer matches the
+// count OtherSessions showed.
+func (s *Service) EndOtherSessions(ctx context.Context, userID int64, keep string) (int, error) {
+	now := s.now()
+	var n int
+	err := s.db.QueryRow(ctx, `WITH ended AS (
+			DELETE FROM sessions s WHERE s.user_id = $1 AND s.id_hash <> $4
+			RETURNING (`+liveSession+`) AS live)
+		SELECT count(*) FILTER (WHERE live) FROM ended`,
+		userID, now, now.Add(-SessionIdle), digest(keep)).Scan(&n)
+	return n, err
+}

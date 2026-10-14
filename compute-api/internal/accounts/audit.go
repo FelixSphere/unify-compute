@@ -26,6 +26,7 @@ const (
 	ActionLogin             = "login"
 	ActionLoginFailed       = "login_failed"
 	ActionLogout            = "logout"
+	ActionSessionsEnded     = "sessions_ended"
 	ActionResetRequested    = "reset_requested"
 	ActionPasswordReset     = "password_reset"
 	ActionPasswordChanged   = "password_changed"

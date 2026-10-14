@@ -989,6 +989,142 @@
         }
       }
     },
+    "/dashboard/v1/sessions": {
+      "get": {
+        "operationId": "otherSessions",
+        "summary": "Count this user's other sessions",
+        "description": "Live sessions of the signed-in user other than the one making the request: not ended, inside the 7 d absolute lifetime and seen within the 12 h idle limit. What the account page shows beside \"Sign out other sessions\".",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The count.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OtherSessions"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "session_required: no cookie, or the session is expired (12 h idle, 7 d absolute) or ended. A stale cookie is cleared.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: Host is not the app host. The whole prefix is 404 on any other host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than 600 reads a minute from this account (in process memory, per replica). Always with Retry-After (seconds).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/sessions/end-others": {
+      "post": {
+        "operationId": "endOtherSessions",
+        "summary": "End every other session of this user",
+        "description": "Needs X-CSRF-Token. Keeps the session making the request (its cookie is not touched) and ends every other session of the user, live or not. No reauth: like logout it only takes access away. Recorded in the audit log as sessions_ended.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ended. `ended` counts the sessions that were still live, so it matches what GET /sessions showed; 0 when there were none.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndedSessions"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "session_required: no cookie, or the session is expired (12 h idle, 7 d absolute) or ended. A stale cookie is cleared.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "csrf_failed: Origin is not APP_ORIGIN (every non-GET), or X-CSRF-Token does not match the session (session routes).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: Host is not the app host. The whole prefix is 404 on any other host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/dashboard/v1/keys": {
       "get": {
         "operationId": "listKeys",
@@ -4590,6 +4726,34 @@
           "open": {
             "type": "boolean",
             "description": "Whether this deployment serves account listings to buyers (false in production until ADR-0012 §4 holds). Submitting and review work either way."
+          }
+        }
+      },
+      "OtherSessions": {
+        "type": "object",
+        "required": [
+          "other_sessions"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "other_sessions": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Live sessions of this user other than the caller's."
+          }
+        }
+      },
+      "EndedSessions": {
+        "type": "object",
+        "required": [
+          "ended"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "ended": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Live sessions ended."
           }
         }
       }

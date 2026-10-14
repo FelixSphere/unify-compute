@@ -2,7 +2,7 @@ import { copyFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
-import { TERMS_URL } from '../app/links';
+import { COMPUTE_API, CONTACT_EMAIL, TERMS_URL } from '../app/links';
 
 // The app host's pages (app.compute.unifyai.us), built apart from the
 // marketing site's vinext export. vinext streams each page's RSC payload as
@@ -28,6 +28,10 @@ const brandFiles = [
 ];
 
 const PRIVACY_URL = 'https://compute.unifyai.us/privacy';
+const QUICK_START_URL = 'https://compute.unifyai.us/start';
+// mailto, not the marketing site's HubSpot form: the app host's CSP admits
+// no third-party script (ADR-0013's reasoning in Unify Data, kept here).
+const HELP_MAILTO = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent('Unify Compute help')}`;
 
 const ICON_ATTRS =
   'xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"';
@@ -39,6 +43,8 @@ const ALERT = `<svg ${ICON_ATTRS}><circle cx="12" cy="12" r="10"/><line x1="12" 
 // lucide Menu / X (ISC), for the phone menu button (UI-STANDARD "App shell").
 const MENU = `<svg class="icon-open" ${ICON_ATTRS}><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg>`;
 const CLOSE = `<svg class="icon-close" ${ICON_ATTRS}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`;
+// lucide CircleHelp (ISC), for the header's Help menu.
+const HELP = `<svg ${ICON_ATTRS}><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>`;
 
 // The signed-in pages, in sidebar order. `path` is what the browser shows;
 // /keys is also where the mailer's "Review keys" link points
@@ -95,8 +101,16 @@ const partials: Record<string, (arg: string) => string> = {
       </a>
       <a class="mark" href="/" aria-label="Unify Compute overview"><img src="/brand/unifyai-mark-black.svg" alt="UnifyAI" width="32" height="32" loading="eager" /></a>
       <div class="header-actions">
+        <div class="header-menu">
+          <button class="help-button" type="button" id="help-button" aria-expanded="false" aria-controls="help-panel">${HELP}<span class="help-label">Help</span></button>
+          <div class="account-panel" id="help-panel" hidden>
+            <a href="${QUICK_START_URL}" target="_blank" rel="noopener">Quick start</a>
+            <a href="${COMPUTE_API}/openapi.json" target="_blank" rel="noopener">API reference</a>
+            <a href="${HELP_MAILTO}">Contact us</a>
+          </div>
+        </div>
         <button class="menu-button" type="button" id="menu-button" aria-label="Menu" aria-expanded="false" aria-controls="app-nav">${MENU}${CLOSE}</button>
-        <div class="account-menu">
+        <div class="header-menu account-menu">
           <button class="avatar" type="button" id="account-button" aria-label="Account" aria-expanded="false" aria-controls="account-panel"><span id="account-initials" aria-hidden="true"></span></button>
           <div class="account-panel" id="account-panel" hidden>
             <p class="account-email" id="account-email"></p>
