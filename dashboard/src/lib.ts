@@ -1,4 +1,4 @@
-// Shared by the signed-out pages (main.ts) and the dashboard (dashboard.ts).
+// Shared by the signed-out pages (main.ts) and the dashboard (shell.ts, pages/).
 // Routes, bodies and error codes: docs/spec/accounts.md, "Dashboard API".
 
 export type ApiError = { status: number; code: string; message: string; param?: string };
