@@ -1593,8 +1593,26 @@ body.app .card.stat-card {
   margin: 0;
 }
 
+.section-head {
+  flex-wrap: wrap;
+}
+
+/* Short labels beside a heading ("2 active of 10") stay on one line; a
+   sentence (.section-note) wraps, and drops under the heading on a phone. */
 .section-head .muted {
   white-space: nowrap;
+}
+
+.section-head .section-note {
+  white-space: normal;
+  flex: 1 1 320px;
+  text-align: end;
+}
+
+@media (max-width: 580px) {
+  .section-head .section-note {
+    text-align: start;
+  }
 }
 
 .section-head .filters {
