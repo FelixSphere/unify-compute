@@ -95,12 +95,16 @@ account. Two consequences:
   Production's `PREVIOUS_RELEASE` is m3, which cannot read 0011–0014:
   restore the backup's dump before rolling back. The G/VT quota is 4 vCPU,
   so a staging job can launch a real GPU.
-- **2026-10-15, staging ahead of production by one site build:** staging
-  runs site `b14bbf75…` (`846c2e0`, #115 GPU catalogue) with the same
-  compute-api `05ba021c…` (run 38672690257). Production was held: at 375 px
-  the signed-in Marketplace page scrolls sideways (`.section-head .muted`
-  is `nowrap`). Record: `deploy/releases/2026-10-15-staging-gpu-catalogue.md`.
-  Staging's PREVIOUS_RELEASE is production's pair.
+- **2026-10-15, both hosts on gpu-catalogue-wrap:** compute-api
+  `05ba021c…` (`494f43d`, unchanged) and site `c2899e5f…` (`0e2b694`,
+  #115 GPU catalogue + #118 subtitle wrap). Staging was first rolled back
+  to production's pair for parity (run 38723497442), then released
+  (38723813378); production followed (38725660008). Records:
+  `deploy/releases/2026-10-15-{staging-rollback-parity,staging-gpu-catalogue-wrap,production-gpu-catalogue-wrap}.md`.
+  Both hosts' PREVIOUS_RELEASE is banner-rtl-fix (`05ba021c…` /
+  `b3871cfc…`), same schema, so `mode=rollback` is a site-only step.
+  Known, not from this release: `/members` scrolls sideways at 375 px
+  (its table has no `.table-wrap`).
 - **IMDS lockdown:** applied to both hosts on 2026-10-03 (staging, then
   production): firewall unit, credentials timer, `docker-compose.imds.yml`,
   hop limit 1 by Terraform. `check-imds.sh` gave `CHECK_IMDS_OK` before and after
