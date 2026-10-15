@@ -454,6 +454,23 @@ const c: Record<string, string> = {
   'verify.title': 'تحقّق من بريدك',
   'verify.verify-email': 'تحقّق من البريد الإلكتروني',
   'nav.members': 'الأعضاء',
+  'marketplace.gpus': 'وحدات GPU',
+  'marketplace.gpus-sub': 'اختر واحدة عند تشغيل قالب، أو مرّر معرّفها كـ <code class="inline">sku</code> في واجهة برمجة المهام.',
+  'common.loading-gpus': 'جارٍ تحميل وحدات GPU…',
+  'marketplace.col-gpu': 'GPU',
+  'marketplace.col-memory': 'الذاكرة',
+  'marketplace.col-cpu': 'vCPU · RAM',
+  'marketplace.col-tier': 'الفئة',
+  'marketplace.col-billing': 'الفوترة',
+  'marketplace.col-rate': 'USD / ساعة',
+  'marketplace.on-demand': 'عند الطلب',
+  'marketplace.spot': 'فوري (Spot)',
+  'marketplace.tier-hyperscaler': 'سحابة كبرى',
+  'marketplace.tier-neocloud': 'سحابة ناشئة',
+  'marketplace.tier-marketplace': 'سوق',
+  'marketplace.coming': 'قريبًا',
+  'marketplace.no-gpus': 'لا تتوفر وحدات GPU بعد.',
+  'marketplace.gpus-will-appear': 'سيظهر دليل وحدات GPU هنا عندما يصبح السوق متاحًا في لوحة التحكم.',
 };
 
 export default c;

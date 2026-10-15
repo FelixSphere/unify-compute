@@ -1,8 +1,41 @@
 import { t as tr } from '../i18n';
 import { $, busy, clearErrors, focusFirstInvalid, input, onSubmit, setFieldError, setFormError, showApiError } from '../lib';
-import { CONTACT, fill, get, h, type Job, type List, muted, notBuilt, send, setText, shell, type Template } from '../shell';
+import { CONTACT, fill, get, h, type Job, type List, money, mono, muted, notBuilt, send, setText, shell, state, table, type Template, usd } from '../shell';
 
-type SKU = { id: string; gpu?: string; accelerator?: string; gpu_count?: number; price_usd_per_hour: string; available: boolean; providers?: { cloud: string }[] };
+type SKU = {
+  id: string;
+  gpu?: string;
+  accelerator?: string;
+  gpu_count?: number;
+  gpu_memory_gb?: number;
+  vcpus?: number;
+  memory_gb?: number;
+  tier?: string;
+  interruptible?: boolean;
+  price_usd_per_hour: string;
+  available: boolean;
+  providers?: { cloud: string }[];
+};
+
+// The catalogue as a table: what can be chosen now, and what is coming.
+// Available first, then by price. Signed-in pages may show the hourly rate
+// (operator, 2026-10-14); the public marketplace page shows none.
+function gpuTable(catalogue: SKU[]): HTMLElement {
+  const rows = [...catalogue].sort((a, b) => Number(b.available) - Number(a.available) || Number(a.price_usd_per_hour) - Number(b.price_usd_per_hour));
+  return table(
+    tr('marketplace.gpus'),
+    [{ text: tr('marketplace.col-gpu') }, { text: tr('marketplace.col-memory'), num: true }, { text: tr('marketplace.col-cpu') }, { text: tr('marketplace.col-tier') }, { text: tr('marketplace.col-billing') }, { text: tr('marketplace.col-rate'), num: true }, { text: tr('common.status') }],
+    rows.map((k) => [
+      h('span', { class: 'cell-stack' }, h('strong', {}, `${k.gpu_count && k.gpu_count > 1 ? `${k.gpu_count} × ` : ''}${k.gpu ?? k.id}`), mono(k.id)),
+      mono(k.gpu_memory_gb ? `${k.gpu_memory_gb} GB` : '—'),
+      mono(k.vcpus && k.memory_gb ? `${k.vcpus} · ${k.memory_gb} GB` : '—'),
+      k.tier ? tr(`marketplace.tier-${k.tier}`) : '—',
+      k.interruptible ? tr('marketplace.spot') : tr('marketplace.on-demand'),
+      money(k.price_usd_per_hour),
+      k.available ? state(tr('marketplace.available'), 'success') : state(tr('marketplace.coming'), 'muted'),
+    ]),
+  );
+}
 
 const PUBLISHER = 'Unify Compute';
 const summary = (text: string) => (text.length > 160 ? text.slice(0, 157).trimEnd() + '…' : text);
@@ -69,6 +102,10 @@ export async function marketplace() {
   if (!me) return;
   $('access-note')!.hidden = me.account.status === 'active' && me.account.compute_enabled;
 
+  const skus = await get<List<SKU>>('/skus');
+  const catalogue = skus.ok ? skus.data.data : [];
+  fill('gpu-list', skus.ok ? (catalogue.length ? gpuTable(catalogue) : muted(tr('marketplace.no-gpus'))) : muted(notBuilt(skus.error) ? tr('marketplace.gpus-will-appear') : skus.error.message));
+
   const r = await get<List<Template>>('/templates');
   if (!r.ok) {
     fill('tpl-list', muted(notBuilt(r.error) ? tr('marketplace.templates-will-appear-here-once') : r.error.message));
@@ -82,8 +119,6 @@ export async function marketplace() {
   }
   const grid = h('ul', { class: 'tiles' }, ...templates.map(tile));
   fill('tpl-list', grid);
-  const skus = await get<List<SKU>>('/skus');
-  const catalogue = skus.ok ? skus.data.data : [];
   const sold = catalogue.filter((k) => k.available);
 
   const card = $('run')!;
@@ -140,8 +175,14 @@ export async function marketplace() {
       );
     });
     if (can('sku')) {
-      const options = sold.some((k) => k.id === t.sku) ? sold : [{ id: t.sku, price_usd_per_hour: '', available: true }, ...sold];
-      const select = h('select', {}, ...options.map((k) => h('option', { value: k.id, selected: k.id === t.sku }, k.price_usd_per_hour ? `${k.id} · USD ${k.price_usd_per_hour}/h` : k.id)));
+      const listed = catalogue.some((k) => k.id === t.sku) ? catalogue : [{ id: t.sku, price_usd_per_hour: '', available: true }, ...catalogue];
+      const options = [...listed].sort((a, b) => Number(b.available) - Number(a.available) || Number(a.price_usd_per_hour) - Number(b.price_usd_per_hour));
+      const label = (k: SKU) => {
+        const name = k.gpu ? `${k.gpu}${k.interruptible ? ` (${tr('marketplace.spot')})` : ''} · ${k.id}` : k.id;
+        const rate = k.price_usd_per_hour ? ` · USD ${usd(k.price_usd_per_hour)}/h` : '';
+        return k.available ? name + rate : `${name} · ${tr('marketplace.coming')}`;
+      };
+      const select = h('select', {}, ...options.map((k) => h('option', { value: k.id, selected: k.id === t.sku, disabled: !k.available }, label(k))));
       nodes.push(field('run-sku', 'GPU (SKU)', select, tr('marketplace.runs-on-unless', { sku: t.sku })));
       if (can('providers')) {
         const box = h('fieldset', { class: 'field', id: 'run-providers' }, h('legend', {}, tr('marketplace.providers-optional')));

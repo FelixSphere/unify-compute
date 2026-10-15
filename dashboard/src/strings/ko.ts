@@ -454,6 +454,23 @@ const c: Record<string, string> = {
   'verify.title': '이메일을 확인하세요',
   'verify.verify-email': '이메일 인증',
   'nav.members': '구성원',
+  'marketplace.gpus': 'GPU',
+  'marketplace.gpus-sub': '템플릿을 실행할 때 선택하거나, 작업 API에서 id를 <code class="inline">sku</code>로 전달하세요.',
+  'common.loading-gpus': 'GPU를 불러오는 중…',
+  'marketplace.col-gpu': 'GPU',
+  'marketplace.col-memory': '메모리',
+  'marketplace.col-cpu': 'vCPU · RAM',
+  'marketplace.col-tier': '등급',
+  'marketplace.col-billing': '과금',
+  'marketplace.col-rate': 'USD / 시간',
+  'marketplace.on-demand': '온디맨드',
+  'marketplace.spot': '스팟',
+  'marketplace.tier-hyperscaler': '하이퍼스케일러',
+  'marketplace.tier-neocloud': '네오클라우드',
+  'marketplace.tier-marketplace': '마켓플레이스',
+  'marketplace.coming': '출시 예정',
+  'marketplace.no-gpus': '아직 제공되는 GPU가 없습니다.',
+  'marketplace.gpus-will-appear': '대시보드에서 마켓플레이스가 활성화되면 GPU 카탈로그가 여기에 표시됩니다.',
 };
 
 export default c;

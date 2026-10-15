@@ -458,6 +458,23 @@ const en: Record<string, string> = {
   'verify.title': 'Check your email',
   'verify.verify-email': 'Verify email',
   'nav.members': 'Members',
+  'marketplace.gpus': 'GPUs',
+  'marketplace.gpus-sub': 'Pick one when you run a template, or pass its id as <code class="inline">sku</code> in the job API.',
+  'common.loading-gpus': 'Loading GPUs…',
+  'marketplace.col-gpu': 'GPU',
+  'marketplace.col-memory': 'Memory',
+  'marketplace.col-cpu': 'vCPU · RAM',
+  'marketplace.col-tier': 'Tier',
+  'marketplace.col-billing': 'Billing',
+  'marketplace.col-rate': 'USD / hour',
+  'marketplace.on-demand': 'On-demand',
+  'marketplace.spot': 'Spot',
+  'marketplace.tier-hyperscaler': 'Hyperscaler',
+  'marketplace.tier-neocloud': 'Neocloud',
+  'marketplace.tier-marketplace': 'Marketplace',
+  'marketplace.coming': 'Coming soon',
+  'marketplace.no-gpus': 'No GPUs are offered yet.',
+  'marketplace.gpus-will-appear': 'The GPU catalogue will appear here once the marketplace is live in the dashboard.',
 };
 
 export default en;
