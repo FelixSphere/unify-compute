@@ -95,6 +95,12 @@ account. Two consequences:
   Production's `PREVIOUS_RELEASE` is m3, which cannot read 0011–0014:
   restore the backup's dump before rolling back. The G/VT quota is 4 vCPU,
   so a staging job can launch a real GPU.
+- **2026-10-15, staging ahead of production by one site build:** staging
+  runs site `b14bbf75…` (`846c2e0`, #115 GPU catalogue) with the same
+  compute-api `05ba021c…` (run 38672690257). Production was held: at 375 px
+  the signed-in Marketplace page scrolls sideways (`.section-head .muted`
+  is `nowrap`). Record: `deploy/releases/2026-10-15-staging-gpu-catalogue.md`.
+  Staging's PREVIOUS_RELEASE is production's pair.
 - **IMDS lockdown:** applied to both hosts on 2026-10-03 (staging, then
   production): firewall unit, credentials timer, `docker-compose.imds.yml`,
   hop limit 1 by Terraform. `check-imds.sh` gave `CHECK_IMDS_OK` before and after
