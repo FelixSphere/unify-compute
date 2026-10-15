@@ -73,6 +73,11 @@ type Server struct {
 	// Now times cancel acceptance; nil is time.Now.
 	Now func() time.Time
 
+	// Demand, when set, records a submit for a SKU none of whose providers
+	// is enabled here (ADR-0013): the customer gets 503 gpu_not_provisioned,
+	// the operator a row and an email.
+	Demand DemandRecorder
+
 	// RuntimeCeilingSeconds is this deployment's ceiling on
 	// max_runtime_seconds (upstreams.md R9), from config/platform.json. Zero
 	// is the contract's MaxRuntimeSeconds.
@@ -331,7 +336,7 @@ func (s *Server) submitJob(w http.ResponseWriter, r *http.Request) {
 		s.submitWired(w, r, sub)
 		return
 	}
-	if _, ok := s.place(w, sub); !ok {
+	if _, ok := s.place(w, r, sub, ""); !ok {
 		return
 	}
 	if s.Quota != nil && !s.checkQuota(w, r, sub.item) {
@@ -454,13 +459,29 @@ func clampRuntime(v int64) int {
 	return int(v)
 }
 
-// place resolves where the job may run, writing the 400/503 itself.
-func (s *Server) place(w http.ResponseWriter, sub submission) ([]sku.Provider, bool) {
+// DemandRecorder is told of a submit for a GPU this deployment cannot launch
+// yet (ADR-0013). It must not block: the customer has already been answered.
+type DemandRecorder interface {
+	Record(ctx context.Context, owner, skuID string)
+}
+
+// place resolves where the job may run, writing the 400/503 itself. owner is
+// the caller, for the demand record; empty on the dark build.
+func (s *Server) place(w http.ResponseWriter, r *http.Request, sub submission, owner string) ([]sku.Provider, bool) {
 	_, candidates, err := s.Upstreams.Place(sub.item, sub.providers)
 	if err != nil {
 		switch {
 		case errors.Is(err, sku.ErrProviderNotOffered):
 			invalid(w, "provider_not_offered", "providers", fmt.Sprintf("sku %q: %v", sub.item.ID, err))
+		case errors.Is(err, upstream.ErrNoEnabledProvider) && len(sub.providers) == 0 && len(s.Upstreams.Clouds()) > 0:
+			// The SKU is listed and the customer asked for nothing special;
+			// we have upstreams, just not this SKU's. That is demand
+			// (ADR-0013), not a misconfiguration.
+			if s.Demand != nil {
+				s.Demand.Record(r.Context(), owner, sub.item.ID)
+			}
+			writeError(w, http.StatusServiceUnavailable, apiError{Type: "upstream_unavailable", Code: "gpu_not_provisioned",
+				Message: fmt.Sprintf("sku %q is not provisioned yet. Your request has been recorded; we add capacity for it and let you know. Until then, choose another sku from GET /compute/v1/skus.", sub.item.ID)})
 		case errors.Is(err, upstream.ErrNoEnabledProvider):
 			writeError(w, http.StatusServiceUnavailable, apiError{Type: "upstream_unavailable", Code: "upstream_unavailable",
 				Message: fmt.Sprintf("sku %q has no upstream enabled in this deployment", sub.item.ID)})
