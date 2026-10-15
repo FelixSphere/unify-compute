@@ -454,6 +454,23 @@ const c: Record<string, string> = {
   'verify.title': 'メールをご確認ください',
   'verify.verify-email': 'メールアドレスを確認',
   'nav.members': 'メンバー',
+  'marketplace.gpus': 'GPU',
+  'marketplace.gpus-sub': 'テンプレートの実行時に選ぶか、ジョブ API で id を <code class="inline">sku</code> として渡します。',
+  'common.loading-gpus': 'GPU を読み込んでいます…',
+  'marketplace.col-gpu': 'GPU',
+  'marketplace.col-memory': 'メモリ',
+  'marketplace.col-cpu': 'vCPU · RAM',
+  'marketplace.col-tier': 'ティア',
+  'marketplace.col-billing': '課金',
+  'marketplace.col-rate': 'USD / 時間',
+  'marketplace.on-demand': 'オンデマンド',
+  'marketplace.spot': 'スポット',
+  'marketplace.tier-hyperscaler': 'ハイパースケーラー',
+  'marketplace.tier-neocloud': 'ネオクラウド',
+  'marketplace.tier-marketplace': 'マーケットプレイス',
+  'marketplace.coming': '近日提供',
+  'marketplace.no-gpus': 'まだ提供している GPU はありません。',
+  'marketplace.gpus-will-appear': 'ダッシュボードでマーケットプレイスが有効になると、GPU カタログがここに表示されます。',
 };
 
 export default c;

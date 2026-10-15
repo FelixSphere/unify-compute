@@ -454,6 +454,23 @@ const c: Record<string, string> = {
   'common.loading-usage': '正在載入用量…',
   'common.loading-your-balance': '正在載入你的餘額…',
   'nav.members': '成員',
+  'marketplace.gpus': 'GPU',
+  'marketplace.gpus-sub': '執行範本時選擇一個，或在工作 API 中把它的 id 當作 <code class="inline">sku</code> 傳入。',
+  'common.loading-gpus': '正在載入 GPU…',
+  'marketplace.col-gpu': 'GPU',
+  'marketplace.col-memory': '顯示記憶體',
+  'marketplace.col-cpu': 'vCPU · 記憶體',
+  'marketplace.col-tier': '層級',
+  'marketplace.col-billing': '計費',
+  'marketplace.col-rate': 'USD / 小時',
+  'marketplace.on-demand': '隨需',
+  'marketplace.spot': '競價',
+  'marketplace.tier-hyperscaler': '超大規模雲',
+  'marketplace.tier-neocloud': '新興雲',
+  'marketplace.tier-marketplace': '算力市集',
+  'marketplace.coming': '即將推出',
+  'marketplace.no-gpus': '目前尚未提供 GPU。',
+  'marketplace.gpus-will-appear': '控制台的市集上線後，GPU 目錄會顯示在這裡。',
 };
 
 export default c;

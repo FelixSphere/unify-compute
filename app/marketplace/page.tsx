@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 import { SiteFooter } from '../site-footer';
 import { SiteHeader } from '../site-header';
-import { gpuLabel, listings, PUBLISHER, runtimeLabel, summary } from './catalogue';
+import { gpuLabel, gpus, listings, PUBLISHER, runtimeLabel, summary, TIER_LABEL } from './catalogue';
 
 export const metadata: Metadata = {
   title: 'Marketplace — Unify Compute',
@@ -60,6 +60,42 @@ export default function Marketplace() {
             </li>
           ))}
         </ul>
+        <div className="gpu-section" id="gpus">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">GPUs</p>
+              <h2>Choose the GPU for the job</h2>
+            </div>
+            <span className="subtle-label">PICK ONE IN THE RUN FORM, OR PASS ITS ID AS SKU</span>
+          </div>
+          <table className="gpu-table">
+            <thead>
+              <tr>
+                <th scope="col">GPU</th>
+                <th scope="col">Memory</th>
+                <th scope="col">vCPU · RAM</th>
+                <th scope="col">Tier</th>
+                <th scope="col">Billing</th>
+                <th scope="col">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {gpus.map((g) => (
+                <tr key={g.id}>
+                  <td>
+                    <strong>{g.gpu_count > 1 ? `${g.gpu_count} × ` : ''}{g.gpu}</strong>
+                    <code>{g.id}</code>
+                  </td>
+                  <td>{g.gpu_memory_gb} GB</td>
+                  <td>{g.vcpus} · {g.memory_gb} GB</td>
+                  <td>{TIER_LABEL[g.tier] ?? g.tier}</td>
+                  <td>{g.interruptible ? 'Spot' : 'On-demand'}</td>
+                  <td><span className={g.available ? 'badge' : 'badge muted'}>{g.available ? 'Available' : 'Coming soon'}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         <div className="early-access" role="note">
           <span className="badge">Early access</span>
           <p>

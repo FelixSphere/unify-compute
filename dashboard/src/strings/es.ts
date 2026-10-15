@@ -454,6 +454,23 @@ const c: Record<string, string> = {
   'common.loading-usage': 'Cargando el uso…',
   'common.loading-your-balance': 'Cargando tu saldo…',
   'nav.members': 'Miembros',
+  'marketplace.gpus': 'GPU',
+  'marketplace.gpus-sub': 'Elige una al ejecutar una plantilla, o pasa su id como <code class="inline">sku</code> en la API de trabajos.',
+  'common.loading-gpus': 'Cargando GPU…',
+  'marketplace.col-gpu': 'GPU',
+  'marketplace.col-memory': 'Memoria',
+  'marketplace.col-cpu': 'vCPU · RAM',
+  'marketplace.col-tier': 'Nivel',
+  'marketplace.col-billing': 'Facturación',
+  'marketplace.col-rate': 'USD / hora',
+  'marketplace.on-demand': 'Bajo demanda',
+  'marketplace.spot': 'Spot',
+  'marketplace.tier-hyperscaler': 'Hiperescalador',
+  'marketplace.tier-neocloud': 'Neocloud',
+  'marketplace.tier-marketplace': 'Mercado',
+  'marketplace.coming': 'Próximamente',
+  'marketplace.no-gpus': 'Todavía no se ofrece ninguna GPU.',
+  'marketplace.gpus-will-appear': 'El catálogo de GPU aparecerá aquí cuando el mercado esté activo en el panel.',
 };
 
 export default c;

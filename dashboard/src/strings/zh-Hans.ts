@@ -454,6 +454,23 @@ const c: Record<string, string> = {
   'common.loading-usage': '正在加载用量…',
   'common.loading-your-balance': '正在加载你的余额…',
   'nav.members': '成员',
+  'marketplace.gpus': 'GPU',
+  'marketplace.gpus-sub': '运行模板时选择一个，或在任务 API 中把它的 id 作为 <code class="inline">sku</code> 传入。',
+  'common.loading-gpus': '正在加载 GPU…',
+  'marketplace.col-gpu': 'GPU',
+  'marketplace.col-memory': '显存',
+  'marketplace.col-cpu': 'vCPU · 内存',
+  'marketplace.col-tier': '层级',
+  'marketplace.col-billing': '计费',
+  'marketplace.col-rate': 'USD / 小时',
+  'marketplace.on-demand': '按需',
+  'marketplace.spot': '竞价',
+  'marketplace.tier-hyperscaler': '超大规模云',
+  'marketplace.tier-neocloud': '新兴云',
+  'marketplace.tier-marketplace': '算力市场',
+  'marketplace.coming': '即将推出',
+  'marketplace.no-gpus': '目前还没有提供 GPU。',
+  'marketplace.gpus-will-appear': '控制台的市场上线后，GPU 目录会显示在这里。',
 };
 
 export default c;
