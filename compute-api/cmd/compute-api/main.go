@@ -224,7 +224,7 @@ func main() {
 			Quota: &quota.Enforcer{Config: quotas, Catalogue: cat, Usage: st, Platform: platform},
 		}
 		if art != nil {
-			cfg.Outputs = art
+			cfg.Outputs, cfg.LogArchive = art, art
 		}
 		var local *billing.Local
 		var notes *notify.Notifier

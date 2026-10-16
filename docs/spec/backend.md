@@ -389,9 +389,15 @@ Instead:
    cap, the job keeps running at our cost (the customer's bill is still
    capped by B16). An in-cluster backstop needs either a `timeout` the image
    may not have, or SkyPilot autostop on wall clock, which it does not offer.
-4. **Logs after teardown.** `/logs` needs the cluster. Keeping logs for 7
-   days (job-api.md) needs `/download_logs` before `/down`, plus somewhere to
-   put them (same storage question as 1).
+4. **Logs after teardown.** Answered 2026-10-16 without `/download_logs`:
+   the run step tees the command's stdout and stderr to `artifacts.LogFile`
+   and uploads it with the outputs from its EXIT trap, so the log lands in
+   the job's artifact prefix whatever the exit status, and `/logs` serves it
+   once the job is terminal (its last 4 MiB). Every job runs through the
+   step when an uploader is configured, outputs or not. Not covered: a
+   worker that dies before its trap runs (spot reclaim, OOM-kill of the
+   shell) leaves no log; and a container that cannot write `/` (non-root
+   image) keeps its output in SkyPilot's logs only.
 5. **Polling cost.** `refresh: AUTO` calls the cloud's API on every step for
    every live cluster. Batching all clusters into one `/status` per tick is
    straightforward; whether cloud API rate limits force it is not known
