@@ -311,9 +311,12 @@ Plain-text stdout/stderr so far (`text/plain; charset=utf-8`), read from the
 job's cluster through the SkyPilot API server; `503 logs_unavailable` when
 that read fails. `since` is not supported yet and is ignored.
 `follow=true` streams as `text/event-stream` (*planned*; answered `501`).
-Logs are retained 7 days after a terminal state (*planned*: nothing keeps
-them after teardown yet, so a finished or not-yet-launched job has an empty
-body; `backend.md` open question 4).
+A job not yet launched (`queued`, `provisioning`) has an empty body. The run
+step tees the command's stdout and stderr to a log file it uploads with the
+outputs, so a finished job's log (its last 4 MiB) is served after its
+cluster is gone, and a running job's falls back to the last upload if the
+cluster cannot be read. The log is kept as long as the job's artifacts.
+Implemented; retention is the artifacts bucket's.
 
 ### `GET /compute/v1/jobs/{id}/artifacts`
 
