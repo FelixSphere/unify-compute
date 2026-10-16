@@ -31,6 +31,11 @@ is lost**. compute-api started tearing the cluster down 17 s after the job ended
 nothing keeps a job's logs after teardown (`backend.md` open question 4).
 The failure was not transient, so it was not retried.
 
+**Root cause, found by the diagnostic rerun below:** the pinned vLLM image
+cannot start. `vllm` dies at import with `RuntimeError: operator
+torchvision::nms does not exist`, because its torchvision does not match
+its torch. Neither the platform nor the GPU is at fault.
+
 ## The job
 
 - Account 23, `success+cicd-firstjob-1015@simulator.amazonses.com`, a new
@@ -169,10 +174,8 @@ settled 5833. `admin audit --account 23`: "balance invariant holds".
    so it failed during the input fetch, vLLM's start, or the model config
    or download. The pinned revision `cdbee75f…` exists on Hugging Face
    (200, not gated), and so does `config.json` at that revision.
-   Unverified hypothesis: `templates.md` records that this image ships
-   torch 2.14.0 (CUDA 13.0) beside torchvision 0.28.0+cu129, which breaks
-   as soon as transformers imports vision code. Nothing here proves that.
-   It needs the job's stderr.
+   The rerun found the cause: torchvision does not match torch in this
+   image. See "Diagnostic rerun".
 2. **The logs were lost, and that is the main product finding.**
    - While the job provisioned, `/logs` answered `503 logs_unavailable`
      (`ClusterNotUpError`, status INIT), and compute-api logs that at ERROR
@@ -207,12 +210,9 @@ settled 5833. `admin audit --account 23`: "balance invariant holds".
   presigned artifact URL has been seen on a real cloud.
 - The 300 s settlement cadence, `extend`, cancel, `max_runtime_seconds`
   enforcement, `balance_exhausted`. The job ended too soon for any of them.
-- Why the command failed (above). The next attempt needs the operator's
-  decision and one of: logs kept past teardown (`backend.md` OQ4), a delay
-  before `sky.down` on failure, or a plain-spec diagnostic run of the same
-  image whose command tees its output into `/mnt/out`. That last one is
-  another GPU launch, about USD 0.15, and outside this exercise's "no retry
-  unless transient".
+- Why run 1's command failed, by its own output. The rerun below found
+  the cause, and run 1 almost certainly shared it, but run 1's output is
+  gone.
 - The real AWS cost, until Cost Explorer catches up.
 - The email contents.
 
@@ -222,3 +222,116 @@ Account 23: active, compute enabled, available USD 4.9883. Key 2 revoked,
 no live session. Job `job_01M51Q9XFVNXGW6KSMCTFZK16J` `failed`. Manifest
 `s3://unify-compute-staging-artifacts-871376691052/jobs/job_01M51Q9XFVNXGW6KSMCTFZK16J/_manifest.json`
 (30-day retention). No GPU instance.
+
+## Diagnostic rerun (UTC, 2026-10-16)
+
+The coordinator approved one diagnostic rerun within the operator's
+original USD 2 cap. This was not a retry of the template: it was a plain
+spec, because `spec.command` cannot be overridden on a curated template.
+It used the template's exact image and env (`MODEL`, `MODEL_REVISION`,
+`MAX_MODEL_LEN`), the same input (freshly presigned) at `/mnt/in`, an output
+mount `/mnt/out`, `max_runtime_seconds` 1200, and the command
+`bash -c 'set -o pipefail; { nvidia-smi; python -c "…versions…"; vllm
+run-batch … ; } 2>&1 | tee /mnt/out/job.log'`, so the output would
+survive teardown as an artifact.
+
+**Account 24, not 23.** Account 23's password went with the first run's
+scratch files, and a reset token cannot be recovered from its digest.
+Signing in again would have meant writing to the database, so instead a
+new throwaway, `success+cicd-diag-1016@simulator.amazonses.com` (account
+24), was signed up and verified as before. `enable-compute` gave audit
+`ae_01M51RQMSJW3JQ5FDPKJQTB65V`, and `balance credit --usd 5.00` gave
+`ae_01M51RQN54ZAWCGH0MX4SFJBAX`. Key id 3 (`uck_QWkpolwS…`, `jobs`) was
+revoked after the run, and the session was logged out. Account 23 is
+unchanged.
+
+Job `job_01M51RS5SME90CREBC70MVACNJ`, `Idempotency-Key:
+first-real-job-diag-2026-10-16-a1`.
+
+| Time | What |
+|---|---|
+| 07:10:48 | Submit; 201 `provisioning` at 07:10:50, hold USD 0.4000 |
+| 07:10:56 | `i-0366850013f660792` launched (g5.xlarge, workers SG, worker profile) |
+| 07:11:18–07:16:49 | `initialize_docker` (image pull), 5 m 31 s |
+| 07:17:33 | "Cluster launched" |
+| 07:17:42.3 | SkyPilot job 1 starts; `nvidia-smi` prints at 07:17:44 |
+| 07:17:53 | compute-api sees `UP`: `job.placed`, `job.running`; metering starts |
+| 07:18:11.5 | SkyPilot job 1 `FAILED` (the command ran 29.2 s; run 1's ran 28.8 s) |
+| 07:18:19 | `job.failed` `nonzero_exit`; settle and release; `sky.down` |
+| 07:18:32 | `sky.down` done; terminate requested. `terminated` by 07:23:49 |
+
+Provisioning took 7 m 03 s, and the instance ran for about 7 m 36 s until
+the terminate request.
+
+**Cost:** `gpu_seconds` 18, settled **USD 0.0060** (3000 units), USD 0.3940
+released. Account 24 is at available USD 4.9940, held 0, and `admin audit`
+says the invariant holds. AWS cost is about USD 0.13 (estimate). **The
+exercise as a whole: about USD 0.26 of AWS GPU time against the USD 2 cap,
+and USD 0.0177 charged to the two throwaway accounts.**
+
+**Artifacts:** `complete: true`, one file, `/mnt/out/job.log` (5068 B,
+sha256 `f91da366bb1b…`), downloaded through its presigned URL (200).
+`/logs` was again empty after the end. That was the gap this rerun worked
+around.
+
+**The decisive lines in job.log:**
+
+```
+| NVIDIA-SMI 580.159.04             Driver Version: 580.159.04     CUDA Version: 13.0     |
+bash: line 1: python: command not found
+  File "/usr/local/lib/python3.12/dist-packages/vllm/transformers_utils/config.py", line 21, in <module>
+    from transformers.models.auto.image_processing_auto import get_image_processor_config
+  ...
+  File "/usr/local/lib/python3.12/dist-packages/transformers/image_utils.py", line 54, in <module>
+    from torchvision.io import ImageReadMode, decode_image
+  File "/usr/local/lib/python3.12/dist-packages/torchvision/_meta_registrations.py", line 163, in <module>
+    @torch.library.register_fake("torchvision::nms")
+RuntimeError: operator torchvision::nms does not exist
+```
+
+**Root cause.** In `vllm/vllm-openai:v0.30.0-cu129@sha256:a67f8f18…`, the
+`vllm` CLI imports `vllm.config`, which imports transformers' image
+processing, which imports torchvision. torchvision's compiled ops do not
+match the installed torch, so loading it raises `operator torchvision::nms
+does not exist`, and `vllm` exits before it reads any argument. This is the
+torch 2.14.0 (CUDA 13.0) beside torchvision 0.28.0+cu129 mismatch that
+`templates.md` already records for this base image. The finetune image
+works around it by reinstalling torchvision 0.29.0+cu130. The batch
+templates use the base image unchanged.
+
+- **Run 1 almost certainly failed the same way.** It was the same image and
+  the same entry point, the command ran within 0.4 s of the same time, and
+  it ended before any model download. Run 1's own output was lost, so this
+  is inferred, not observed.
+- **It does not depend on the GPU, the driver (580.159.04, CUDA 13.0) or
+  the platform.** The error is at import time, so it can be reproduced
+  without a GPU, on any amd64 host:
+  `docker run --rm --entrypoint vllm <image> --help`.
+- **Every template on this image fails today:** `batch-infer-vllm` and
+  `batch-embed`. The finetune image (`batch-infer-lora`, `finetune-lora`)
+  is a different build and was not exercised.
+- The diagnostic one-liner's `python -c` printed nothing: the image has
+  `python3`, not `python`. The traceback alone is decisive.
+
+**Anomaly, new in the rerun:** metering started 11 s **after** the command
+did. compute-api saw the cluster `UP` at 07:17:53, but the job had started
+at 07:17:42. In run 1 it started 7 s **before**. So `gpu_seconds` follows
+compute-api's status poll, not the cluster's `UP`, in both directions.
+That matters little at this size, but the meter is off by up to one poll
+interval at each end.
+
+Teardown: no instance, ENI or tagged volume is left in the workers VPC.
+The reaper at 07:21:20 reported `workers: []`. SkyPilot shows no clusters.
+The quota, the caps and the budget are unchanged.
+
+### What the rerun leaves to decide (not done here, no code changed)
+
+- Fix the vLLM image the batch templates pin. Options: build it like the
+  finetune image (torchvision 0.29.0+cu130), or pin another vLLM tag whose
+  torch and torchvision match. Then prove it without a GPU with
+  `vllm --help`, then with one more GPU run.
+- The two log findings above (anomaly 2) stand. Had this command not teed
+  into `/mnt/out`, the cause would have been lost a second time.
+- Until the image is fixed, `batch-infer-vllm` and `batch-embed` will fail
+  for every customer, after about 7 minutes of provisioning, and they read
+  "Available".
