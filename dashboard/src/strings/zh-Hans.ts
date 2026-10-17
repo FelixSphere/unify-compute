@@ -471,6 +471,10 @@ const c: Record<string, string> = {
   'marketplace.coming': '即将推出',
   'marketplace.no-gpus': '目前还没有提供 GPU。',
   'marketplace.gpus-will-appear': '控制台的市场上线后，GPU 目录会显示在这里。',
+  'common.collapse': '收起',
+  'common.expand': '展开',
+  'common.collapse-nav': '收起侧边栏',
+  'common.expand-nav': '展开侧边栏',
 };
 
 export default c;

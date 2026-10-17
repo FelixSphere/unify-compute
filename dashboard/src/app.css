@@ -2066,3 +2066,214 @@ body.app .card.settings {
   flex: none;
   margin: 0;
 }
+
+
+/* ------------------------------------------------------------ motion
+   Page to page: a cross-document view transition. The header and the
+   sidebar are named, so they stay put while only the content cross-fades;
+   browsers without it navigate as before. */
+@view-transition {
+  navigation: auto;
+}
+
+.app-header {
+  view-transition-name: app-header;
+}
+
+.app-nav {
+  view-transition-name: app-nav;
+}
+
+::view-transition-group(app-header),
+::view-transition-group(app-nav) {
+  animation: none;
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 140ms;
+}
+
+/* Every control answers the pointer at once: colour eases, a press moves it
+   down a pixel, and a busy submit shows a spinner instead of going grey. */
+.primary,
+.ghost,
+.secondary,
+.icon-button,
+.logout-button,
+.help-button,
+.chip,
+.identity,
+.nav-collapse,
+.app-nav a {
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    box-shadow 120ms ease,
+    transform 80ms ease;
+}
+
+.primary:active:not(:disabled),
+.ghost:active:not(:disabled),
+.secondary:active:not(:disabled),
+.icon-button:active:not(:disabled),
+.logout-button:active:not(:disabled),
+.chip:active {
+  transform: translateY(1px);
+}
+
+.ghost:hover:not(:disabled),
+.secondary:hover:not(:disabled) {
+  border-color: var(--u-text-2);
+}
+
+.secondary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--u-btn-secondary-bg) 88%, var(--u-ink));
+}
+
+button[aria-busy='true'] {
+  cursor: progress;
+}
+
+.primary[aria-busy='true'],
+.ghost[aria-busy='true'],
+.secondary[aria-busy='true'] {
+  color: inherit;
+  gap: 8px;
+}
+
+.primary[aria-busy='true'] {
+  color: var(--u-btn-primary-fg);
+}
+
+.primary[aria-busy='true']::after,
+.ghost[aria-busy='true']::after,
+.secondary[aria-busy='true']::after {
+  content: '';
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-inline-end-color: transparent;
+  border-radius: var(--u-radius-pill);
+  animation: uc-spin 700ms linear infinite;
+}
+
+@keyframes uc-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @view-transition {
+    navigation: none;
+  }
+
+  *,
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    transition: none !important;
+    animation-duration: 1ms !important;
+  }
+}
+
+/* ------------------------------------------------------------ sidebar
+   Icons beside every item; collapsed, the sidebar keeps only them (64px),
+   with the label as the tooltip. The choice is this browser's (uc_nav),
+   applied before the first render. Phones keep the menu panel as before. */
+.app-nav a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.nav-icon {
+  flex: none;
+  width: 18px;
+  height: 18px;
+}
+
+.nav-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.nav-collapse {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--u-radius);
+  background: transparent;
+  color: var(--u-text-2);
+  font-family: var(--u-font-body);
+  font-size: var(--u-text-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.nav-collapse:hover {
+  color: var(--u-text);
+  background: color-mix(in srgb, var(--u-ink) 6%, transparent);
+}
+
+.nav-collapse svg {
+  flex: none;
+  width: 18px;
+  height: 18px;
+}
+
+.nav-collapse .icon-expand,
+.nav-collapsed .nav-collapse .icon-collapse {
+  display: none;
+}
+
+.nav-collapsed .nav-collapse .icon-expand {
+  display: block;
+}
+
+[dir='rtl'] .nav-collapse svg {
+  transform: scaleX(-1);
+}
+
+@media (min-width: 768px) {
+  body.app {
+    transition: grid-template-columns 160ms ease;
+  }
+
+  .nav-collapsed body.app {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+
+  .nav-collapsed .app-nav {
+    padding-inline: 8px;
+  }
+
+  .nav-collapsed .app-nav a,
+  .nav-collapsed .nav-collapse {
+    justify-content: center;
+    padding-inline: 0;
+  }
+
+  .nav-collapsed .app-nav .nav-label,
+  .nav-collapsed .nav-foot {
+    display: none;
+  }
+}
+
+@media (max-width: 767px) {
+  .nav-collapse {
+    display: none;
+  }
+}

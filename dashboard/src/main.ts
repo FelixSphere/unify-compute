@@ -231,6 +231,11 @@ const pages: Record<string, (form: HTMLFormElement | null) => void> = {
 
 pages['accept-invitation'] = (form) => void acceptInvitation(form);
 
+// Before the first render (the script blocks it): the sidebar's state, so a
+// collapsed sidebar never paints open first.
+try {
+  if (localStorage.getItem('uc_nav') === 'collapsed') document.documentElement.classList.add('nav-collapsed');
+} catch {}
 await start();
 wireToggles();
 const page = document.body.dataset.page ?? '';
