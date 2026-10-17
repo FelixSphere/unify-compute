@@ -244,7 +244,8 @@ for app_host in app.compute.unifyai.us app.staging.compute.unifyai.us; do
     if grep -qE '<(script|link|img|iframe)[^>]+(src|href)="(https?:)?//' "$tmp/body"; then
       echo "FAIL $app_host $path: loads something from another origin"; fail=1
     fi
-    grep -qE '<script type="module" crossorigin src="/assets/main-[A-Za-z0-9_-]+\.js">' "$tmp/body" \
+    # blocking="render": no paint before main.ts has applied the language.
+    grep -qE '<script type="module" crossorigin( blocking="render")? src="/assets/main-[A-Za-z0-9_-]+\.js">' "$tmp/body" \
       || { echo "FAIL $app_host $path: page script missing"; fail=1; }
   done
 

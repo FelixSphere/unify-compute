@@ -556,19 +556,20 @@ const pressKey = async (key, code, keyCode) => {
   for (const type of ['keyDown', 'keyUp'])
     await page('Input.dispatchKeyEvent', { type, key, code, windowsVirtualKeyCode: keyCode, ...(type === 'keyDown' && key === 'Enter' ? { text: '\r' } : {}) });
 };
-// Every state-changing call carries the CSRF token, and the token came from a
-// GET /me made just before it.
+// Every state-changing call carries the CSRF token, and the token came from
+// a GET /me made earlier on the page (since #131 the page reuses it and
+// re-fetches only on 403 csrf_failed, instead of a GET /me per action).
 const csrfChecked = (label, from) => {
   const calls = apiCalls.slice(from);
   const mutating = calls.filter((c) => c.method !== 'GET');
   const bad = mutating.filter((c) => {
-    const i = calls.indexOf(c);
-    const prior = calls.slice(0, i).reverse().find((p) => p.method === 'GET' && p.path === '/me');
+    const i = apiCalls.indexOf(c);
+    const prior = apiCalls.slice(0, i).reverse().find((p) => p.method === 'GET' && p.path === '/me');
     return c.headers['X-CSRF-Token'] !== CSRF || !prior;
   });
   check(
     mutating.length > 0 && bad.length === 0,
-    `${label}: ${mutating.map((c) => `${c.method} ${c.path}`).join(', ')} sent X-CSRF-Token from a fresh GET /me`,
+    `${label}: ${mutating.map((c) => `${c.method} ${c.path}`).join(', ')} sent X-CSRF-Token from the page's GET /me`,
     `${label}: CSRF missing or not re-fetched on ${bad.map((c) => `${c.method} ${c.path}`).join(', ') || '(no mutating call seen)'}`,
   );
 };

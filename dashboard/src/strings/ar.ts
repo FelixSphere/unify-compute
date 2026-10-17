@@ -471,6 +471,10 @@ const c: Record<string, string> = {
   'marketplace.coming': 'قريبًا',
   'marketplace.no-gpus': 'لا تتوفر وحدات GPU بعد.',
   'marketplace.gpus-will-appear': 'سيظهر دليل وحدات GPU هنا عندما يصبح السوق متاحًا في لوحة التحكم.',
+  'common.collapse': 'طي',
+  'common.expand': 'توسيع',
+  'common.collapse-nav': 'طي الشريط الجانبي',
+  'common.expand-nav': 'توسيع الشريط الجانبي',
 };
 
 export default c;

@@ -475,6 +475,10 @@ const en: Record<string, string> = {
   'marketplace.coming': 'Coming soon',
   'marketplace.no-gpus': 'No GPUs are offered yet.',
   'marketplace.gpus-will-appear': 'The GPU catalogue will appear here once the marketplace is live in the dashboard.',
+  'common.collapse': 'Collapse',
+  'common.expand': 'Expand',
+  'common.collapse-nav': 'Collapse sidebar',
+  'common.expand-nav': 'Expand sidebar',
 };
 
 export default en;

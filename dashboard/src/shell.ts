@@ -69,13 +69,27 @@ export async function get<T>(path: string): Promise<Result<T>> {
   return r;
 }
 
-// Every state-changing request carries the CSRF token fetched from GET /me
-// just before it, so a token rotated by a log-in in another tab, or a
-// session that ended, is noticed here rather than as a 403.
-export async function send<T>(method: 'POST' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<Result<T>> {
+// The CSRF token from this page's GET /me. A state-changing request uses it
+// directly, one round trip instead of two; a token rotated since (a log-in in
+// another tab) answers 403 csrf_failed, and the request is retried once
+// with a fresh one.
+let csrf = '';
+async function freshCsrf(): Promise<Result<Me>> {
   const m = await get<Me>('/me');
-  if (!m.ok) return m;
-  const r = await call<T>(method, path, body, m.data.csrf_token);
+  if (m.ok) csrf = m.data.csrf_token;
+  return m;
+}
+export async function send<T>(method: 'POST' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<Result<T>> {
+  if (!csrf) {
+    const m = await freshCsrf();
+    if (!m.ok) return m;
+  }
+  let r = await call<T>(method, path, body, csrf);
+  if (!r.ok && r.error.code === 'csrf_failed') {
+    const m = await freshCsrf();
+    if (!m.ok) return m;
+    r = await call<T>(method, path, body, csrf);
+  }
   if (!r.ok && r.error.code === 'session_required') return toLogin();
   return r;
 }
@@ -209,6 +223,9 @@ export function initials(email: string): string {
 
 export async function logout(button: HTMLButtonElement) {
   button.disabled = true;
+  try {
+    sessionStorage.removeItem(ME_KEY);
+  } catch {}
   const r = await send('POST', '/logout');
   if (r.ok || r.error.status === 401) {
     location.assign('/login');
@@ -262,18 +279,50 @@ export function wireMenus() {
   });
   const out = $<HTMLButtonElement>('logout')!;
   out.addEventListener('click', () => void logout(out));
+
+  // Collapse: the sidebar down to its icons, remembered on this browser.
+  const collapse = $<HTMLButtonElement>('nav-collapse');
+  const sync = () => {
+    const on = document.documentElement.classList.contains('nav-collapsed');
+    collapse?.setAttribute('aria-pressed', String(on));
+    collapse?.setAttribute('aria-label', t(on ? 'common.expand-nav' : 'common.collapse-nav'));
+    const label = collapse?.querySelector('.nav-label');
+    if (label) label.textContent = t(on ? 'common.expand' : 'common.collapse');
+  };
+  sync();
+  collapse?.addEventListener('click', () => {
+    const on = document.documentElement.classList.toggle('nav-collapsed');
+    try {
+      localStorage.setItem('uc_nav', on ? 'collapsed' : 'open');
+    } catch {}
+    sync();
+  });
+}
+
+// Who is signed in, kept for this tab so the header shows it at once on the
+// next page instead of after GET /me. Display only: nothing is decided on it.
+const ME_KEY = 'uc_me';
+function showIdentity(email: string) {
+  setText('account-initials', initials(email));
+  setText('account-email', email);
+  $('account-button')?.setAttribute('aria-label', t('common.account-email', { email }));
 }
 
 export async function shell(): Promise<Me | null> {
   wireMenus();
-  const r = await get<Me>('/me');
+  try {
+    const cached = sessionStorage.getItem(ME_KEY);
+    if (cached) showIdentity(cached);
+  } catch {}
+  const r = await freshCsrf();
   if (!r.ok) {
     setFormError(r.error.message);
     return null;
   }
-  setText('account-initials', initials(r.data.user.email));
-  setText('account-email', r.data.user.email);
-  $('account-button')?.setAttribute('aria-label', t('common.account-email', { email: r.data.user.email }));
+  showIdentity(r.data.user.email);
+  try {
+    sessionStorage.setItem(ME_KEY, r.data.user.email);
+  } catch {}
   void balance().then((b) => b.ok && lowBalanceBanner(b.data));
   return r.data;
 }

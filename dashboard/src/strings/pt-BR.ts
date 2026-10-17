@@ -471,6 +471,10 @@ const c: Record<string, string> = {
   'marketplace.coming': 'Em breve',
   'marketplace.no-gpus': 'Nenhuma GPU é oferecida ainda.',
   'marketplace.gpus-will-appear': 'O catálogo de GPUs aparecerá aqui quando o marketplace estiver ativo no painel.',
+  'common.collapse': 'Recolher',
+  'common.expand': 'Expandir',
+  'common.collapse-nav': 'Recolher a barra lateral',
+  'common.expand-nav': 'Expandir a barra lateral',
 };
 
 export default c;
