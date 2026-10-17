@@ -190,7 +190,12 @@ publish took nine runs to get there (37257555345 … 37266527011); the
 Dockerfile's comments carry the reasons.
 
 Published 2026-10-05 as digest `6d426175…` (run 37266527011, from main
-`150de552`) and pinned in both templates. The GHCR package must be **public**
+`150de552`) and pinned in both LoRA templates, and since 2026-10-16 in
+`batch-infer-vllm` and `batch-embed` as well: the bare base cannot start
+`vllm` at all (the first real staging job, 2026-10-16, crashed in
+`torchvision/_meta_registrations.py` with `operator torchvision::nms does not
+exist` before reading an argument), and this image is the same base with
+torchvision fixed and vLLM's import gated at build. The GHCR package must be **public**
 for workers to pull it without credentials; that is a package setting the
 operator changes once.
 
