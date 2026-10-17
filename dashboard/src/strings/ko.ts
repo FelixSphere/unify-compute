@@ -471,6 +471,7 @@ const c: Record<string, string> = {
   'marketplace.coming': '출시 예정',
   'marketplace.no-gpus': '아직 제공되는 GPU가 없습니다.',
   'marketplace.gpus-will-appear': '대시보드에서 마켓플레이스가 활성화되면 GPU 카탈로그가 여기에 표시됩니다.',
+  'marketplace.gpu-sku': 'GPU (SKU)',
 };
 
 export default c;

@@ -85,6 +85,7 @@ OpenAI-style envelope so existing client error handling carries over:
 | 501 | `not_implemented` | The dark build (no job store); `spec.outputs` without artifact storage (`outputs_unsupported`); `follow=true` on logs |
 | 503 | `console_unavailable` | Key could not be verified or hold could not be placed |
 | 503 | `upstream_unavailable` | The SKU is sound but no provider it offers is enabled in this deployment |
+| 503 | `gpu_not_provisioned` | The SKU is listed but none of its providers is enabled here yet; the request is recorded as demand (ADR-0013) and nothing is held |
 | 503 | `storage_unavailable` | Artifact storage could not be reached |
 
 ## Objects

@@ -471,6 +471,7 @@ const c: Record<string, string> = {
   'marketplace.coming': '即將推出',
   'marketplace.no-gpus': '目前尚未提供 GPU。',
   'marketplace.gpus-will-appear': '控制台的市集上線後，GPU 目錄會顯示在這裡。',
+  'marketplace.gpu-sku': 'GPU（SKU）',
 };
 
 export default c;

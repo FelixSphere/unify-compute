@@ -119,7 +119,6 @@ export async function marketplace() {
   }
   const grid = h('ul', { class: 'tiles' }, ...templates.map(tile));
   fill('tpl-list', grid);
-  const sold = catalogue.filter((k) => k.available);
 
   const card = $('run')!;
   const form = $<HTMLFormElement>('run-form')!;
@@ -183,21 +182,8 @@ export async function marketplace() {
         return k.available ? name + rate : `${name} · ${tr('marketplace.coming')}`;
       };
       const select = h('select', {}, ...options.map((k) => h('option', { value: k.id, selected: k.id === t.sku, disabled: !k.available }, label(k))));
-      nodes.push(field('run-sku', 'GPU (SKU)', select, tr('marketplace.runs-on-unless', { sku: t.sku })));
-      if (can('providers')) {
-        const box = h('fieldset', { class: 'field', id: 'run-providers' }, h('legend', {}, tr('marketplace.providers-optional')));
-        const render = () => {
-          for (const el of Array.from(box.querySelectorAll('label'))) el.remove();
-          const k = sold.find((x) => x.id === select.value);
-          for (const p of k?.providers ?? []) {
-            box.append(h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'provider', value: p.cloud }), p.cloud));
-          }
-          box.hidden = !(k?.providers ?? []).length;
-        };
-        select.addEventListener('change', render);
-        render();
-        nodes.push(box);
-      }
+      nodes.push(field('run-sku', tr('marketplace.gpu-sku'), select, tr('marketplace.runs-on-unless', { sku: t.sku })));
+      // No provider choice: which cloud runs a SKU is ours (ADR-0006, ADR-0013).
     }
     if (can('spec.env')) {
       for (const [k, v] of Object.entries(t.env)) {

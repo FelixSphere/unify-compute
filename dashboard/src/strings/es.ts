@@ -471,6 +471,7 @@ const c: Record<string, string> = {
   'marketplace.coming': 'Próximamente',
   'marketplace.no-gpus': 'Todavía no se ofrece ninguna GPU.',
   'marketplace.gpus-will-appear': 'El catálogo de GPU aparecerá aquí cuando el mercado esté activo en el panel.',
+  'marketplace.gpu-sku': 'GPU (SKU)',
 };
 
 export default c;
