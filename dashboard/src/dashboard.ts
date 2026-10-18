@@ -11,7 +11,8 @@ import { jobs } from './pages/jobs';
 import { keys } from './pages/keys';
 import { listings } from './pages/listings';
 import { marketplace } from './pages/marketplace';
+import { members } from './pages/members';
 import { overview } from './pages/overview';
 import { usage } from './pages/usage';
 
-export const dashboard: Record<string, () => Promise<void>> = { overview, keys, jobs, job, usage, billing, account, marketplace, listings };
+export const dashboard: Record<string, () => Promise<void>> = { overview, keys, jobs, job, usage, billing, account, marketplace, listings, members };

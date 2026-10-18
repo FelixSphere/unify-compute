@@ -235,6 +235,8 @@ func (h *Handler) createKey(w http.ResponseWriter, r *http.Request, s accounts.S
 	writeJSON(w, http.StatusCreated, createdKeyView{keyView: viewKey(k), Secret: secret})
 }
 
+var errRevokeOthers = &accounts.Error{Code: "role_required", Message: "Members can revoke only the API keys they created. Ask an owner or admin to revoke this one."}
+
 // revokeKey takes effect on the job API's next request: keys are looked up
 // on every request, never cached. Revoking an already revoked key is a 204
 // that changes nothing; another account's key is 404, like a missing one.
@@ -245,6 +247,22 @@ func (h *Handler) revokeKey(w http.ResponseWriter, r *http.Request, _ accounts.S
 		return
 	}
 	ctx := r.Context()
+	// A member revokes only the keys it created; owners and admins any.
+	if !accounts.CanManage(u.Role) {
+		k, err := h.acc.KeyByID(ctx, u.AccountID, id)
+		if errors.Is(err, accounts.ErrNotFound) {
+			notFound(w)
+			return
+		}
+		if err != nil {
+			h.internal(w, "load key", err)
+			return
+		}
+		if k.CreatedBy != u.ID {
+			writeAccountsError(w, errRevokeOthers)
+			return
+		}
+	}
 	k, changed, err := h.acc.RevokeKey(ctx, u.AccountID, id)
 	if errors.Is(err, accounts.ErrNotFound) {
 		notFound(w)

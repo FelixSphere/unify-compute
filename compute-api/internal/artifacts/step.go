@@ -27,6 +27,14 @@ const UploadMargin = 2 * time.Hour
 // callback and an upload from the node and a HEAD at completion.
 const MaxFiles = 10000
 
+// LogDir is where the run step tees the command's stdout and stderr. It is
+// uploaded with the outputs, so a job's log outlives its cluster
+// (backend.md open question 4). A customer mount may not touch it.
+const (
+	LogDir  = "/unify-compute-logs"
+	LogFile = LogDir + "/job.log"
+)
+
 var (
 	ErrNoOwner      = errors.New("artifacts: job has no owner to bind the upload to")
 	ErrMountOverlap = errors.New("artifacts: output mounts must not be / or contain one another")
@@ -40,7 +48,7 @@ func OutputMounts(outs []backend.Output) ([]string, error) {
 			return nil, fmt.Errorf("%w: %q", backend.ErrBadMount, o.Mount)
 		}
 		m := path.Clean(o.Mount)
-		if m == "/" {
+		if m == "/" || m == LogDir || strings.HasPrefix(m, LogDir+"/") || strings.HasPrefix(LogDir, m+"/") {
 			return nil, fmt.Errorf("%w: %q", ErrMountOverlap, o.Mount)
 		}
 		for _, prev := range ms {
@@ -82,9 +90,12 @@ func (s *Service) OutputStep(j backend.Job, command string) (map[string]string, 
 
 func shq(s string) string { return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'" }
 
-// runScript runs command, then uploads every regular file under the mounts
-// from an EXIT trap, so a failed command still gets its outputs uploaded and
-// the step still exits with the command's status. Symlinks are not followed.
+// runScript runs command with its stdout and stderr also teed to LogFile,
+// then uploads every regular file under the mounts and LogDir from an EXIT
+// trap, so a failed command still gets its outputs and its log uploaded and
+// the step still exits with the command's status. The trap first restores
+// the original stdout and stderr and waits for tee, so the log is complete
+// before it is uploaded. Symlinks are not followed.
 func runScript(mounts []string, command string) string {
 	q := make([]string, len(mounts))
 	for i, m := range mounts {
@@ -92,9 +103,12 @@ func runScript(mounts []string, command string) string {
 	}
 	list := strings.Join(q, " ")
 	return fmt.Sprintf(`mkdir -p -- %[1]s
+mkdir -p -- %[6]s
 __uc_upload() {
   __uc_rc=$?
   trap - EXIT
+  exec 1>&3 2>&4
+  wait "$__uc_tee" 2>/dev/null
   if ! command -v curl >/dev/null 2>&1 || ! command -v sha256sum >/dev/null 2>&1; then
     echo "unify-compute: curl and sha256sum are needed to upload outputs; nothing was uploaded" >&2
     exit "$__uc_rc"
@@ -102,7 +116,7 @@ __uc_upload() {
   __uc_auth="Authorization: Bearer $%[2]s"
   __uc_n=0
   __uc_bad=0
-  for __uc_m in %[1]s; do
+  for __uc_m in %[1]s %[6]s; do
     [ -d "$__uc_m" ] || continue
     while IFS= read -r -d '' __uc_f; do
       __uc_n=$((__uc_n + 1))
@@ -136,7 +150,10 @@ EOF
   fi
   exit "$__uc_rc"
 }
+exec 3>&1 4>&2
+exec > >(tee -a %[7]s) 2>&1
+__uc_tee=$!
 trap __uc_upload EXIT
 %[5]s
-`, list, EnvToken, EnvURL, MaxFiles, command)
+`, list, EnvToken, EnvURL, MaxFiles, command, shq(LogDir), shq(LogFile))
 }

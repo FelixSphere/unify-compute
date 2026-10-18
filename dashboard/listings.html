@@ -4,54 +4,55 @@
     <!-- @head -->
     <title>My listings — Unify Compute</title>
     <link rel="stylesheet" href="/src/app.css" />
-    <script type="module" src="/src/main.ts"></script>
+    <script type="module" blocking="render" src="/src/main.ts"></script>
   </head>
-  <body class="app" data-page="listings">
+  <body class="app" data-page="listings" data-i18n-title="listings.page-title">
     <!-- @shell:listings -->
     <main class="content" id="main" tabindex="-1">
-      <h1 class="sr-only">My listings</h1>
       <!-- @form-error -->
-      <section class="focal" aria-labelledby="focal-label">
+      <div class="page-head">
         <div>
-          <p class="eyebrow" id="focal-label">Templates you publish</p>
-          <p class="metric" id="lst-count" aria-live="polite">—</p>
-          <p class="sub">Submit a template for review. Once approved it appears in the marketplace under the publisher Unify Compute; nothing about your account is shown. Any change asks for review again, and you can take it off the market at any time.</p>
+          <h1 data-i18n="nav.listings">My listings</h1>
+          <p class="page-desc" data-i18n="listings.submit-a-template-for-review">Submit a template for review. Once approved it appears in the marketplace under the publisher Unify Compute; nothing about your account is shown. Any change asks for review again, and you can take it off the market at any time.</p>
         </div>
-        <button class="primary" type="button" id="new-open">New listing</button>
-      </section>
+        <button class="primary" type="button" id="new-open" data-i18n="listings.new-listing">New listing</button>
+      </div>
 
-      <p class="warning" id="closed-note" role="note" hidden>This deployment doesn't serve account listings to buyers yet. You can submit and edit listings; approved ones wait until it does.</p>
+      <p class="warning" id="closed-note" role="note" hidden data-i18n="listings.this-deployment-doesn-t-serve">This deployment doesn't serve account listings to buyers yet. You can submit and edit listings; approved ones wait until it does.</p>
 
       <section class="card" id="edit" aria-labelledby="edit-title" hidden>
-        <h2 id="edit-title" tabindex="-1">New listing</h2>
+        <h2 id="edit-title" tabindex="-1" data-i18n="listings.new-listing">New listing</h2>
         <form id="edit-form" novalidate>
           <div class="field">
-            <label for="listing-json">Template (JSON)</label>
+            <label for="listing-json" data-i18n="listings.template-json">Template (JSON)</label>
             <textarea id="listing-json" name="template" rows="20" spellcheck="false" aria-describedby="listing-json-hint listing-json-error"></textarea>
-            <p class="hint" id="listing-json-hint">One entry in the format of <a href="https://compute.unifyai.us/marketplace">templates.json</a>: a digest-pinned image, the command, the SKU, declared inputs and outputs, and which fields a submitter may override. The id is the slug buyers submit; it can't change later.</p>
+            <p class="hint" id="listing-json-hint" data-i18n="listings.one-entry-in-the-format">One entry in the format of <a href="https://compute.unifyai.us/marketplace">templates.json</a>: a digest-pinned image, the command, the SKU, declared inputs and outputs, and which fields a submitter may override. The id is the slug buyers submit; it can't change later.</p>
             <p class="field-error" id="listing-json-error" hidden></p>
           </div>
           <div class="actions">
-            <button class="primary" type="submit" id="edit-save">Submit for review</button>
-            <button class="ghost" type="button" id="edit-cancel">Cancel</button>
+            <button class="primary" type="submit" id="edit-save" data-i18n="listings.submit-for-review">Submit for review</button>
+            <button class="ghost" type="button" id="edit-cancel" data-i18n="common.cancel">Cancel</button>
           </div>
         </form>
       </section>
 
       <section class="section" aria-labelledby="list-title">
-        <h2 id="list-title">Listings</h2>
+        <div class="section-head">
+          <h2 id="list-title" data-i18n="listings.listings">Listings</h2>
+          <p class="muted" data-i18n="listings.on-the-market"><span id="lst-count">—</span> on the market</p>
+        </div>
         <p class="status-line" id="lst-status" role="status"></p>
-        <div id="lst-list" aria-live="polite"><p class="muted">Loading listings…</p></div>
+        <div id="lst-list" aria-live="polite"><p class="muted" data-i18n="common.loading-listings">Loading listings…</p></div>
       </section>
 
       <dialog id="unlist-dialog" aria-labelledby="unlist-title">
         <form method="dialog" id="unlist-form">
-          <h2 id="unlist-title">Take <code id="unlist-display"></code> off the market?</h2>
-          <p>Buyers stop seeing it at once. Jobs already running keep running. Relisting it asks for review again.</p>
+          <h2 id="unlist-title" data-i18n="listings.take-off-the-market">Take <code id="unlist-display"></code> off the market?</h2>
+          <p data-i18n="listings.buyers-stop-seeing-it-at">Buyers stop seeing it at once. Jobs already running keep running. Relisting it asks for review again.</p>
           <div class="form-error" id="unlist-error" role="alert" hidden><p></p></div>
           <div class="actions">
-            <button class="ghost" type="submit" value="unlist" id="unlist-confirm">Unlist</button>
-            <button class="ghost" type="submit" value="cancel">Keep it</button>
+            <button class="ghost" type="submit" value="unlist" id="unlist-confirm" data-i18n="listings.unlist">Unlist</button>
+            <button class="ghost" type="submit" value="cancel" data-i18n="common.keep-it">Keep it</button>
           </div>
         </form>
       </dialog>

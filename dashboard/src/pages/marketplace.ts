@@ -1,7 +1,41 @@
+import { t as tr } from '../i18n';
 import { $, busy, clearErrors, focusFirstInvalid, input, onSubmit, setFieldError, setFormError, showApiError } from '../lib';
-import { CONTACT, fill, get, h, type Job, type List, muted, notBuilt, send, setText, shell, type Template } from '../shell';
+import { CONTACT, fill, get, h, type Job, type List, money, mono, muted, notBuilt, send, setText, shell, state, table, type Template, usd } from '../shell';
 
-type SKU = { id: string; gpu?: string; accelerator?: string; gpu_count?: number; price_usd_per_hour: string; available: boolean; providers?: { cloud: string }[] };
+type SKU = {
+  id: string;
+  gpu?: string;
+  accelerator?: string;
+  gpu_count?: number;
+  gpu_memory_gb?: number;
+  vcpus?: number;
+  memory_gb?: number;
+  tier?: string;
+  interruptible?: boolean;
+  price_usd_per_hour: string;
+  available: boolean;
+  providers?: { cloud: string }[];
+};
+
+// The catalogue as a table: what can be chosen now, and what is coming.
+// Available first, then by price. Signed-in pages may show the hourly rate
+// (operator, 2026-10-14); the public marketplace page shows none.
+function gpuTable(catalogue: SKU[]): HTMLElement {
+  const rows = [...catalogue].sort((a, b) => Number(b.available) - Number(a.available) || Number(a.price_usd_per_hour) - Number(b.price_usd_per_hour));
+  return table(
+    tr('marketplace.gpus'),
+    [{ text: tr('marketplace.col-gpu') }, { text: tr('marketplace.col-memory'), num: true }, { text: tr('marketplace.col-cpu') }, { text: tr('marketplace.col-tier') }, { text: tr('marketplace.col-billing') }, { text: tr('marketplace.col-rate'), num: true }, { text: tr('common.status') }],
+    rows.map((k) => [
+      h('span', { class: 'cell-stack' }, h('strong', {}, `${k.gpu_count && k.gpu_count > 1 ? `${k.gpu_count} × ` : ''}${k.gpu ?? k.id}`), mono(k.id)),
+      mono(k.gpu_memory_gb ? `${k.gpu_memory_gb} GB` : '—'),
+      mono(k.vcpus && k.memory_gb ? `${k.vcpus} · ${k.memory_gb} GB` : '—'),
+      k.tier ? tr(`marketplace.tier-${k.tier}`) : '—',
+      k.interruptible ? tr('marketplace.spot') : tr('marketplace.on-demand'),
+      money(k.price_usd_per_hour),
+      k.available ? state(tr('marketplace.available'), 'success') : state(tr('marketplace.coming'), 'muted'),
+    ]),
+  );
+}
 
 const PUBLISHER = 'Unify Compute';
 const summary = (text: string) => (text.length > 160 ? text.slice(0, 157).trimEnd() + '…' : text);
@@ -48,18 +82,18 @@ function tile(t: Template): HTMLElement {
   return h(
     'li',
     { class: 'tile' },
-    h('div', { class: 'tile-top' }, h('code', {}, t.id), h('span', { class: t.available ? 'badge' : 'badge muted' }, t.available ? 'Available' : 'Not yet')),
+    h('div', { class: 'tile-top' }, h('code', {}, t.id), h('span', { class: t.available ? 'badge' : 'badge muted' }, t.available ? tr('marketplace.available') : tr('marketplace.not-yet'))),
     h('h3', {}, t.title),
     muted(summary(t.description)),
     h(
       'dl',
       { class: 'facts' },
       h('div', {}, h('dt', {}, 'GPU'), h('dd', { class: 'mono' }, t.sku)),
-      h('div', {}, h('dt', {}, 'Default runtime'), h('dd', {}, runtimeLabel(t.max_runtime_seconds))),
-      h('div', {}, h('dt', {}, 'Inputs'), h('dd', {}, t.inputs.length ? t.inputs.map((m) => m.mount).join(', ') : 'none')),
-      h('div', {}, h('dt', {}, 'Publisher'), h('dd', {}, t.publisher ?? PUBLISHER)),
+      h('div', {}, h('dt', {}, tr('marketplace.default-runtime')), h('dd', {}, runtimeLabel(t.max_runtime_seconds))),
+      h('div', {}, h('dt', {}, tr('marketplace.inputs')), h('dd', {}, t.inputs.length ? t.inputs.map((m) => m.mount).join(', ') : 'none')),
+      h('div', {}, h('dt', {}, tr('marketplace.publisher')), h('dd', {}, t.publisher ?? PUBLISHER)),
     ),
-    h('button', { type: 'button', class: 'secondary', 'data-run': t.id, disabled: !t.available, 'aria-label': `Run ${t.title}` }, t.available ? 'Run this' : t.unavailable_reason ?? 'Not runnable yet'),
+    h('button', { type: 'button', class: 'secondary', 'data-run': t.id, disabled: !t.available, 'aria-label': tr('marketplace.run-title', { title: t.title }) }, t.available ? tr('marketplace.run-this') : t.unavailable_reason ?? tr('marketplace.not-runnable-yet')),
   );
 }
 
@@ -68,21 +102,23 @@ export async function marketplace() {
   if (!me) return;
   $('access-note')!.hidden = me.account.status === 'active' && me.account.compute_enabled;
 
+  const skus = await get<List<SKU>>('/skus');
+  const catalogue = skus.ok ? skus.data.data : [];
+  fill('gpu-list', skus.ok ? (catalogue.length ? gpuTable(catalogue) : muted(tr('marketplace.no-gpus'))) : muted(notBuilt(skus.error) ? tr('marketplace.gpus-will-appear') : skus.error.message));
+
   const r = await get<List<Template>>('/templates');
   if (!r.ok) {
-    fill('tpl-list', muted(notBuilt(r.error) ? 'Templates will appear here once the marketplace is live in the dashboard.' : r.error.message));
+    fill('tpl-list', muted(notBuilt(r.error) ? tr('marketplace.templates-will-appear-here-once') : r.error.message));
     return;
   }
   const templates = r.data.data;
   setText('tpl-count', String(templates.length));
   if (templates.length === 0) {
-    fill('tpl-list', muted('No templates are offered yet.'));
+    fill('tpl-list', muted(tr('marketplace.no-templates-are-offered-yet')));
     return;
   }
   const grid = h('ul', { class: 'tiles' }, ...templates.map(tile));
   fill('tpl-list', grid);
-  const skus = await get<List<SKU>>('/skus');
-  const catalogue = skus.ok ? skus.data.data : [];
   const sold = catalogue.filter((k) => k.available);
 
   const card = $('run')!;
@@ -113,7 +149,7 @@ export async function marketplace() {
     }
     const hourly = holdUSD(rate, 3600);
     if (!Number.isInteger(secs) || secs < 1) {
-      estimateEl.textContent = `${id} costs USD ${hourly} an hour of GPU time. Enter a maximum runtime to see the hold.`;
+      estimateEl.textContent = tr('marketplace.estimate-no-runtime', { sku: id, hourly: hourly ?? '' });
       estimateEl.hidden = false;
       return;
     }
@@ -121,8 +157,8 @@ export async function marketplace() {
     const most = holdUSD(rate, secs);
     estimateEl.textContent =
       secs <= INITIAL_HOLD_SECONDS
-        ? `${id} costs USD ${hourly} an hour of GPU time. Submitting holds USD ${held} of your balance, the most this job can cost; what it doesn't use comes back when it ends.`
-        : `${id} costs USD ${hourly} an hour of GPU time. Submitting holds USD ${held} of your balance for the first ${runtimeLabel(INITIAL_HOLD_SECONDS)}, extended while the job runs; over its ${runtimeLabel(secs)} maximum it can cost at most USD ${most}. What it doesn't use comes back when it ends.`;
+        ? tr('marketplace.estimate-within-hold', { sku: id, hourly: hourly ?? '', held: held ?? '' })
+        : tr('marketplace.estimate-beyond-hold', { sku: id, hourly: hourly ?? '', held: held ?? '', first: runtimeLabel(INITIAL_HOLD_SECONDS), max: runtimeLabel(secs), most: most ?? '' });
     estimateEl.hidden = false;
   }
 
@@ -130,20 +166,26 @@ export async function marketplace() {
     current = t;
     opener = from;
     const can = (f: string) => t.overridable.includes(f);
-    setText('run-title', `Run ${t.title}`);
+    setText('run-title', tr('marketplace.run-title', { title: t.title }));
     setText('run-sub', `${t.id} · ${t.description}`);
     const nodes: HTMLElement[] = [];
     t.inputs.forEach((m, i) => {
       nodes.push(
-        field(`in-${i}`, `Input for ${m.mount}`, h('input', { type: 'url', inputmode: 'url', autocomplete: 'off', placeholder: 'https://…/file', required: true }), `${m.description} An https:// URL ending in a file name; the file is mounted at ${m.mount}.`),
+        field(`in-${i}`, tr('marketplace.input-for', { mount: m.mount }), h('input', { type: 'url', inputmode: 'url', autocomplete: 'off', placeholder: 'https://…/file', required: true }), `${m.description} ${tr('marketplace.input-hint', { mount: m.mount })}`),
       );
     });
     if (can('sku')) {
-      const options = sold.some((k) => k.id === t.sku) ? sold : [{ id: t.sku, price_usd_per_hour: '', available: true }, ...sold];
-      const select = h('select', {}, ...options.map((k) => h('option', { value: k.id, selected: k.id === t.sku }, k.price_usd_per_hour ? `${k.id} · USD ${k.price_usd_per_hour}/h` : k.id)));
-      nodes.push(field('run-sku', 'GPU (SKU)', select, `The template runs on ${t.sku} unless you choose another.`));
+      const listed = catalogue.some((k) => k.id === t.sku) ? catalogue : [{ id: t.sku, price_usd_per_hour: '', available: true }, ...catalogue];
+      const options = [...listed].sort((a, b) => Number(b.available) - Number(a.available) || Number(a.price_usd_per_hour) - Number(b.price_usd_per_hour));
+      const label = (k: SKU) => {
+        const name = k.gpu ? `${k.gpu}${k.interruptible ? ` (${tr('marketplace.spot')})` : ''} · ${k.id}` : k.id;
+        const rate = k.price_usd_per_hour ? ` · USD ${usd(k.price_usd_per_hour)}/h` : '';
+        return k.available ? name + rate : `${name} · ${tr('marketplace.coming')}`;
+      };
+      const select = h('select', {}, ...options.map((k) => h('option', { value: k.id, selected: k.id === t.sku, disabled: !k.available }, label(k))));
+      nodes.push(field('run-sku', 'GPU (SKU)', select, tr('marketplace.runs-on-unless', { sku: t.sku })));
       if (can('providers')) {
-        const box = h('fieldset', { class: 'field', id: 'run-providers' }, h('legend', {}, 'Providers (optional)'));
+        const box = h('fieldset', { class: 'field', id: 'run-providers' }, h('legend', {}, tr('marketplace.providers-optional')));
         const render = () => {
           for (const el of Array.from(box.querySelectorAll('label'))) el.remove();
           const k = sold.find((x) => x.id === select.value);
@@ -159,19 +201,19 @@ export async function marketplace() {
     }
     if (can('spec.env')) {
       for (const [k, v] of Object.entries(t.env)) {
-        nodes.push(field(`env-${k}`, `Environment: ${k}`, h('input', { type: 'text', autocomplete: 'off', value: v }), undefined));
+        nodes.push(field(`env-${k}`, tr('marketplace.environment-var', { name: k }), h('input', { type: 'text', autocomplete: 'off', value: v }), undefined));
         (nodes[nodes.length - 1].querySelector('input') as HTMLInputElement).value = v;
       }
     }
     if (can('spec.max_runtime_seconds')) {
       const n = h('input', { type: 'number', inputmode: 'numeric', min: '1', step: '1', autocomplete: 'off' });
       n.value = String(t.max_runtime_seconds);
-      nodes.push(field('run-runtime', 'Maximum runtime (seconds)', n, 'The job is stopped at this limit, and the hold on your balance is sized by it.'));
+      nodes.push(field('run-runtime', tr('marketplace.maximum-runtime-seconds'), n, tr('marketplace.the-job-is-stopped-at')));
     }
     if (can('spec.command')) {
       const ta = h('textarea', { rows: '4', spellcheck: 'false' });
       ta.value = t.command.join('\n');
-      nodes.push(field('run-command', 'Command', ta, 'One argument per line, as the template\'s command is run in the image.'));
+      nodes.push(field('run-command', tr('job.command'), ta, tr('marketplace.one-argument-per-line-as')));
     }
     fields.replaceChildren(...nodes);
     $('run-sku')?.addEventListener('change', estimate);
@@ -199,7 +241,7 @@ export async function marketplace() {
     t.inputs.forEach((m, i) => {
       const v = input(`in-${i}`)!.value.trim();
       if (!/^https:\/\/\S+\/[^/?#]+$/.test(v)) {
-        setFieldError(`in-${i}`, 'Enter an https:// URL that ends in a file name.');
+        setFieldError(`in-${i}`, tr('marketplace.enter-an-https-url-that'));
         bad = true;
       }
       inputs.push({ source: v, mount: m.mount });
@@ -223,7 +265,7 @@ export async function marketplace() {
     if (runtime) {
       const n = Number(runtime.value);
       if (!Number.isInteger(n) || n < 1) {
-        setFieldError('run-runtime', 'Whole seconds, at least 1.');
+        setFieldError('run-runtime', tr('marketplace.whole-seconds-at-least-1'));
         return runtime.focus();
       }
       if (n !== t.max_runtime_seconds) spec.max_runtime_seconds = n;
@@ -240,8 +282,8 @@ export async function marketplace() {
       const target: Record<string, string> = { 'spec.inputs': 'in-0', sku: 'run-sku', 'spec.env': `env-${Object.keys(t.env)[0] ?? ''}`, 'spec.max_runtime_seconds': 'run-runtime', 'spec.command': 'run-command' };
       const id = e.param && target[e.param];
       if (id && setFieldError(id, e.message)) return input(id)?.focus();
-      if (e.code === 'insufficient_balance') return setFormError(e.message, { href: '/billing', text: 'Top up' });
-      if (e.code === 'compute_not_enabled') return setFormError(e.message, { href: CONTACT, text: 'Contact us' });
+      if (e.code === 'insufficient_balance') return setFormError(e.message, { href: '/billing', text: tr('marketplace.top-up') });
+      if (e.code === 'compute_not_enabled') return setFormError(e.message, { href: CONTACT, text: tr('common.contact-us') });
       return showApiError(e);
     }
     location.assign(`/jobs/${encodeURIComponent(r.data.id)}`);

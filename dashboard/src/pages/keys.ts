@@ -1,5 +1,6 @@
+import { t } from '../i18n';
 import { $, busy, clearFieldError, focusFirstInvalid, input, onSubmit, setFieldError, showApiError } from '../lib';
-import { cents, fill, get, h, type List, listOf, mono, muted, notBuilt, send, setText, shell, state, table, when, withReauth } from '../shell';
+import { cents, empty, fill, get, h, type List, listOf, mono, muted, notBuilt, send, setText, shell, state, table, usd, when, withReauth } from '../shell';
 
 type Key = {
   id: number | string;
@@ -38,39 +39,37 @@ export async function keys() {
   async function load() {
     const r = await get<Key[] | List<Key>>('/keys');
     if (!r.ok) {
-      setText('keys-count', '—');
-      fill('keys-list', muted(notBuilt(r.error) ? 'Your API keys will be listed here once keys are live in the dashboard.' : r.error.message));
+      setText('keys-count', '');
+      fill('keys-list', muted(notBuilt(r.error) ? t('keys.your-api-keys-will-be') : r.error.message));
       return;
     }
     const list = listOf(r.data).data;
-    setText('keys-count', String(list.filter(active).length));
+    const n = list.filter(active).length;
+    setText('keys-count', t('keys.active-of-10', { n }));
     if (list.length === 0) {
-      fill('keys-list', muted('No keys yet. Create one to submit jobs.'));
+      fill('keys-list', empty(t('keys.no-keys-yet'), t('keys.create-a-key-to-submit')));
       return;
     }
     fill(
       'keys-list',
       table(
-        'API keys',
-        [{ text: 'Name' }, { text: 'Key' }, { text: 'Access' }, { text: 'This month / cap (USD)', num: true }, { text: 'Created' }, { text: 'Expires' }, { text: 'Last used' }, { text: 'Status' }, { text: '' }],
+        t('nav.keys'),
+        [{ text: t('keys.key') }, { text: t('keys.access') }, { text: t('keys.this-month-cap-usd'), num: true }, { text: t('keys.expires-2') }, { text: t('keys.last-used') }, { text: t('common.status') }, { text: '' }],
         list.map((k) => {
           const live = active(k);
-          const st = k.revoked_at ? state('Revoked', 'muted') : live ? state('Active', 'success') : state('Expired', 'muted');
+          const st = k.revoked_at ? state(t('keys.revoked'), 'muted') : live ? state(t('keys.active'), 'success') : state(t('keys.expired'), 'muted');
           const spent = k.spent_this_month_usd ?? '—';
-          const capCell = h(
-            'span',
-            { class: 'mono' },
-            `${spent} / ${k.monthly_cap_usd ?? 'no cap'}`,
-          );
+          const capCell = h('span', { class: 'mono' }, `${usd(spent)} / ${k.monthly_cap_usd ? usd(k.monthly_cap_usd) : t('keys.no-cap')}`);
+          const nameCell = h('span', { class: 'cell-stack' }, h('strong', {}, k.name), mono(k.display));
           const actions = h('span', { class: 'row-actions' });
           if (live) {
             actions.append(
-              h('button', { type: 'button', class: 'link', 'data-cap': String(k.id), 'data-display': k.display, 'data-cap-value': k.monthly_cap_usd ?? '', 'data-spent': spent, 'aria-label': `Set the monthly cap of ${k.name}` }, 'Cap'),
+              h('button', { type: 'button', class: 'link', 'data-cap': String(k.id), 'data-display': k.display, 'data-cap-value': k.monthly_cap_usd ?? '', 'data-spent': spent, 'aria-label': t('keys.set-cap-of', { name: k.name }) }, t('keys.cap')),
               ' ',
-              h('button', { type: 'button', class: 'link', 'data-revoke': String(k.id), 'data-display': k.display, 'aria-label': `Revoke ${k.name}` }, 'Revoke'),
+              h('button', { type: 'button', class: 'link', 'data-revoke': String(k.id), 'data-display': k.display, 'aria-label': t('keys.revoke-name', { name: k.name }) }, t('keys.revoke')),
             );
           }
-          return [k.name, mono(k.display), k.scopes.includes('jobs') ? 'Jobs' : 'Read only', capCell, when(k.created_at), k.expires_at ? when(k.expires_at) : 'Never', when(k.last_used_at), st, actions];
+          return [nameCell, k.scopes.includes('jobs') ? t('nav.jobs') : t('keys.read-only'), capCell, k.expires_at ? when(k.expires_at) : t('keys.never'), k.last_used_at ? when(k.last_used_at) : t('keys.never'), st, actions];
         }),
       ),
     );
@@ -99,14 +98,14 @@ export async function keys() {
   onSubmit(form, async () => {
     const name = nameField.value.trim();
     if (!name) {
-      setFieldError('key-name', 'Give the key a name.');
+      setFieldError('key-name', t('keys.give-the-key-a-name'));
       return focusFirstInvalid(form);
     }
     const scope = form.querySelector<HTMLInputElement>('input[name=scope]:checked')?.value ?? 'jobs';
     const capField = input('key-cap')!;
     const cap = capField.value.trim();
     if (cap && cents(cap) === null) {
-      setFieldError('key-cap', 'Dollars with at most two decimals, e.g. 20 or 12.50.');
+      setFieldError('key-cap', t('keys.dollars-with-at-most-two'));
       return capField.focus();
     }
     const expiresField = input('key-expires')!;
@@ -114,7 +113,7 @@ export async function keys() {
     if (expiresField.value) {
       expiresAt = endOfDay(expiresField.value);
       if (expiresAt === null || expiresAt * 1000 <= Date.now()) {
-        setFieldError('key-expires', 'Choose today or a later date.');
+        setFieldError('key-expires', t('keys.choose-today-or-a-later'));
         return expiresField.focus();
       }
     }
@@ -156,7 +155,7 @@ export async function keys() {
     const secret = $('reveal-secret')!.textContent ?? '';
     try {
       await navigator.clipboard.writeText(secret);
-      status.textContent = 'Copied to the clipboard.';
+      status.textContent = t('keys.copied-to-the-clipboard');
     } catch {
       // Clipboard access refused: select the key so a keyboard copy works.
       const range = document.createRange();
@@ -164,7 +163,7 @@ export async function keys() {
       const sel = getSelection();
       sel?.removeAllRanges();
       sel?.addRange(range);
-      status.textContent = "Couldn't copy automatically. The key is selected: press Ctrl+C or ⌘C.";
+      status.textContent = t('keys.couldn-t-copy-automatically-the');
     }
   });
   $('reveal-done')!.addEventListener('click', () => {
@@ -195,7 +194,7 @@ export async function keys() {
     e.preventDefault();
     const v = capValue.value.trim();
     if (v && cents(v) === null) {
-      setFieldError('cap-value', 'Dollars with at most two decimals, e.g. 20 or 12.50.');
+      setFieldError('cap-value', t('keys.dollars-with-at-most-two'));
       return capValue.focus();
     }
     const save = $<HTMLButtonElement>('cap-save')!;
@@ -209,7 +208,7 @@ export async function keys() {
     }
     capDialog.close();
     await load();
-    $('keys-list')!.prepend(h('p', { class: 'status-line', role: 'status' }, v ? `Monthly cap set to USD ${r.data.monthly_cap_usd}.` : 'Monthly cap removed.'));
+    $('keys-list')!.prepend(h('p', { class: 'status-line', role: 'status' }, v ? t('keys.cap-set', { amount: usd(r.data.monthly_cap_usd) }) : t('keys.monthly-cap-removed')));
   });
 
   // Revoke: confirm in a dialog; errors stay inside it.
@@ -241,7 +240,7 @@ export async function keys() {
     await load();
     status.textContent = '';
     const announce = $('keys-list')!;
-    announce.prepend(h('p', { class: 'status-line', role: 'status' }, `Key ${target.display} revoked.`));
+    announce.prepend(h('p', { class: 'status-line', role: 'status' }, t('keys.key-revoked', { key: target.display })));
     $('main')?.focus();
   });
 

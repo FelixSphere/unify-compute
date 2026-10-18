@@ -1,5 +1,6 @@
+import { t } from '../i18n';
 import { $, setFormError } from '../lib';
-import { type Child, duration, fill, get, getText, h, type Job, jobState, type List, mono, muted, notBuilt, send, setText, shell, table, when } from '../shell';
+import { type Child, duration, fill, get, getText, h, type Job, jobState, type List, mono, muted, notBuilt, send, setText, shell, table, usd, when } from '../shell';
 
 type JobEvent = { id: string; type: string; created_at: number; data: Record<string, unknown> };
 type Artifact = { path: string; size: number; sha256: string; url: string; expires_at: number };
@@ -25,12 +26,12 @@ export async function job() {
   if (!me) return;
   const id = decodeURIComponent(location.pathname.split('/')[2] ?? '');
   setText('job-id', id);
-  setText('job-h1', `Job ${id}`);
+  setText('job-h1', t('job.job-id', { id }));
   document.title = `${id || 'Job'} — Unify Compute`;
   const loading = $('job-loading')!;
   if (!id) {
     loading.hidden = true;
-    setFormError('This address has no job id.', { href: '/jobs', text: 'See all jobs' });
+    setFormError(t('job.this-address-has-no-job'), { href: '/jobs', text: t('job.see-all-jobs') });
     return;
   }
   const path = `/jobs/${encodeURIComponent(id)}`;
@@ -38,31 +39,31 @@ export async function job() {
 
   function render(j: Job) {
     const u = j.usage;
-    setText('job-settled', u?.settled_cost_usd ?? '—');
+    setText('job-settled', usd(u?.settled_cost_usd));
     fill(
       'job-sub',
       jobState(j.status),
-      u ? ` · USD ${u.hold_usd} held · ceiling USD ${u.estimated_cost_usd}` : '',
+      u ? ` · USD ${usd(u.hold_usd)} held · ceiling USD ${usd(u.estimated_cost_usd)}` : '',
     );
     cancelButton.hidden = TERMINAL.has(j.status) || me!.account.status !== 'active';
     facts('job-details', [
-      ['Status', jobState(j.status)],
+      [t('common.status'), jobState(j.status)],
       ['SKU', mono(j.sku)],
-      ['Created', when(j.created_at)],
-      ['Started', when(j.started_at)],
-      ['Finished', when(j.finished_at)],
-      ['Placement', j.placement ? mono(`${j.placement.cloud} · ${j.placement.region} · ${j.placement.instance_type}`) : '—'],
-      ['Image', j.spec?.image ? mono(j.spec.image) : '—'],
-      ['Command', j.spec?.command?.length ? mono(j.spec.command.join(' ')) : '—'],
-      ['Max runtime', j.spec?.max_runtime_seconds ? duration(j.spec.max_runtime_seconds) : '—'],
-      ...(j.error ? ([['Error', h('span', {}, mono(j.error.code), ` ${j.error.message}`)]] as [string, Child][]) : []),
+      [t('common.created'), when(j.created_at)],
+      [t('job.started'), when(j.started_at)],
+      [t('job.finished'), when(j.finished_at)],
+      [t('job.placement'), j.placement ? mono(`${j.placement.cloud} · ${j.placement.region} · ${j.placement.instance_type}`) : '—'],
+      [t('job.image'), j.spec?.image ? mono(j.spec.image) : '—'],
+      [t('job.command'), j.spec?.command?.length ? mono(j.spec.command.join(' ')) : '—'],
+      [t('job.max-runtime'), j.spec?.max_runtime_seconds ? duration(j.spec.max_runtime_seconds) : '—'],
+      ...(j.error ? ([[t('job.error'), h('span', {}, mono(j.error.code), ` ${j.error.message}`)]] as [string, Child][]) : []),
       ...Object.entries(j.metadata ?? {}).map(([k, v]) => [k, mono(v)] as [string, Child]),
     ]);
     facts('job-usage', [
-      ['GPU time', mono(`${duration(u?.gpu_seconds ?? 0)} (${u?.gpu_seconds ?? 0} s)`)],
-      ['Charged', mono(`USD ${u?.settled_cost_usd ?? '—'}`)],
-      ['Held now', mono(`USD ${u?.hold_usd ?? '—'}`)],
-      ['Ceiling', mono(`USD ${u?.estimated_cost_usd ?? '—'}`)],
+      [t('common.gpu-time'), mono(`${duration(u?.gpu_seconds ?? 0)} (${u?.gpu_seconds ?? 0} s)`)],
+      [t('job.charged'), mono(`USD ${u?.settled_cost_usd ?? '—'}`)],
+      [t('job.held-now'), mono(`USD ${u?.hold_usd ?? '—'}`)],
+      [t('job.ceiling'), mono(`USD ${u?.estimated_cost_usd ?? '—'}`)],
     ]);
   }
 
@@ -70,8 +71,8 @@ export async function job() {
   loading.hidden = true;
   if (!r.ok) {
     setFormError(
-      r.error.status === 404 ? "We couldn't find that job in your account." : r.error.message,
-      { href: '/jobs', text: 'See all jobs' },
+      r.error.status === 404 ? t('job.we-couldn-t-find-that') : r.error.message,
+      { href: '/jobs', text: t('job.see-all-jobs') },
     );
     return;
   }
@@ -100,24 +101,24 @@ export async function job() {
     dialog.close();
     const fresh = c.ok ? c : await get<Job>(path);
     if (fresh.ok) render(fresh.data);
-    setText('job-status-line', c.ok ? 'Cancel requested. GPU time stopped being charged when it was accepted.' : 'This job had already ended.');
+    setText('job-status-line', c.ok ? t('job.cancel-requested-gpu-time-stopped') : t('job.this-job-had-already-ended'));
     $('main')?.focus();
   });
 
   const ev = await get<List<JobEvent>>(`${path}/events`);
-  if (!ev.ok) fill('job-events', muted(notBuilt(ev.error) ? 'Events will appear here: queued, placed, running, and how the job ended.' : ev.error.message));
-  else if (ev.data.data.length === 0) fill('job-events', muted('No events yet.'));
+  if (!ev.ok) fill('job-events', muted(notBuilt(ev.error) ? t('job.events-will-appear-here-queued') : ev.error.message));
+  else if (ev.data.data.length === 0) fill('job-events', muted(t('job.no-events-yet')));
   else
     fill(
       'job-events',
-      table('Events', [{ text: 'Time' }, { text: 'Event' }, { text: 'Detail' }], ev.data.data.map((e) => [when(e.created_at), mono(e.type), eventDetail(e)])),
+      table(t('job.events'), [{ text: t('job.time') }, { text: t('job.event') }, { text: t('job.detail') }], ev.data.data.map((e) => [when(e.created_at), mono(e.type), eventDetail(e)])),
     );
 
   async function logs() {
     const l = await getText(`${path}/logs`);
-    if (!l.ok) fill('job-logs', muted(notBuilt(l.error) ? 'Logs will appear here while the job runs.' : l.error.message));
-    else if (!l.data) fill('job-logs', muted("No output yet. Logs are read from the job's machine while it runs; a finished job's logs are not kept yet."));
-    else fill('job-logs', h('pre', { class: 'code-block', tabindex: '0', role: 'region', 'aria-label': 'Job logs' }, l.data));
+    if (!l.ok) fill('job-logs', muted(notBuilt(l.error) ? t('job.logs-will-appear-here-while') : l.error.message));
+    else if (!l.data) fill('job-logs', muted(t('job.no-output-yet-logs-are')));
+    else fill('job-logs', h('pre', { class: 'code-block', tabindex: '0', role: 'region', 'aria-label': t('job.job-logs') }, l.data));
   }
   $('logs-refresh')!.addEventListener('click', () => void logs());
   await logs();
@@ -129,20 +130,20 @@ export async function job() {
     fill(
       'job-artifacts',
       notBuilt(a.error)
-        ? muted('Download links are not in the dashboard yet. With an API key: ', h('code', { class: 'inline' }, `GET /compute/v1/jobs/${id}/artifacts`), '.')
+        ? muted(t('job.download-links-are-not-in'), h('code', { class: 'inline' }, `GET /compute/v1/jobs/${id}/artifacts`), '.')
         : muted(a.error.message),
     );
     return;
   }
   if (!a.data.data.length) {
-    fill('job-artifacts', muted(a.data.complete === false ? "Files the job writes to its output directories are uploaded when its command exits." : 'This job wrote no files.'));
+    fill('job-artifacts', muted(a.data.complete === false ? t('job.files-the-job-writes-to') : t('job.this-job-wrote-no-files')));
     return;
   }
   fill(
     'job-artifacts',
     table(
-      'Artifacts',
-      [{ text: 'File' }, { text: 'Size', num: true }, { text: 'SHA-256' }, { text: 'Link expires' }],
+      t('job.artifacts'),
+      [{ text: t('job.file') }, { text: t('job.size'), num: true }, { text: 'SHA-256' }, { text: t('job.link-expires') }],
       a.data.data.map((f) => [
         // Presigned S3 URLs: a download the person starts, never a request
         // the page makes. Anything but https is not a link.
@@ -152,6 +153,6 @@ export async function job() {
         when(f.expires_at),
       ]),
     ),
-    a.data.truncated ? muted('Only the first 10,000 files are listed.') : null,
+    a.data.truncated ? muted(t('job.only-the-first-10-000')) : null,
   );
 }

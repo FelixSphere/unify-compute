@@ -1,5 +1,6 @@
+import { t } from '../i18n';
 import { $ } from '../lib';
-import { fill, get, type Job, jobsTable, type List, muted, notBuilt, setText, shell } from '../shell';
+import { empty, fill, get, type Job, jobsTable, type List, muted, notBuilt, rich, setText, shell } from '../shell';
 
 function chipsInit(onChange: (status: string) => void) {
   const chips = Array.from(document.querySelectorAll<HTMLButtonElement>('#filters .chip'));
@@ -32,13 +33,20 @@ export async function jobs() {
     more.disabled = false;
     if (!r.ok) {
       more.hidden = true;
-      fill('jobs-list', muted(notBuilt(r.error) ? 'Your jobs will be listed here once jobs are live in the dashboard.' : r.error.message));
+      fill('jobs-list', muted(notBuilt(r.error) ? t('jobs.your-jobs-will-be-listed') : r.error.message));
       return;
     }
     shown = append ? shown.concat(r.data.data) : r.data.data;
     cursor = r.data.has_more ? r.data.next : undefined;
     more.hidden = !cursor;
-    fill('jobs-list', shown.length ? jobsTable('Jobs', shown) : muted(filter ? 'No jobs with this status.' : 'No jobs yet.'));
+    fill(
+      'jobs-list',
+      shown.length
+        ? jobsTable(t('nav.jobs'), shown)
+        : filter
+          ? empty(t('jobs.no-jobs-with-this-status'))
+          : empty(t('jobs.no-jobs-yet'), rich('jobs.no-jobs-yet-text')),
+    );
   }
 
   chipsInit((s) => {

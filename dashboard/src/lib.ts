@@ -1,3 +1,4 @@
+import { t } from './i18n';
 // Shared by the signed-out pages (main.ts) and the dashboard (shell.ts, pages/).
 // Routes, bodies and error codes: docs/spec/accounts.md, "Dashboard API".
 
@@ -6,13 +7,14 @@ export type Result<T> = { ok: true; status: number; data: T } | { ok: false; err
 
 export const API = '/dashboard/v1';
 export const MIN_PASSWORD = 12;
-export const GENERIC = "Something went wrong on our side. Try again in a minute.";
+// Functions, not strings: the catalogue is loaded after this module.
+export const GENERIC = () => t('err.something-went-wrong-on-our');
 
 // Same wording as compute-api's own 429 message (internal/dashboard).
 export function humanWait(secs: number): string {
-  if (secs < 60) return `${secs} seconds`;
-  if (secs < 120) return 'a minute';
-  return `${Math.ceil(secs / 60)} minutes`;
+  if (secs < 60) return t('time.seconds', { n: secs });
+  if (secs < 120) return t('time.a-minute');
+  return t('time.minutes', { n: Math.ceil(secs / 60) });
 }
 
 export async function call<T>(method: string, path: string, body?: unknown, csrf?: string): Promise<Result<T>> {
@@ -29,20 +31,20 @@ export async function call<T>(method: string, path: string, body?: unknown, csrf
       cache: 'no-store',
     });
   } catch {
-    return { ok: false, error: { status: 0, code: 'network', message: "We couldn't reach Unify Compute. Check your connection and try again." } };
+    return { ok: false, error: { status: 0, code: 'network', message: t('err.we-couldn-t-reach-unify') } };
   }
   const json = await res.json().catch(() => null);
   if (res.ok) return { ok: true, status: res.status, data: json as T };
   const e = json?.error;
   if (e && typeof e.code === 'string') {
-    let message = typeof e.message === 'string' && e.message ? e.message : GENERIC;
+    let message = typeof e.message === 'string' && e.message ? e.message : GENERIC();
     const retry = Number(res.headers.get('Retry-After'));
     if (res.status === 429 && retry > 0 && !/second|minute|hour/.test(message)) {
-      message += ` Try again in ${humanWait(retry)}.`;
+      message += ' ' + t('err.try-again-in', { wait: humanWait(retry) });
     }
     return { ok: false, error: { status: res.status, code: e.code, message, param: e.param || undefined } };
   }
-  return { ok: false, error: { status: res.status, code: 'unexpected', message: GENERIC } };
+  return { ok: false, error: { status: res.status, code: 'unexpected', message: GENERIC() } };
 }
 
 export const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T | null;
@@ -114,23 +116,23 @@ export function busy(form: HTMLFormElement, on: boolean) {
 export function checkNewPassword(): boolean {
   const pw = input('password')?.value ?? '';
   if (pw.length < MIN_PASSWORD) {
-    setFieldError('password', `Use a password of at least ${MIN_PASSWORD} characters.`);
+    setFieldError('password', t('err.password-min', { min: MIN_PASSWORD }));
     return false;
   }
   return true;
 }
 
-export const MISMATCH = "Passwords don't match.";
+export const MISMATCH = () => t('err.passwords-don-t-match');
 
 export function checkConfirm(): boolean {
   const pw = input('password')?.value ?? '';
   const confirm = input('password_confirm')?.value ?? '';
   if (!confirm) {
-    setFieldError('password_confirm', 'Enter the password again.');
+    setFieldError('password_confirm', t('err.enter-the-password-again'));
     return false;
   }
   if (pw !== confirm) {
-    setFieldError('password_confirm', MISMATCH);
+    setFieldError('password_confirm', MISMATCH());
     return false;
   }
   clearFieldError('password_confirm');
@@ -161,7 +163,7 @@ export function wireToggles() {
       const show = target.type === 'password';
       target.type = show ? 'text' : 'password';
       button.setAttribute('aria-pressed', String(show));
-      button.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+      button.setAttribute('aria-label', show ? t('err.hide-password') : t('err.show-password'));
     });
   }
 }

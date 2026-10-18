@@ -1,16 +1,22 @@
+import { t, tag } from './i18n';
 // Shared by the signed-in pages in pages/: API types, requests, DOM helpers,
 // the app shell and the reauth prompt.
 
 import { $, type ApiError, busy, call, clearFieldError, GENERIC, input, type Result, setFieldError, setFormError } from './lib';
 
+export type Role = 'owner' | 'admin' | 'member';
 export type Me = {
-  user: { email: string; created_at: number };
-  account: { id: number; status: 'active' | 'suspended' | 'closed'; compute_enabled: boolean };
+  // role and name arrive with members (A5b); an older compute-api omits them.
+  user: { email: string; role?: Role; created_at: number };
+  account: { id: number; name?: string; status: 'active' | 'suspended' | 'closed'; compute_enabled: boolean };
   csrf_token: string;
 };
 export type Balance = {
   available_usd: string;
   held_usd: string;
+  // The low-balance warning's threshold, 2 places; "0.00" is off. Absent
+  // from a compute-api older than W6.
+  low_balance_usd?: string;
   currency?: 'USD';
   limits?: { topup_min_usd: string; topup_max_usd: string; balance_max_usd: string; topups_per_day: number };
 };
@@ -63,13 +69,27 @@ export async function get<T>(path: string): Promise<Result<T>> {
   return r;
 }
 
-// Every state-changing request carries the CSRF token fetched from GET /me
-// just before it, so a token rotated by a log-in in another tab, or a
-// session that ended, is noticed here rather than as a 403.
-export async function send<T>(method: 'POST' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<Result<T>> {
+// The CSRF token from this page's GET /me. A state-changing request uses it
+// directly, one round trip instead of two; a token rotated since (a log-in in
+// another tab) answers 403 csrf_failed, and the request is retried once
+// with a fresh one.
+let csrf = '';
+async function freshCsrf(): Promise<Result<Me>> {
   const m = await get<Me>('/me');
-  if (!m.ok) return m;
-  const r = await call<T>(method, path, body, m.data.csrf_token);
+  if (m.ok) csrf = m.data.csrf_token;
+  return m;
+}
+export async function send<T>(method: 'POST' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<Result<T>> {
+  if (!csrf) {
+    const m = await freshCsrf();
+    if (!m.ok) return m;
+  }
+  let r = await call<T>(method, path, body, csrf);
+  if (!r.ok && r.error.code === 'csrf_failed') {
+    const m = await freshCsrf();
+    if (!m.ok) return m;
+    r = await call<T>(method, path, body, csrf);
+  }
   if (!r.ok && r.error.code === 'session_required') return toLogin();
   return r;
 }
@@ -84,7 +104,7 @@ export async function getText(path: string): Promise<Result<string>> {
       cache: 'no-store',
     });
   } catch {
-    return { ok: false, error: { status: 0, code: 'network', message: "We couldn't reach Unify Compute. Check your connection and try again." } };
+    return { ok: false, error: { status: 0, code: 'network', message: t('err.we-couldn-t-reach-unify') } };
   }
   if (res.status === 401) return toLogin();
   if (res.ok) return { ok: true, status: res.status, data: await res.text() };
@@ -144,19 +164,41 @@ export function table(label: string, head: { text: string; num?: boolean }[], ro
 export type Tone = 'success' | 'live' | 'danger' | 'warning' | 'muted';
 export const state = (word: string, tone: Tone) => h('span', { class: 'state' }, h('span', { class: `dot dot-${tone}`, 'aria-hidden': 'true' }), word);
 
+// Catalogue keys, read with t() at render time: a module-level string would
+// be English, since the catalogue loads after this module.
 export const JOB_STATUS: Record<string, [string, Tone]> = {
-  queued: ['Queued', 'muted'],
-  provisioning: ['Provisioning', 'live'],
-  running: ['Running', 'live'],
-  succeeded: ['Succeeded', 'success'],
-  failed: ['Failed', 'danger'],
-  interrupted: ['Interrupted', 'warning'],
-  cancelled: ['Cancelled', 'muted'],
+  queued: ['status.queued', 'muted'],
+  provisioning: ['status.provisioning', 'live'],
+  running: ['status.running', 'live'],
+  succeeded: ['status.succeeded', 'success'],
+  failed: ['status.failed', 'danger'],
+  interrupted: ['status.interrupted', 'warning'],
+  cancelled: ['status.cancelled', 'muted'],
 };
-export const jobState = (s: string) => state(...(JOB_STATUS[s] ?? [s, 'muted']));
+export const jobState = (s: string) => (JOB_STATUS[s] ? state(t(JOB_STATUS[s][0]), JOB_STATUS[s][1]) : state(s, 'muted'));
 
-export const dateFmt = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-export const when = (t: number | null | undefined) => (t ? dateFmt.format(new Date(t * 1000)) : '—');
+// Amounts the API returns as strings with up to four decimals; people read
+// dollars and cents. Parsing stays on the raw string (cents()).
+export function usd(s: string | number | null | undefined): string {
+  if (s === null || s === undefined || s === '') return '—';
+  const n = Number(s);
+  return Number.isFinite(n) ? new Intl.NumberFormat(tag(), { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n) : String(s);
+}
+export const money = (s: string | number | null | undefined) => h('span', { class: Number(s) === 0 ? 'mono zero' : 'mono' }, usd(s));
+
+// Catalogue text with markup in it (links, <strong>): the strings are ours,
+// never the API's, so innerHTML is safe; anything from outside goes through esc().
+export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+export function rich(key: string, vars?: Record<string, string | number>): HTMLElement {
+  const el = h('span');
+  el.innerHTML = t(key, vars);
+  return el;
+}
+
+// An empty list: a titled block in the card style, never a bare sentence.
+export const empty = (title: string, ...more: Child[]) => h('div', { class: 'empty' }, h('h3', {}, title), more.length ? h('p', {}, ...more) : null);
+
+export const when = (at: number | null | undefined) => (at ? new Intl.DateTimeFormat(tag(), { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(at * 1000)) : '—');
 
 export function duration(secs: number): string {
   const s = Math.max(0, Math.floor(secs));
@@ -181,6 +223,9 @@ export function initials(email: string): string {
 
 export async function logout(button: HTMLButtonElement) {
   button.disabled = true;
+  try {
+    sessionStorage.removeItem(ME_KEY);
+  } catch {}
   const r = await send('POST', '/logout');
   if (r.ok || r.error.status === 401) {
     location.assign('/login');
@@ -195,14 +240,14 @@ export function wireMenus() {
   const nav = $('app-nav')!;
   const setMenu = (open: boolean) => {
     menu.setAttribute('aria-expanded', String(open));
-    menu.setAttribute('aria-label', open ? 'Close menu' : 'Menu');
+    menu.setAttribute('aria-label', open ? t('common.close-menu') : t('common.menu'));
     nav.toggleAttribute('data-open', open);
   };
   menu.addEventListener('click', () => setMenu(menu.getAttribute('aria-expanded') !== 'true'));
 
-  // The Help and account buttons each open a panel under the header; one
-  // at a time, closed by a click elsewhere or Escape.
-  const dropdowns = (['help', 'account'] as const).map((name) => ({
+  // The Help button opens a panel under the header, closed by a click
+  // elsewhere or Escape.
+  const dropdowns = (['help'] as const).map((name) => ({
     button: $<HTMLButtonElement>(`${name}-button`)!,
     panel: $(`${name}-panel`)!,
   }));
@@ -234,18 +279,51 @@ export function wireMenus() {
   });
   const out = $<HTMLButtonElement>('logout')!;
   out.addEventListener('click', () => void logout(out));
+
+  // Collapse: the sidebar down to its icons, remembered on this browser.
+  const collapse = $<HTMLButtonElement>('nav-collapse');
+  const sync = () => {
+    const on = document.documentElement.classList.contains('nav-collapsed');
+    collapse?.setAttribute('aria-pressed', String(on));
+    collapse?.setAttribute('aria-label', t(on ? 'common.expand-nav' : 'common.collapse-nav'));
+    const label = collapse?.querySelector('.nav-label');
+    if (label) label.textContent = t(on ? 'common.expand' : 'common.collapse');
+  };
+  sync();
+  collapse?.addEventListener('click', () => {
+    const on = document.documentElement.classList.toggle('nav-collapsed');
+    try {
+      localStorage.setItem('uc_nav', on ? 'collapsed' : 'open');
+    } catch {}
+    sync();
+  });
+}
+
+// Who is signed in, kept for this tab so the header shows it at once on the
+// next page instead of after GET /me. Display only: nothing is decided on it.
+const ME_KEY = 'uc_me';
+function showIdentity(email: string) {
+  setText('account-initials', initials(email));
+  setText('account-email', email);
+  $('account-button')?.setAttribute('aria-label', t('common.account-email', { email }));
 }
 
 export async function shell(): Promise<Me | null> {
   wireMenus();
-  const r = await get<Me>('/me');
+  try {
+    const cached = sessionStorage.getItem(ME_KEY);
+    if (cached) showIdentity(cached);
+  } catch {}
+  const r = await freshCsrf();
   if (!r.ok) {
     setFormError(r.error.message);
     return null;
   }
-  setText('account-initials', initials(r.data.user.email));
-  setText('account-email', r.data.user.email);
-  $('account-button')?.setAttribute('aria-label', `Account: ${r.data.user.email}`);
+  showIdentity(r.data.user.email);
+  try {
+    sessionStorage.setItem(ME_KEY, r.data.user.email);
+  } catch {}
+  void balance().then((b) => b.ok && lowBalanceBanner(b.data));
   return r.data;
 }
 
@@ -274,7 +352,7 @@ export function reauth(): Promise<boolean> {
     const submit = async (e: SubmitEvent) => {
       e.preventDefault();
       if (!field.value) {
-        setFieldError('reauth_password', 'Enter your password.');
+        setFieldError('reauth_password', t('auth.enter-your-password'));
         field.focus();
         return;
       }
@@ -305,19 +383,81 @@ export async function withReauth<T>(action: () => Promise<Result<T>>): Promise<R
 
 // ---------------------------------------------------------------- balance
 
-export async function showBalance(): Promise<Balance | null> {
-  const r = await get<Balance>('/balance');
+// One GET /balance per page load, shared by the shell's banner and the
+// page's own figure; fresh asks again (after a top-up or a change).
+let balanceOnce: Promise<Result<Balance>> | null = null;
+export function balance(fresh = false): Promise<Result<Balance>> {
+  if (fresh || !balanceOnce) balanceOnce = get<Balance>('/balance');
+  return balanceOnce;
+}
+
+// A decimal string as an integer number of ten-thousandths, so the
+// comparison is exact: balances have 4 places and thresholds 2.
+export function units(usd: string): number | null {
+  const m = /^(-?)(\d+)(?:\.(\d{1,4}))?$/.exec(usd.trim());
+  if (!m) return null;
+  const n = Number(m[2]) * 10000 + Number((m[3] ?? '').padEnd(4, '0'));
+  return m[1] ? -n : n;
+}
+
+export const isLow = (b: Balance) => {
+  const avail = units(b.available_usd);
+  const limit = units(b.low_balance_usd ?? '0');
+  return avail !== null && limit !== null && limit > 0 && avail < limit;
+};
+
+// The low-balance banner (accounts.md, "Low-balance warning"): on every
+// signed-in page while available is below the account's threshold, first in
+// the content. A link, not a button: the page's one primary stays its own.
+export function lowBalanceBanner(b: Balance) {
+  const main = document.querySelector('main.content');
+  let el = $('low-balance');
+  if (!isLow(b)) {
+    el?.remove();
+    return;
+  }
+  const onBilling = document.body.dataset.page === 'billing';
+  const text = h(
+    'p',
+    {},
+    `Your available balance is USD ${usd(b.available_usd)}, below your low-balance alert of USD ${usd(b.low_balance_usd)}. New jobs need enough balance for their hold. `,
+    onBilling ? 'Add credit to keep jobs running.' : h('a', { href: '/billing' }, 'Top up'),
+  );
+  if (!el) {
+    el = h('div', { class: 'balance-alert', id: 'low-balance', role: 'status' });
+    main?.prepend(el);
+  }
+  el.replaceChildren(alertIcon(), text);
+}
+
+// lucide TriangleAlert (ISC).
+function alertIcon(): SVGSVGElement {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  for (const [k, v] of Object.entries({ width: '20', height: '20', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5',
+    'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', focusable: 'false' })) svg.setAttribute(k, v);
+  for (const d of ['m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3', 'M12 9v4', 'M12 17h.01']) {
+    const p = document.createElementNS(ns, 'path');
+    p.setAttribute('d', d);
+    svg.append(p);
+  }
+  return svg;
+}
+
+export async function showBalance(fresh = false): Promise<Balance | null> {
+  const r = await balance(fresh);
   if (r.ok) {
-    setText('balance-available', r.data.available_usd);
+    lowBalanceBanner(r.data);
+    setText('balance-available', usd(r.data.available_usd));
     setText(
       'balance-sub',
       /^0(\.0+)?$/.test(r.data.held_usd)
-        ? 'Nothing is held for running jobs.'
-        : `USD ${r.data.held_usd} more is held for running jobs and comes back when they finish.`,
+        ? t('common.nothing-is-held-for-running')
+        : t('common.held-for-running', { amount: usd(r.data.held_usd) }),
     );
     return r.data;
   } else if (notBuilt(r.error)) {
-    setText('balance-sub', 'Your balance will show here once billing is live in the dashboard.');
+    setText('balance-sub', t('common.your-balance-will-show-here'));
   } else {
     setText('balance-sub', r.error.message);
   }
@@ -327,14 +467,14 @@ export async function showBalance(): Promise<Balance | null> {
 export function jobsTable(label: string, jobs: Job[]) {
   return table(
     label,
-    [{ text: 'Job' }, { text: 'Status' }, { text: 'SKU' }, { text: 'Created' }, { text: 'GPU time', num: true }, { text: 'Charged (USD)', num: true }],
+    [{ text: 'Job' }, { text: t('common.status') }, { text: 'SKU' }, { text: t('common.created') }, { text: t('common.gpu-time'), num: true }, { text: t('common.charged-usd'), num: true }],
     jobs.map((j) => [
       jobLink(j.id),
       jobState(j.status),
       mono(j.sku),
       when(j.created_at),
       mono(duration(j.usage?.gpu_seconds ?? 0)),
-      mono(j.usage?.settled_cost_usd ?? '—'),
+      money(j.usage?.settled_cost_usd),
     ]),
   );
 }

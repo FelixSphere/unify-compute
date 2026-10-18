@@ -35,6 +35,7 @@ for (const tpl of templates) {
   for (const m of [...tpl.inputs, ...tpl.outputs]) keys.add(m.description);
 }
 for (const m of read('app/catalogue.ts').matchAll(/^\s+'?[\w.]+'?: '([^']+)',$/gm)) keys.add(m[1]);
+for (const m of read('app/catalogue.ts').match(/TIER_LABEL[^{]*\{([^}]*)\}/)[1].matchAll(/: '([^']+)'/g)) keys.add(m[1]);
 
 if (process.argv.includes('--keys')) {
   console.log(JSON.stringify([...keys].sort(), null, 2));

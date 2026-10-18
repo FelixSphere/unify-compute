@@ -145,10 +145,12 @@ func (s *Server) presignUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mounts, err := artifacts.OutputMounts(spec.Outputs)
-	if err != nil || len(mounts) == 0 {
+	if err != nil {
 		invalid(w, "no_outputs", "path", "this job declares no valid spec.outputs")
 		return
 	}
+	// Every job's run step uploads its log (artifacts.LogDir), outputs or not.
+	mounts = append(mounts, artifacts.LogDir)
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	if err := r.ParseForm(); err != nil {
 		invalid(w, "malformed_body", "", "expected a form with path, size and sha256")

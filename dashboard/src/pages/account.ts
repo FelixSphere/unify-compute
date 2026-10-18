@@ -1,19 +1,15 @@
+import { t, tag } from '../i18n';
 import { $, busy, checkConfirm, checkNewPassword, focusFirstInvalid, input, onSubmit, setFieldError, showApiError, wireConfirm } from '../lib';
-import { fill, get, logout, mono, notBuilt, send, setText, shell } from '../shell';
+import { get, initials, notBuilt, send, setText, shell } from '../shell';
 
 export async function account() {
   const me = await shell();
   if (!me) return;
   setText('me-email', me.user.email);
-  fill(
-    'me-sub',
-    'Account ',
-    mono(String(me.account.id)),
-    ` · since ${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(me.user.created_at * 1000))}`,
-    me.account.status !== 'active' ? ` · ${me.account.status}` : '',
-  );
-  const out = $<HTMLButtonElement>('logout-main')!;
-  out.addEventListener('click', () => void logout(out));
+  setText('me-email-row', me.user.email);
+  setText('me-avatar', initials(me.user.email));
+  const since = new Intl.DateTimeFormat(tag(), { dateStyle: 'long' }).format(new Date(me.user.created_at * 1000));
+  setText('me-sub', t('account.member-since', { date: since }) + (me.account.status !== 'active' ? ` · ${t(`account.status-${me.account.status}`)}` : ''));
 
   // Copy from Unify Data's profile page ("Other sessions").
   const end = $<HTMLButtonElement>('sessions-end')!;
@@ -21,12 +17,12 @@ export async function account() {
   async function loadSessions() {
     const r = await get<{ other_sessions: number }>('/sessions');
     if (!r.ok) {
-      setText('sessions-count', notBuilt(r.error) ? 'Other sessions will be listed here once this is live.' : r.error.message);
+      setText('sessions-count', notBuilt(r.error) ? t('account.other-sessions-will-be-listed') : r.error.message);
       end.hidden = true;
       return;
     }
     const n = r.data.other_sessions;
-    setText('sessions-count', n === 0 ? 'This is your only active session.' : `Active sessions on other devices or browsers: ${n}.`);
+    setText('sessions-count', n === 0 ? t('account.this-is-your-only-active') : t('account.other-sessions-count', { n }));
     end.hidden = n === 0;
   }
   end.addEventListener('click', async () => {
@@ -36,18 +32,35 @@ export async function account() {
     end.disabled = false;
     if (!r.ok) return showApiError(r.error);
     await loadSessions();
-    sessionsStatus.textContent = 'Signed out of every other session.';
+    sessionsStatus.textContent = t('account.signed-out-of-every-other');
     $('sessions-title')?.focus();
   });
   void loadSessions();
 
   const form = $<HTMLFormElement>('form')!;
   const status = $('password-status')!;
+  const wrap = $('password-form-wrap')!;
+  const open = $<HTMLButtonElement>('password-open')!;
+  const setOpen = (on: boolean) => {
+    wrap.hidden = !on;
+    open.setAttribute('aria-expanded', String(on));
+    if (on) input('current_password')?.focus();
+  };
+  open.addEventListener('click', () => {
+    status.textContent = '';
+    form.reset();
+    setOpen(!!wrap.hidden);
+  });
+  $('password-cancel')!.addEventListener('click', () => {
+    form.reset();
+    setOpen(false);
+    open.focus();
+  });
   wireConfirm();
   onSubmit(form, async () => {
     status.textContent = '';
     const current = input('current_password')!.value;
-    if (!current) setFieldError('current_password', 'Enter your current password.');
+    if (!current) setFieldError('current_password', t('account.enter-your-current-password'));
     const pwOk = checkNewPassword();
     const confirmOk = checkConfirm();
     if (!current || !pwOk || !confirmOk) return focusFirstInvalid(form);
@@ -59,7 +72,9 @@ export async function account() {
     });
     if (!r.ok) return showApiError(r.error);
     form.reset();
-    status.textContent = 'Password changed. Every other session has been logged out.';
+    setOpen(false);
+    status.textContent = t('account.password-changed-every-other-session');
+    open.focus();
     void loadSessions();
   });
 }

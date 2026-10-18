@@ -4,62 +4,67 @@
     <!-- @head -->
     <title>Job — Unify Compute</title>
     <link rel="stylesheet" href="/src/app.css" />
-    <script type="module" src="/src/main.ts"></script>
+    <script type="module" blocking="render" src="/src/main.ts"></script>
   </head>
-  <body class="app" data-page="job">
+  <body class="app" data-page="job" data-i18n-title="job.page-title">
     <!-- @shell:jobs -->
     <main class="content" id="main" tabindex="-1">
-      <h1 class="sr-only" id="job-h1">Job</h1>
-      <p class="crumb"><a href="/jobs">Jobs</a> / <span class="mono" id="job-id"></span></p>
       <!-- @form-error -->
-      <p class="muted" id="job-loading" role="status">Loading the job…</p>
+      <p class="muted" id="job-loading" role="status" data-i18n="common.loading-the-job">Loading the job…</p>
       <div id="job" hidden>
-        <section class="focal" aria-labelledby="focal-label">
+        <div class="page-head">
           <div>
-            <p class="eyebrow" id="focal-label">Charged so far · USD</p>
-            <p class="metric" id="job-settled">—</p>
-            <p class="sub" id="job-sub"></p>
+            <p class="crumb" data-i18n="job.jobs"><a href="/jobs">Jobs</a> / <span class="mono" id="job-id"></span></p>
+            <h1 class="sr-only" id="job-h1" data-i18n="job.job">Job</h1>
+            <p class="page-desc" id="job-sub"></p>
           </div>
-          <button class="ghost" type="button" id="job-cancel" hidden>Cancel job</button>
-        </section>
+          <button class="ghost" type="button" id="job-cancel" hidden data-i18n="job.cancel-job">Cancel job</button>
+        </div>
         <p class="status-line" id="job-status-line" role="status"></p>
+
+        <div class="stats one">
+          <section class="card stat-card hero" aria-labelledby="focal-label">
+            <p class="eyebrow" id="focal-label" data-i18n="job.charged-so-far-usd">Charged so far · USD</p>
+            <p class="stat-value" id="job-settled">—</p>
+          </section>
+        </div>
 
         <div class="grid">
           <section class="card" aria-labelledby="details-title">
-            <h2 id="details-title">Details</h2>
+            <h2 id="details-title" data-i18n="job.details">Details</h2>
             <dl class="facts" id="job-details"></dl>
           </section>
           <section class="card" aria-labelledby="usage-title">
-            <h2 id="usage-title">Usage</h2>
+            <h2 id="usage-title" data-i18n="nav.usage">Usage</h2>
             <dl class="facts" id="job-usage"></dl>
           </section>
         </div>
 
         <section class="section" aria-labelledby="events-title">
-          <h2 id="events-title">Events</h2>
-          <div id="job-events"><p class="muted">Loading events…</p></div>
+          <h2 id="events-title" data-i18n="job.events">Events</h2>
+          <div id="job-events"><p class="muted" data-i18n="common.loading-events">Loading events…</p></div>
         </section>
         <section class="section" aria-labelledby="logs-title">
           <div class="section-head">
-            <h2 id="logs-title">Logs</h2>
-            <button class="link" type="button" id="logs-refresh">Refresh</button>
+            <h2 id="logs-title" data-i18n="job.logs">Logs</h2>
+            <button class="link" type="button" id="logs-refresh" data-i18n="common.refresh">Refresh</button>
           </div>
-          <div id="job-logs"><p class="muted">Loading logs…</p></div>
+          <div id="job-logs"><p class="muted" data-i18n="common.loading-logs">Loading logs…</p></div>
         </section>
         <section class="section" aria-labelledby="artifacts-title">
-          <h2 id="artifacts-title">Artifacts</h2>
-          <div id="job-artifacts"><p class="muted">Loading artifacts…</p></div>
+          <h2 id="artifacts-title" data-i18n="job.artifacts">Artifacts</h2>
+          <div id="job-artifacts"><p class="muted" data-i18n="common.loading-artifacts">Loading artifacts…</p></div>
         </section>
       </div>
 
       <dialog id="cancel-dialog" aria-labelledby="cancel-title">
         <form method="dialog" id="cancel-form">
-          <h2 id="cancel-title">Cancel this job?</h2>
-          <p>The job stops and GPU time stops being charged now. Files it has not uploaded yet are lost.</p>
+          <h2 id="cancel-title" data-i18n="job.cancel-this-job">Cancel this job?</h2>
+          <p data-i18n="job.the-job-stops-and-gpu">The job stops and GPU time stops being charged now. Files it has not uploaded yet are lost.</p>
           <div class="form-error" id="cancel-error" role="alert" hidden><p></p></div>
           <div class="actions">
-            <button class="ghost" type="submit" value="cancel-job" id="cancel-confirm">Cancel job</button>
-            <button class="ghost" type="submit" value="keep">Keep running</button>
+            <button class="ghost" type="submit" value="cancel-job" id="cancel-confirm" data-i18n="job.cancel-job">Cancel job</button>
+            <button class="ghost" type="submit" value="keep" data-i18n="job.keep-running">Keep running</button>
           </div>
         </form>
       </dialog>

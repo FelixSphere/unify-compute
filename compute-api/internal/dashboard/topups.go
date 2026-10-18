@@ -63,7 +63,12 @@ type createTopupRequest struct {
 
 // createTopup answers the Checkout URL the page sends the browser to. The
 // balance changes only when Stripe's webhook says the payment succeeded.
+// Owners and admins top up; members only spend.
 func (h *Handler) createTopup(w http.ResponseWriter, r *http.Request, _ accounts.Session, u accounts.User) {
+	if !accounts.CanManage(u.Role) {
+		writeAccountsError(w, accounts.ErrRoleRequired)
+		return
+	}
 	if !h.pay.Enabled() {
 		writePaymentsError(w, payments.ErrUnavailable)
 		return

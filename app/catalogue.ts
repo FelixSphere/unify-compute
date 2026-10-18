@@ -64,6 +64,11 @@ export const listings: Listing[] = raw
   .map(toListing)
   .sort((a, b) => Number(b.runnable) - Number(a.runnable) || a.id.localeCompare(b.id));
 
+// Every SKU, the ones sold first. Shown without prices (ADR-0012).
+export type Gpu = Sku;
+export const gpus: Gpu[] = [...skuFile.skus].sort((a, b) => Number(b.available) - Number(a.available) || a.id.localeCompare(b.id));
+export const TIER_LABEL: Record<string, string> = { hyperscaler: 'Hyperscaler', neocloud: 'Neocloud', marketplace: 'Marketplace' };
+
 export function findListing(id: string) {
   return listings.find((l) => l.id === id);
 }

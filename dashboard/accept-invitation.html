@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <!-- @head -->
+    <title>Accept invitation — Unify Compute</title>
+    <link rel="stylesheet" href="/src/app.css" />
+    <script type="module" blocking="render" src="/src/main.ts"></script>
+  </head>
+  <body data-page="accept-invitation">
+    <main class="page">
+      <div class="card">
+        <!-- @brand -->
+        <div id="ask">
+          <h1 id="title">Join an account on Unify Compute</h1>
+          <p class="lead" id="lead">Checking your invitation…</p>
+          <!-- @form-error -->
+          <form id="form" method="post" novalidate hidden>
+            <div class="field">
+              <label for="email">Email</label>
+              <input id="email" name="email" type="email" autocomplete="username" readonly aria-describedby="email-hint" />
+              <p class="hint" id="email-hint">The address the invitation was sent to. It becomes your login.</p>
+            </div>
+            <div class="field">
+              <label for="password">Choose a password</label>
+              <div class="password">
+                <input id="password" name="password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required aria-describedby="password-hint password-error" />
+                <!-- @toggle:password -->
+              </div>
+              <p class="hint" id="password-hint">At least 12 characters.</p>
+              <p class="field-error" id="password-error" hidden></p>
+            </div>
+            <div class="field">
+              <label for="password_confirm">Confirm password</label>
+              <div class="password">
+                <input id="password_confirm" name="password_confirm" type="password" autocomplete="new-password" required aria-describedby="password_confirm-error" />
+                <!-- @toggle:password_confirm -->
+              </div>
+              <p class="field-error" id="password_confirm-error" hidden></p>
+            </div>
+            <button class="primary" type="submit">Accept invitation</button>
+            <!-- @legal -->
+          </form>
+        </div>
+        <p class="switch">Already have a login? <a href="/login">Log in</a></p>
+      </div>
+      <!-- @below -->
+    </main>
+  </body>
+</html>

@@ -4,94 +4,97 @@
     <!-- @head -->
     <title>API keys — Unify Compute</title>
     <link rel="stylesheet" href="/src/app.css" />
-    <script type="module" src="/src/main.ts"></script>
+    <script type="module" blocking="render" src="/src/main.ts"></script>
   </head>
-  <body class="app" data-page="keys">
+  <body class="app" data-page="keys" data-i18n-title="keys.page-title">
     <!-- @shell:keys -->
     <main class="content" id="main" tabindex="-1">
-      <h1 class="sr-only">API keys</h1>
       <!-- @form-error -->
-      <section class="focal" aria-labelledby="focal-label">
+      <div class="page-head">
         <div>
-          <p class="eyebrow" id="focal-label">Active API keys</p>
-          <p class="metric" id="keys-count" aria-live="polite">—</p>
-          <p class="sub">Up to 10 at a time. Each key submits and reads jobs on this account's balance.</p>
+          <h1 data-i18n="nav.keys">API keys</h1>
+          <p class="page-desc" data-i18n="keys.a-key-submits-and-reads">A key submits and reads jobs on this account's balance. Up to 10 active at a time; the secret is shown once, when the key is created.</p>
         </div>
-        <button class="primary" type="button" id="create-open">Create key</button>
-      </section>
+        <button class="primary" type="button" id="create-open" data-i18n="keys.create-key">Create key</button>
+      </div>
 
-      <section class="card" id="create" aria-labelledby="create-title" hidden>
-        <h2 id="create-title" tabindex="-1">Create an API key</h2>
+      <section class="card narrow" id="create" aria-labelledby="create-title" hidden>
+        <h2 id="create-title" tabindex="-1" data-i18n="keys.create-an-api-key">Create an API key</h2>
         <form id="create-form" novalidate>
           <div class="field">
-            <label for="key-name">Name</label>
+            <label for="key-name" data-i18n="common.name">Name</label>
             <input id="key-name" name="name" type="text" maxlength="64" autocomplete="off" required aria-describedby="key-name-hint key-name-error" />
-            <p class="hint" id="key-name-hint">So you can tell keys apart, e.g. "nightly pipeline".</p>
+            <p class="hint" id="key-name-hint" data-i18n="keys.so-you-can-tell-keys">So you can tell keys apart, e.g. "nightly pipeline".</p>
             <p class="field-error" id="key-name-error" hidden></p>
           </div>
-          <div class="field">
-            <label for="key-cap">Monthly cap (USD, optional)</label>
-            <input id="key-cap" name="monthly_cap_usd" type="text" inputmode="decimal" autocomplete="off" placeholder="No cap" aria-describedby="key-cap-hint key-cap-error" />
-            <p class="hint" id="key-cap-hint">The most this key may spend or hold per calendar month. A job that would go past it is refused; other keys are unaffected.</p>
-            <p class="field-error" id="key-cap-error" hidden></p>
-          </div>
-          <div class="field">
-            <label for="key-expires">Expires (optional)</label>
-            <input id="key-expires" name="expires_at" type="date" autocomplete="off" aria-describedby="key-expires-hint key-expires-error" />
-            <p class="hint" id="key-expires-hint">The key stops working at the end of this day, your local time. Leave it empty for a key that doesn't expire.</p>
-            <p class="field-error" id="key-expires-error" hidden></p>
+          <div class="field-row">
+            <div class="field">
+              <label for="key-cap" data-i18n="keys.monthly-cap">Monthly cap (USD, optional)</label>
+              <input id="key-cap" name="monthly_cap_usd" type="text" inputmode="decimal" autocomplete="off" placeholder="No cap" aria-describedby="key-cap-hint key-cap-error" data-i18n-attr="placeholder:keys.no-cap" />
+              <p class="hint" id="key-cap-hint" data-i18n="keys.the-most-this-key-may">The most this key may spend or hold per calendar month.</p>
+              <p class="field-error" id="key-cap-error" hidden></p>
+            </div>
+            <div class="field">
+              <label for="key-expires" data-i18n="keys.expires">Expires (optional)</label>
+              <input id="key-expires" name="expires_at" type="date" autocomplete="off" aria-describedby="key-expires-hint key-expires-error" />
+              <p class="hint" id="key-expires-hint" data-i18n="keys.stops-working-at-the-end">Stops working at the end of that day, your local time.</p>
+              <p class="field-error" id="key-expires-error" hidden></p>
+            </div>
           </div>
           <fieldset class="field">
-            <legend>Access</legend>
-            <label class="check"><input type="radio" name="scope" value="jobs" checked /> Submit, cancel and read jobs</label>
-            <label class="check"><input type="radio" name="scope" value="read" /> Read only</label>
+            <legend data-i18n="keys.access">Access</legend>
+            <label class="check"><input type="radio" name="scope" value="jobs" checked /> <span data-i18n="keys.scope-jobs">Submit, cancel and read jobs</span></label>
+            <label class="check"><input type="radio" name="scope" value="read" /> <span data-i18n="keys.read-only">Read only</span></label>
           </fieldset>
           <div class="actions">
-            <button class="primary" type="submit">Create key</button>
-            <button class="ghost" type="button" id="create-cancel">Cancel</button>
+            <button class="primary" type="submit" data-i18n="keys.create-key">Create key</button>
+            <button class="ghost" type="button" id="create-cancel" data-i18n="common.cancel">Cancel</button>
           </div>
         </form>
       </section>
 
-      <section class="card reveal" id="reveal" aria-labelledby="reveal-title" hidden>
-        <h2 id="reveal-title" tabindex="-1">Copy your new key</h2>
-        <p class="warning" id="reveal-warning">This is the only time the full key is shown. Store it somewhere safe now: if you lose it, revoke it and create another.</p>
+      <section class="card narrow reveal" id="reveal" aria-labelledby="reveal-title" hidden>
+        <h2 id="reveal-title" tabindex="-1" data-i18n="keys.copy-your-new-key">Copy your new key</h2>
+        <p class="warning" id="reveal-warning" data-i18n="keys.this-is-the-only-time">This is the only time the full key is shown. Store it somewhere safe now: if you lose it, revoke it and create another.</p>
         <div class="secret">
           <code id="reveal-secret" aria-describedby="reveal-warning"></code>
-          <button class="secondary" type="button" id="reveal-copy">Copy</button>
+          <button class="secondary" type="button" id="reveal-copy" data-i18n="keys.copy">Copy</button>
         </div>
         <p class="status-line" id="reveal-status" role="status"></p>
-        <button class="ghost" type="button" id="reveal-done">I've saved it</button>
+        <button class="ghost" type="button" id="reveal-done" data-i18n="keys.saved-it">I've saved it</button>
       </section>
 
       <section class="section" aria-labelledby="list-title">
-        <h2 id="list-title">Keys</h2>
-        <div id="keys-list" aria-live="polite"><p class="muted">Loading keys…</p></div>
+        <div class="section-head">
+          <h2 id="list-title" data-i18n="keys.keys">Keys</h2>
+          <p class="muted" id="keys-count" aria-live="polite"></p>
+        </div>
+        <div id="keys-list" aria-live="polite"><p class="muted" data-i18n="common.loading-keys">Loading keys…</p></div>
       </section>
 
       <dialog id="cap-dialog" aria-labelledby="cap-title">
         <form method="dialog" id="cap-form" novalidate>
-          <h2 id="cap-title">Monthly cap for <code id="cap-display"></code></h2>
+          <h2 id="cap-title" data-i18n="keys.monthly-cap-for">Monthly cap for <code id="cap-display"></code></h2>
           <div class="field">
-            <label for="cap-value">Cap (USD)</label>
-            <input id="cap-value" name="monthly_cap_usd" type="text" inputmode="decimal" autocomplete="off" placeholder="No cap" aria-describedby="cap-hint cap-value-error" />
-            <p class="hint" id="cap-hint">Leave empty to remove the cap. Spent so far this month: <span id="cap-spent">—</span>.</p>
+            <label for="cap-value" data-i18n="keys.cap-usd">Cap (USD)</label>
+            <input id="cap-value" name="monthly_cap_usd" type="text" inputmode="decimal" autocomplete="off" placeholder="No cap" aria-describedby="cap-hint cap-value-error" data-i18n-attr="placeholder:keys.no-cap" />
+            <p class="hint" id="cap-hint" data-i18n="keys.leave-empty-to-remove-the">Leave empty to remove the cap. Spent so far this month: <span id="cap-spent">—</span>.</p>
             <p class="field-error" id="cap-value-error" hidden></p>
           </div>
           <div class="actions">
-            <button class="primary" type="submit" value="save" id="cap-save">Save</button>
-            <button class="ghost" type="submit" value="cancel">Cancel</button>
+            <button class="primary" type="submit" value="save" id="cap-save" data-i18n="common.save">Save</button>
+            <button class="ghost" type="submit" value="cancel" data-i18n="common.cancel">Cancel</button>
           </div>
         </form>
       </dialog>
       <dialog id="revoke-dialog" aria-labelledby="revoke-title">
         <form method="dialog" id="revoke-form">
-          <h2 id="revoke-title">Revoke this key?</h2>
-          <p>Anything using <code id="revoke-display"></code> stops working at once. Running jobs keep running. This can't be undone.</p>
+          <h2 id="revoke-title" data-i18n="keys.revoke-this-key">Revoke this key?</h2>
+          <p data-i18n="keys.anything-using-stops-working-at">Anything using <code id="revoke-display"></code> stops working at once. Running jobs keep running. This can't be undone.</p>
           <div class="form-error" id="revoke-error" role="alert" hidden><p></p></div>
           <div class="actions">
-            <button class="ghost" type="submit" value="revoke" id="revoke-confirm">Revoke key</button>
-            <button class="ghost" type="submit" value="cancel">Keep it</button>
+            <button class="ghost" type="submit" value="revoke" id="revoke-confirm" data-i18n="keys.revoke-key">Revoke key</button>
+            <button class="ghost" type="submit" value="cancel" data-i18n="common.keep-it">Keep it</button>
           </div>
         </form>
       </dialog>

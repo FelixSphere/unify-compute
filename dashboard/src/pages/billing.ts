@@ -1,5 +1,6 @@
+import { t as tr } from '../i18n';
 import { $, busy, clearFieldError, focusFirstInvalid, GENERIC, input, onSubmit, setFieldError, setFormError, showApiError } from '../lib';
-import { cents, type Child, fill, get, h, jobLink, type List, listOf, mono, muted, notBuilt, send, setText, shell, showBalance, state, table, type Tone, when } from '../shell';
+import { type Balance, cents, type Child, empty, fill, get, h, jobLink, type List, listOf, lowBalanceBanner, money, mono, muted, notBuilt, send, setText, shell, showBalance, state, table, type Tone, usd, when } from '../shell';
 
 type Topup = {
   id: string;
@@ -21,18 +22,20 @@ type Entry = {
   created_at: number;
 };
 
+// Catalogue keys, read with tr() at render time: a module-level string would
+// be English, since the catalogue loads after this module.
 const KIND: Record<string, string> = {
-  topup: 'Top-up',
-  hold: 'Hold',
-  extend: 'Hold extended',
-  settle: 'Charge',
-  release: 'Released',
-  refund: 'Refund',
-  dispute: 'Dispute',
-  dispute_reversal: 'Dispute reversed',
-  admin_credit: 'Credit',
-  admin_debit: 'Debit',
-  writeoff: 'Write-off',
+  topup: 'billing.kind-topup',
+  hold: 'billing.kind-hold',
+  extend: 'billing.kind-extend',
+  settle: 'billing.kind-settle',
+  release: 'billing.kind-release',
+  refund: 'billing.kind-refund',
+  dispute: 'billing.kind-dispute',
+  dispute_reversal: 'billing.kind-dispute-reversal',
+  admin_credit: 'billing.kind-admin-credit',
+  admin_debit: 'billing.kind-admin-debit',
+  writeoff: 'billing.kind-writeoff',
 };
 
 function refCell(ref: Entry['ref']): Child {
@@ -42,14 +45,14 @@ function refCell(ref: Entry['ref']): Child {
 }
 
 const TOPUP_STATUS: Record<string, [string, Tone]> = {
-  open: ['Awaiting payment', 'muted'],
-  credited: ['Added', 'success'],
-  expired: ['Not completed', 'muted'],
-  failed: ['Failed', 'danger'],
-  refunded: ['Refunded', 'muted'],
-  partially_refunded: ['Partly refunded', 'muted'],
-  disputed: ['Disputed', 'warning'],
-  lost: ['Dispute lost', 'danger'],
+  open: ['billing.topup-open', 'muted'],
+  credited: ['billing.topup-credited', 'success'],
+  expired: ['billing.topup-expired', 'muted'],
+  failed: ['billing.topup-failed', 'danger'],
+  refunded: ['billing.topup-refunded', 'muted'],
+  partially_refunded: ['billing.topup-partially-refunded', 'muted'],
+  disputed: ['billing.topup-disputed', 'warning'],
+  lost: ['billing.topup-lost', 'danger'],
 };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -74,7 +77,7 @@ export async function billing() {
       more.hidden = true;
       fill(
         'history',
-        muted(notBuilt(r.error) ? 'Your balance history will appear here: every credit, hold, charge and release on your account.' : r.error.message),
+        muted(notBuilt(r.error) ? tr('billing.your-balance-history-will-appear') : r.error.message),
       );
       return;
     }
@@ -86,15 +89,43 @@ export async function billing() {
       'history',
       rows.length
         ? table(
-            'Balance history',
-            [{ text: 'Date' }, { text: 'Entry' }, { text: 'Amount (USD)', num: true }, { text: 'Available after', num: true }, { text: 'Reference' }],
-            rows.map((e) => [when(e.created_at), KIND[e.kind] ?? e.kind, mono(e.amount_usd), mono(e.available_after_usd), refCell(e.ref)]),
+            tr('billing.balance-history'),
+            [{ text: tr('billing.date') }, { text: tr('billing.entry') }, { text: tr('billing.amount-usd'), num: true }, { text: tr('billing.available-after'), num: true }, { text: tr('billing.reference') }],
+            rows.map((e) => [when(e.created_at), KIND[e.kind] ? tr(KIND[e.kind]) : e.kind, money(e.amount_usd), money(e.available_after_usd), refCell(e.ref)]),
           )
-        : muted('Nothing yet.'),
+        : empty(tr('billing.no-balance-history-yet'), tr('billing.every-credit-hold-charge-and')),
     );
   }
   more.addEventListener('click', () => void load(true));
   kindSel?.addEventListener('change', () => void load(false));
+
+  // --- The low-balance alert (W6). Hidden on a compute-api that does not
+  // report a threshold yet.
+  const alertCard = $('alert')!;
+  const alertForm = $<HTMLFormElement>('alert-form')!;
+  const alertField = input('low_balance_usd')!;
+  const alertStatus = $('alert-status')!;
+  void balance.then((b) => {
+    if (b?.low_balance_usd === undefined) {
+      alertCard.hidden = true;
+      return;
+    }
+    alertField.value = b.low_balance_usd;
+  });
+  onSubmit(alertForm, async () => {
+    alertStatus.textContent = '';
+    const c = cents(alertField.value);
+    if (c === null || c > 1_000_000) {
+      setFieldError('low_balance_usd', 'Enter an amount in US dollars from 0 to 10000, like 5 or 5.00.');
+      return focusFirstInvalid(alertForm);
+    }
+    busy(alertForm, true);
+    const r = await send<Balance>('PATCH', '/balance', { low_balance_usd: (c / 100).toFixed(2) });
+    if (!r.ok) return showApiError(r.error);
+    alertField.value = r.data.low_balance_usd ?? alertField.value;
+    alertStatus.textContent = c === 0 ? 'Low-balance alert turned off.' : `Saved. We'll alert you below USD ${r.data.low_balance_usd}.`;
+    lowBalanceBanner(r.data);
+  });
 
   // --- Card top-ups (B1). The page never credits anything: it sends the
   // browser to Stripe's Checkout page and, on the way back, waits for the
@@ -117,13 +148,13 @@ export async function billing() {
     fill(
       'topups',
       table(
-        'Card top-ups',
-        [{ text: 'Date' }, { text: 'Amount (USD)', num: true }, { text: 'Status' }, { text: 'Receipt' }],
+        tr('billing.card-top-ups'),
+        [{ text: tr('billing.date') }, { text: tr('billing.amount-usd'), num: true }, { text: tr('common.status') }, { text: tr('billing.receipt') }],
         list.map((t) => [
           when(t.created_at),
-          mono(t.amount_usd),
-          state(...(TOPUP_STATUS[t.status] ?? [t.status, 'muted'])),
-          t.receipt_url && t.receipt_url.startsWith('https://') ? h('a', { href: t.receipt_url, rel: 'noopener noreferrer', target: '_blank' }, 'View receipt') : '—',
+          money(t.amount_usd),
+          TOPUP_STATUS[t.status] ? state(tr(TOPUP_STATUS[t.status][0]), TOPUP_STATUS[t.status][1]) : state(t.status, 'muted'),
+          t.receipt_url && t.receipt_url.startsWith('https://') ? h('a', { href: t.receipt_url, rel: 'noopener noreferrer', target: '_blank' }, tr('billing.view-receipt')) : '—',
         ]),
       ),
     );
@@ -150,17 +181,17 @@ export async function billing() {
   onSubmit(form, async () => {
     const c = cents(amount.value);
     if (c === null) {
-      setFieldError('amount_usd', 'Enter an amount in US dollars, like 20 or 20.00.');
+      setFieldError('amount_usd', tr('billing.enter-an-amount-in-us'));
       return focusFirstInvalid(form);
     }
     if (c < min || c > max) {
-      setFieldError('amount_usd', `Enter an amount from USD ${(min / 100).toFixed(2)} to ${(max / 100).toFixed(2)}.`);
+      setFieldError('amount_usd', tr('billing.amount-range', { min: (min / 100).toFixed(2), max: (max / 100).toFixed(2) }));
       return focusFirstInvalid(form);
     }
     busy(form, true);
     const r = await send<{ id: string; checkout_url: string }>('POST', '/topups', { amount_usd: (c / 100).toFixed(2) });
     if (!r.ok) return showApiError(r.error);
-    if (!r.data.checkout_url.startsWith('https://')) return setFormError(GENERIC);
+    if (!r.data.checkout_url.startsWith('https://')) return setFormError(GENERIC());
     // A full navigation to Stripe's hosted page: no Stripe script runs here,
     // and the CSP stays as strict as on every other page.
     busy(form, true);
@@ -171,16 +202,16 @@ export async function billing() {
   async function returned(id: string, outcome: string | null) {
     history.replaceState(null, '', '/billing');
     if (outcome === 'cancelled') {
-      status.textContent = 'Payment cancelled. Nothing was charged.';
+      status.textContent = tr('billing.payment-cancelled-nothing-was-charged');
       return;
     }
-    status.textContent = 'Payment received by Stripe. Adding it to your balance…';
+    status.textContent = tr('billing.payment-received-by-stripe-adding');
     for (let i = 0; i < 15; i++) {
       const r = await get<Topup>(`/topups/${encodeURIComponent(id)}`);
       if (r.ok && r.data.status !== 'open') {
         status.textContent =
-          r.data.status === 'credited' ? `USD ${r.data.amount_usd} added to your balance.` : 'This payment did not go through. Nothing was charged.';
-        void showBalance();
+          r.data.status === 'credited' ? tr('billing.added-to-balance', { amount: usd(r.data.amount_usd) }) : tr('billing.this-payment-did-not-go');
+        void showBalance(true);
         void loadTopups();
         void load(false);
         return;
@@ -188,7 +219,7 @@ export async function billing() {
       if (!r.ok && r.error.status === 404) break;
       await sleep(2000);
     }
-    status.textContent = 'Your payment is still being confirmed. It will appear in your balance within a few minutes; refresh this page to check.';
+    status.textContent = tr('billing.your-payment-is-still-being');
   }
 
   const q = new URLSearchParams(location.search);
@@ -198,7 +229,7 @@ export async function billing() {
     const b = await balance;
     min = cents(b?.limits?.topup_min_usd ?? '') ?? min;
     max = cents(b?.limits?.topup_max_usd ?? '') ?? max;
-    setText('amount_usd-hint', `USD ${(min / 100).toFixed(2)} to ${(max / 100).toFixed(2)} per top-up. Your balance can hold up to USD ${b?.limits?.balance_max_usd ?? '200.00'}.`);
+    setText('amount_usd-hint', tr('billing.topup-limits', { min: (min / 100).toFixed(2), max: (max / 100).toFixed(2), cap: b?.limits?.balance_max_usd ?? '200.00' }));
     off.hidden = true;
     contact.hidden = true;
     openButton.hidden = false;

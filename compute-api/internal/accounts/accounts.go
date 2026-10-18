@@ -74,6 +74,7 @@ const (
 
 type Account struct {
 	ID              int64
+	Name            string
 	Status          string
 	ComputeEnabled  bool
 	Available       int64
@@ -83,7 +84,11 @@ type Account struct {
 	BalanceMaxCents int
 	TopupsPerDay    int
 	SuspendedReason string
+	MemberLimit     int
 	CreatedAt       time.Time
+	// LowBalance is the low-balance warning threshold in quota units; 0 is
+	// off (migration 0014).
+	LowBalance int64
 }
 
 // Owner is the owner string jobs, quotas and events key on.
@@ -164,13 +169,13 @@ func scanUser(row pgx.Row) (User, error) {
 	return u, err
 }
 
-const accountColumns = `a.id, a.status, a.compute_enabled, a.available, a.held, a.topup_min_cents,
-	a.topup_max_cents, a.balance_max_cents, a.topups_per_day, coalesce(a.suspended_reason, ''), a.created_at`
+const accountColumns = `a.id, a.name, a.status, a.compute_enabled, a.available, a.held, a.topup_min_cents,
+	a.topup_max_cents, a.balance_max_cents, a.topups_per_day, coalesce(a.suspended_reason, ''), a.member_limit, a.created_at, a.low_balance_quota`
 
 func scanAccount(row pgx.Row) (Account, error) {
 	var a Account
-	err := row.Scan(&a.ID, &a.Status, &a.ComputeEnabled, &a.Available, &a.Held, &a.TopupMinCents,
-		&a.TopupMaxCents, &a.BalanceMaxCents, &a.TopupsPerDay, &a.SuspendedReason, &a.CreatedAt)
+	err := row.Scan(&a.ID, &a.Name, &a.Status, &a.ComputeEnabled, &a.Available, &a.Held, &a.TopupMinCents,
+		&a.TopupMaxCents, &a.BalanceMaxCents, &a.TopupsPerDay, &a.SuspendedReason, &a.MemberLimit, &a.CreatedAt, &a.LowBalance)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Account{}, ErrNotFound
 	}
@@ -191,8 +196,10 @@ func (s *Service) CreatePending(ctx context.Context, email, passwordHash string)
 	var a Account
 	err := pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
 		var err error
-		a, err = scanAccount(tx.QueryRow(ctx, `INSERT INTO accounts AS a (compute_enabled, created_at)
-			VALUES ($1, $2) RETURNING `+accountColumns, s.computeDefault, now))
+		// The account is named after its first user until an owner or
+		// admin renames it.
+		a, err = scanAccount(tx.QueryRow(ctx, `INSERT INTO accounts AS a (name, compute_enabled, created_at)
+			VALUES ($3, $1, $2) RETURNING `+accountColumns, s.computeDefault, now, email))
 		if err != nil {
 			return err
 		}

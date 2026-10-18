@@ -38,7 +38,7 @@ RUN npm run build \
  && test -f dist/client/sitemap.xml \
  && test -f dist/client/robots.txt \
  && rm -rf dist/client/.vite dist/client/vinext-client-entry-manifest.json \
- && for page in index signup login verify forgot-password reset-password 404 keys jobs job usage billing account marketplace listings; do \
+ && for page in index signup login verify forgot-password reset-password 404 keys jobs job usage billing account marketplace listings members accept-invitation; do \
       test -f "dist/app/$page.html" || { echo "missing dist/app/$page.html"; exit 1; }; \
     done \
  && test -f dist/app/brand/unifyai-lockup-horizontal-black.svg \
