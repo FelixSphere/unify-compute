@@ -32,7 +32,7 @@ export const siteMetadata: Metadata = {
   manifest: '/manifest-v3.webmanifest',
 };
 
-// Every public page: its own canonical, all ten languages plus x-default
+// Every public page: its own canonical, all eleven languages plus x-default
 // (UI-STANDARD "Languages"). `path` is the page's English path.
 export function pageMetadata(locale: Locale, path: string, title: string, description: string): Metadata {
   const url = absoluteUrl(path, locale);

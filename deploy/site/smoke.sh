@@ -143,19 +143,19 @@ check /does-not-exist 404 "Content-Type: text/html" "Cache-Control: no-cache" "$
 grep -q 'This page could not be found' "$tmp/body" \
   || { echo "FAIL 404: not the export's 404 page"; fail=1; }
 
-# The ten languages (UI-STANDARD "Languages"): every public page is a real
+# The eleven languages (UI-STANDARD "Languages"): every public page is a real
 # file under its prefix, with <html lang> (and dir="rtl" for Arabic), its own
-# canonical and all eleven hreflang links. ~/unifyai-brand-kit/check-i18n.sh
+# canonical and all twelve hreflang links. ~/unifyai-brand-kit/check-i18n.sh
 # audits the same thing against a live host.
-for lang in zh:zh-Hans zh-hant:zh-Hant ja:ja ko:ko es:es fr:fr de:de pt-br:pt-BR ar:ar; do
+for lang in zh:zh-Hans zh-hant:zh-Hant ja:ja ko:ko es:es fr:fr de:de pt-br:pt-BR vi:vi ar:ar; do
   prefix=${lang%%:*}; code=${lang#*:}
   for page in "" /start /marketplace /marketplace/batch-embed /privacy; do
     check "/$prefix$page" 200 "Content-Type: text/html" "Cache-Control: no-cache" "${common[@]}"
     grep -q "<html lang=\"$code\"" "$tmp/body" || { echo "FAIL /$prefix$page: <html lang> is not $code"; fail=1; }
     grep -q "<link rel=\"canonical\" href=\"https://compute.unifyai.us/$prefix$page\"" "$tmp/body" \
       || { echo "FAIL /$prefix$page: canonical is not its own URL"; fail=1; }
-    [ "$(grep -o 'rel="alternate" hrefLang="' "$tmp/body" | wc -l)" -eq 11 ] \
-      || { echo "FAIL /$prefix$page: not 10 hreflang links plus x-default"; fail=1; }
+    [ "$(grep -o 'rel="alternate" hrefLang="' "$tmp/body" | wc -l)" -eq 12 ] \
+      || { echo "FAIL /$prefix$page: not 11 hreflang links plus x-default"; fail=1; }
   done
   check "/$prefix/" 308 "Location: /$prefix"
 done
@@ -163,7 +163,7 @@ check /ar 200
 grep -q '<html lang="ar" dir="rtl"' "$tmp/body" || { echo "FAIL /ar: not dir=\"rtl\""; fail=1; }
 check /zh/no-such-page 404 "Content-Type: text/html"
 check /sitemap.xml 200
-[ "$(grep -c '<loc>' "$tmp/body")" -eq "$(( (5 + $(grep -c '^      "id": ' "$(dirname "$0")/../../compute-api/config/templates.json") - 1) * 10 ))" ] \
+[ "$(grep -c '<loc>' "$tmp/body")" -eq "$(( (5 + $(grep -c '^      "id": ' "$(dirname "$0")/../../compute-api/config/templates.json") - 1) * 11 ))" ] \
   || { echo "FAIL /sitemap.xml: does not list every page in every language"; fail=1; }
 check /robots.txt 200
 

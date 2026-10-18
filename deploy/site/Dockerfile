@@ -30,7 +30,7 @@ RUN npm run build \
  && test -f dist/client/marketplace/batch-embed.html \
  && test -f dist/client/marketplace/batch-embed.txt \
  && test -f dist/client/404.html \
- && for lang in zh zh-hant ja ko es fr de pt-br ar; do \
+ && for lang in zh zh-hant ja ko es fr de pt-br vi ar; do \
       for page in "$lang" "$lang/start" "$lang/marketplace" "$lang/marketplace/batch-embed" "$lang/privacy"; do \
         test -f "dist/client/$page.html" || { echo "missing dist/client/$page.html"; exit 1; }; \
       done; \

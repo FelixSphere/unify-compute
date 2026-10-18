@@ -1,5 +1,6 @@
 // The UnifyAI language standard (~/unifyai-brand-kit/UI-STANDARD.md,
-// "Languages", user decision 2026-10-13): the same ten languages, in this
+// "Languages", user decision 2026-10-13, Vietnamese added
+// 2026-10-18): the same eleven languages, in this
 // order, under these prefixes, on every product. English has no prefix.
 export const LOCALES = [
   { code: 'en', prefix: '', label: 'English', dir: 'ltr' },
@@ -11,6 +12,7 @@ export const LOCALES = [
   { code: 'fr', prefix: 'fr', label: 'Français', dir: 'ltr' },
   { code: 'de', prefix: 'de', label: 'Deutsch', dir: 'ltr' },
   { code: 'pt-BR', prefix: 'pt-br', label: 'Português (Brasil)', dir: 'ltr' },
+  { code: 'vi', prefix: 'vi', label: 'Tiếng Việt', dir: 'ltr' },
   { code: 'ar', prefix: 'ar', label: 'العربية', dir: 'rtl' },
 ] as const;
 

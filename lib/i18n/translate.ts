@@ -6,6 +6,7 @@ import fr from './messages/fr.json';
 import ja from './messages/ja.json';
 import ko from './messages/ko.json';
 import ptBR from './messages/pt-BR.json';
+import vi from './messages/vi.json';
 import zhHans from './messages/zh-Hans.json';
 import zhHant from './messages/zh-Hant.json';
 
@@ -22,6 +23,7 @@ export const MESSAGES: Record<Exclude<Locale, 'en'>, Record<string, string>> = {
   fr,
   de,
   'pt-BR': ptBR,
+  vi,
   ar,
 };
 

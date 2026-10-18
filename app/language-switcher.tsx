@@ -30,7 +30,7 @@ function LangLink({ link, onPick }: { link: LanguageLink; onPick?: () => void })
   );
 }
 
-// Header, wide screens: a menu button with the ten labels in a popover. The
+// Header, wide screens: a menu button with the eleven labels in a popover. The
 // button shows the current language's code, not its label: "Português
 // (Brasil)" beside five translated nav links overran the 1240px header.
 export function LanguageMenu({ links, label }: { links: LanguageLink[]; label: string }) {
@@ -76,7 +76,7 @@ export function LanguageMenu({ links, label }: { links: LanguageLink[]; label: s
   );
 }
 
-// Inside the mobile menu and in the footer: the ten labels as a plain list.
+// Inside the mobile menu and in the footer: the eleven labels as a plain list.
 export function LanguageList({ links, label, className }: { links: LanguageLink[]; label: string; className?: string }) {
   return (
     <nav aria-label={label} className={className}>

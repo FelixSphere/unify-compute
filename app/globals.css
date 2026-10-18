@@ -326,6 +326,11 @@ footer > .copyright { width: 100%; font-size: var(--u-text-xs); padding-bottom: 
   .menu-panel .menu-languages a { display: inline; height: auto; padding: 0; background: none; }
 }
 
+/* Vietnamese: Instrument Sans has no Latin Extended Additional (ạ, ế, ộ, ...),
+   so its letters would mix with a fallback inside one word. The system UI
+   face covers them; headings stay Space Grotesk, which has the subset. */
+html[lang="vi"] { --u-font-body: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+
 /* Right-to-left (Arabic). Arrows point the reading direction; code, keys,
    model IDs and file names stay left-to-right. */
 [dir="rtl"] .dir-icon { transform: scaleX(-1); }

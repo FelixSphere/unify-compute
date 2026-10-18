@@ -1342,7 +1342,7 @@ try {
   );
 
   // UI-STANDARD "Marketing header": Log in, then Sign up, on the right. The
-  // nav links are inline from 1360px: below that the ten languages' labels
+  // nav links are inline from 1360px: below that the eleven languages' labels
   // do not fit beside the language menu (app/globals.css).
   await setViewport(1440, 900, false);
   await load('/');
@@ -1462,7 +1462,7 @@ try {
     check(line === want, '/privacy footer names FelixSphere LLC under the brand line', `/privacy footer company line: ${JSON.stringify(line)}`);
   }
 
-  // The ten languages (UI-STANDARD "Languages"): the footer switcher keeps the
+  // The eleven languages (UI-STANDARD "Languages"): the footer switcher keeps the
   // visitor on the same page, the choice is remembered in fs_lang (no
   // redirect is ever made from it), and Arabic is right-to-left with code
   // left-to-right.
