@@ -5,9 +5,9 @@
       "id": "batch-embed",
       "title": "Batch embeddings with vLLM",
       "description": "Embeds an OpenAI batch file of /v1/embeddings requests with vLLM's batch runner and writes one result line per request. Default model Qwen3-Embedding-0.6B (Apache-2.0), downloaded from Hugging Face at start.",
-      "image": "vllm/vllm-openai:v0.30.0-cu129@sha256:a67f8f186d4567612ac37a55bd82295006002b18858eb12a8af2f05f86c2ae3f",
+      "image": "ghcr.io/felixsphere/unify-compute-finetune:finetune-2026-10-04@sha256:6d426175dcd0e2443df6da9cf68e96c079abe5a8b80d9f488d09019536272ac1",
       "image_licence": "Apache-2.0",
-      "image_source": "https://hub.docker.com/r/vllm/vllm-openai (tag v0.30.0-cu129, pushed 2026-09-22; Dockerfile at github.com/vllm-project/vllm/blob/v0.30.0/docker/Dockerfile)",
+      "image_source": "ghcr.io/felixsphere/unify-compute-finetune, built by publish-image.yml run 37266527011 from main 150de552 (finetune/Dockerfile on vllm/vllm-openai:v0.30.0-cu129@sha256:a67f8f18…, Apache-2.0; adds TRL 1.14.1, PEFT 0.21.2, datasets 5.0.1, accelerate 1.15.0, jsonschema 4.26.0 and torchvision 0.29.0+cu130, removes torchaudio; linux/amd64 only; licences in THIRD-PARTY-LICENSES.md, Workload images); used unchanged by this template because the bare vllm/vllm-openai:v0.30.0-cu129 cannot start (torchvision 0.28.0+cu129 against torch 2.14.0: RuntimeError operator torchvision::nms does not exist; staging first real job 2026-10-16, deploy/releases/2026-10-15-staging-first-real-job.md)",
       "command": [
         "bash",
         "-c",
@@ -88,9 +88,9 @@
       "id": "batch-infer-vllm",
       "title": "Batch chat completions with vLLM",
       "description": "Runs an OpenAI batch file of /v1/chat/completions requests through vLLM's batch runner and writes one result line per request. Default model Qwen3-4B-Instruct-2507 (Apache-2.0), downloaded from Hugging Face at start.",
-      "image": "vllm/vllm-openai:v0.30.0-cu129@sha256:a67f8f186d4567612ac37a55bd82295006002b18858eb12a8af2f05f86c2ae3f",
+      "image": "ghcr.io/felixsphere/unify-compute-finetune:finetune-2026-10-04@sha256:6d426175dcd0e2443df6da9cf68e96c079abe5a8b80d9f488d09019536272ac1",
       "image_licence": "Apache-2.0",
-      "image_source": "https://hub.docker.com/r/vllm/vllm-openai (tag v0.30.0-cu129, pushed 2026-09-22; Dockerfile at github.com/vllm-project/vllm/blob/v0.30.0/docker/Dockerfile)",
+      "image_source": "ghcr.io/felixsphere/unify-compute-finetune, built by publish-image.yml run 37266527011 from main 150de552 (finetune/Dockerfile on vllm/vllm-openai:v0.30.0-cu129@sha256:a67f8f18…, Apache-2.0; adds TRL 1.14.1, PEFT 0.21.2, datasets 5.0.1, accelerate 1.15.0, jsonschema 4.26.0 and torchvision 0.29.0+cu130, removes torchaudio; linux/amd64 only; licences in THIRD-PARTY-LICENSES.md, Workload images); used unchanged by this template because the bare vllm/vllm-openai:v0.30.0-cu129 cannot start (torchvision 0.28.0+cu129 against torch 2.14.0: RuntimeError operator torchvision::nms does not exist; staging first real job 2026-10-16, deploy/releases/2026-10-15-staging-first-real-job.md)",
       "command": [
         "bash",
         "-c",
