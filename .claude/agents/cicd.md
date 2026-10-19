@@ -105,6 +105,14 @@ account. Two consequences:
   `b3871cfc…`), same schema, so `mode=rollback` is a site-only step.
   Known, not from this release: `/members` scrolls sideways at 375 px
   (its table has no `.table-wrap`).
+- **2026-10-17, both hosts on smooth-shell:** compute-api `fd586e94…`
+  (`e7fe722`, #121 job-log-archive, released earlier that day: staging
+  39022313260, production 39023191841) and site `bd9edfdb…` (`5838ce5`,
+  #131 view transitions, collapsible sidebar; staging 39032471498,
+  production 39033815759). No migration since banner-rtl-fix. Both hosts'
+  PREVIOUS_RELEASE is `fd586e94…` / `c2899e5f…`, so `mode=rollback` is a
+  site-only step. Records: `deploy/releases/2026-10-17-*`. Throwaway
+  accounts 25 and 26 remain on staging (compute off, keys revoked).
 - **IMDS lockdown:** applied to both hosts on 2026-10-03 (staging, then
   production): firewall unit, credentials timer, `docker-compose.imds.yml`,
   hop limit 1 by Terraform. `check-imds.sh` gave `CHECK_IMDS_OK` before and after
