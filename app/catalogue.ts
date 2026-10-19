@@ -1,9 +1,9 @@
 // The marketplace pages are generated at build time from the same files
 // compute-api serves (ADR-0012, docs/spec/marketplace.md). A change to either
 // file therefore needs a site release as well as an API release.
-import skuFile from '../../compute-api/config/skus.json';
-import templateFile from '../../compute-api/config/templates.json';
-import { COMPUTE_API } from '../links';
+import skuFile from '../compute-api/config/skus.json';
+import templateFile from '../compute-api/config/templates.json';
+import { COMPUTE_API } from './links';
 
 type Sku = (typeof skuFile.skus)[number];
 type Mount = { mount: string; description: string };
@@ -28,6 +28,9 @@ export type Listing = RawTemplate & {
   gpu: Pick<Sku, 'gpu' | 'gpu_count' | 'gpu_memory_gb'>;
   runnable: boolean;
   reason?: string;
+  // Set instead of reason when the default SKU is what is not sold yet, so
+  // the page can say so in each language.
+  unsoldSku?: string;
 };
 
 // ADR-0012 §2: the buyer sees the marketplace, not the author.
@@ -50,7 +53,7 @@ function toListing(t: RawTemplate): Listing {
   if (!sku) throw new Error(`template ${t.id}: SKU ${t.sku} is not in skus.json`);
   const gpu = { gpu: sku.gpu, gpu_count: sku.gpu_count, gpu_memory_gb: sku.gpu_memory_gb };
   if (!t.available) return { ...t, gpu, runnable: false, reason: t.unavailable_reason };
-  if (!sku.available) return { ...t, gpu, runnable: false, reason: `Its GPU (${sku.id}) is not available yet.` };
+  if (!sku.available) return { ...t, gpu, runnable: false, unsoldSku: sku.id };
   return { ...t, gpu, runnable: true };
 }
 
