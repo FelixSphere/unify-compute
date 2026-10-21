@@ -62,6 +62,26 @@ const (
 	stripeTO  = 20 * time.Second
 )
 
+// BonusTier is one row of ADR-0013 §1: a top-up of at least MinCents earns
+// Percent of itself as bonus credit.
+type BonusTier struct {
+	MinCents int
+	Percent  int
+}
+
+// BonusTiers are ADR-0013 §1's, highest first. Changing them amends that ADR.
+var BonusTiers = []BonusTier{{MinCents: 10000, Percent: 5}, {MinCents: 5000, Percent: 3}}
+
+// BonusFor is the bonus a top-up of cents earns, rounded down to the cent.
+func BonusFor(cents int) int {
+	for _, t := range BonusTiers {
+		if cents >= t.MinCents {
+			return cents * t.Percent / 100
+		}
+	}
+	return 0
+}
+
 // Top-up statuses (spec/accounts.md, "Top-up").
 const (
 	StatusOpen     = "open"
@@ -228,8 +248,14 @@ type Topup struct {
 	SessionID     string
 	ReceiptURL    string
 	RefundedCents int
-	CreatedAt     time.Time
-	PaidAt        *time.Time
+	BonusCents    int
+	// RefundableCents is what is left to refund: the amount less refunds and
+	// disputes, and zero unless the top-up is credited or partly refunded.
+	RefundableCents int
+	CreatedAt       time.Time
+	PaidAt          *time.Time
+	// Request is the top-up's open refund request, else its newest, if any.
+	Request *CustomerRequest
 }
 
 // Created is POST /topups' answer.
@@ -237,6 +263,7 @@ type Created struct {
 	ID          string
 	Status      string
 	CheckoutURL string
+	BonusCents  int
 }
 
 var amountRe = regexp.MustCompile(`^(0|[1-9][0-9]{0,6})(\.[0-9]{1,2})?$`)
@@ -355,6 +382,11 @@ func (s *Service) CreateTopup(ctx context.Context, u accounts.User, amountUSD st
 
 	now := s.now()
 	id := store.NewID("tu_", now)
+	bonus := BonusFor(cents)
+	item := "Unify Compute credit"
+	if bonus > 0 {
+		item += ", includes USD " + CentsUSD(bonus) + " bonus"
+	}
 	err = pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
 		a, err := loadAccount(ctx, tx, u.AccountID, true)
 		if err != nil {
@@ -374,8 +406,8 @@ func (s *Service) CreateTopup(ctx context.Context, u accounts.User, amountUSD st
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO topups (id, account_id, user_id, amount_cents, stripe_customer_id, created_at)
-			VALUES ($1, $2, $3, $4, $5, $6)`, id, u.AccountID, u.ID, cents, cust, now)
+		_, err = tx.Exec(ctx, `INSERT INTO topups (id, account_id, user_id, amount_cents, bonus_cents, stripe_customer_id, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)`, id, u.AccountID, u.ID, cents, bonus, cust, now)
 		if isUniqueViolation(err) {
 			return topupOpen("")
 		}
@@ -391,7 +423,7 @@ func (s *Service) CreateTopup(ctx context.Context, u accounts.User, amountUSD st
 		"line_items[0][quantity]":                       {"1"},
 		"line_items[0][price_data][currency]":           {"usd"},
 		"line_items[0][price_data][unit_amount]":        {strconv.Itoa(cents)},
-		"line_items[0][price_data][product_data][name]": {"Unify Compute credit"},
+		"line_items[0][price_data][product_data][name]": {item},
 		"payment_method_types[0]":                       {"card"},
 		"customer":                                      {cust},
 		"client_reference_id":                           {id},
@@ -432,10 +464,10 @@ func (s *Service) CreateTopup(ctx context.Context, u accounts.User, amountUSD st
 	}
 	if _, err := s.acc.Audit(ctx, accounts.AuditEvent{ActorType: accounts.ActorUser, ActorID: strconv.FormatInt(u.ID, 10),
 		AccountID: u.AccountID, Action: accounts.ActionTopupCreated, Client: c,
-		Detail: map[string]any{"topup_id": id, "amount_usd": CentsUSD(cents), "checkout_session": cs.ID}}); err != nil {
+		Detail: map[string]any{"topup_id": id, "amount_usd": CentsUSD(cents), "bonus_usd": CentsUSD(bonus), "checkout_session": cs.ID}}); err != nil {
 		s.log.Error("audit write failed", "action", accounts.ActionTopupCreated, "topup", id, "err", err)
 	}
-	return Created{ID: id, Status: StatusOpen, CheckoutURL: cs.URL}, nil
+	return Created{ID: id, Status: StatusOpen, CheckoutURL: cs.URL, BonusCents: bonus}, nil
 }
 
 func (s *Service) metadata(accountID int64, topupID string) map[string]string {
@@ -520,21 +552,45 @@ func (s *Service) closeOpen(ctx context.Context, accountID int64) error {
 	}
 }
 
-const topupColumns = `id, account_id, amount_cents, status, COALESCE(stripe_checkout_session_id, ''), COALESCE(receipt_url, ''),
-	refunded_cents, created_at, paid_at`
+// topupColumns read a top-up (t) with its refund request (rr): the open one
+// if there is one, otherwise the newest.
+const topupColumns = `t.id, t.account_id, t.amount_cents, t.status, COALESCE(t.stripe_checkout_session_id, ''), COALESCE(t.receipt_url, ''),
+	t.refunded_cents, t.disputed_cents, t.bonus_cents, t.created_at, t.paid_at,
+	rr.id, rr.user_id, rr.amount_cents, rr.reason, rr.status, rr.resolution, rr.created_at, rr.resolved_at`
+
+const topupFrom = ` FROM topups t LEFT JOIN LATERAL (SELECT * FROM refund_requests r WHERE r.topup_id = t.id
+	ORDER BY r.status = 'open' DESC, r.created_at DESC, r.id DESC LIMIT 1) rr ON true`
 
 func scanTopup(r pgx.Row) (Topup, error) {
 	var t Topup
-	err := r.Scan(&t.ID, &t.AccountID, &t.AmountCents, &t.Status, &t.SessionID, &t.ReceiptURL, &t.RefundedCents, &t.CreatedAt, &t.PaidAt)
-	return t, err
+	var disputed int
+	var rr struct {
+		id, reason, status, resolution *string
+		user                           *int64
+		cents                          *int
+		created, resolved              *time.Time
+	}
+	err := r.Scan(&t.ID, &t.AccountID, &t.AmountCents, &t.Status, &t.SessionID, &t.ReceiptURL, &t.RefundedCents, &disputed,
+		&t.BonusCents, &t.CreatedAt, &t.PaidAt, &rr.id, &rr.user, &rr.cents, &rr.reason, &rr.status, &rr.resolution, &rr.created, &rr.resolved)
+	if err != nil {
+		return t, err
+	}
+	if t.Status == StatusCredited || t.Status == StatusPartiallyRefunded {
+		t.RefundableCents = t.AmountCents - t.RefundedCents - disputed
+	}
+	if rr.id != nil {
+		t.Request = &CustomerRequest{ID: *rr.id, AccountID: t.AccountID, UserID: *rr.user, TopupID: t.ID, AmountCents: *rr.cents,
+			Reason: *rr.reason, Status: *rr.status, Resolution: *rr.resolution, CreatedAt: *rr.created, ResolvedAt: rr.resolved}
+	}
+	return t, nil
 }
 
 // ListTopups is the account's newest top-ups, at most 50 (three a day). A
 // top-up whose session was never created is not shown: it is being created
 // or about to be deleted.
 func (s *Service) ListTopups(ctx context.Context, accountID int64) ([]Topup, error) {
-	rows, err := s.db.Query(ctx, `SELECT `+topupColumns+` FROM topups
-		WHERE account_id = $1 AND stripe_checkout_session_id IS NOT NULL ORDER BY created_at DESC, id DESC LIMIT $2`, accountID, maxListed)
+	rows, err := s.db.Query(ctx, `SELECT `+topupColumns+topupFrom+`
+		WHERE t.account_id = $1 AND t.stripe_checkout_session_id IS NOT NULL ORDER BY t.created_at DESC, t.id DESC LIMIT $2`, accountID, maxListed)
 	if err != nil {
 		return nil, err
 	}
@@ -543,8 +599,8 @@ func (s *Service) ListTopups(ctx context.Context, accountID int64) ([]Topup, err
 
 // GetTopup is one top-up of the account; another account's is ErrNotFound.
 func (s *Service) GetTopup(ctx context.Context, accountID int64, id string) (Topup, error) {
-	t, err := scanTopup(s.db.QueryRow(ctx, `SELECT `+topupColumns+` FROM topups
-		WHERE id = $1 AND account_id = $2 AND stripe_checkout_session_id IS NOT NULL`, id, accountID))
+	t, err := scanTopup(s.db.QueryRow(ctx, `SELECT `+topupColumns+topupFrom+`
+		WHERE t.id = $1 AND t.account_id = $2 AND t.stripe_checkout_session_id IS NOT NULL`, id, accountID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Topup{}, ErrNotFound
 	}

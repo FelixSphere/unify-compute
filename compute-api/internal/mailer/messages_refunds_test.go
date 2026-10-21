@@ -20,6 +20,14 @@ var refundMessages = []struct {
 	{"account-suspended", func(m *Mailer, to string) error {
 		return m.AccountSuspended(context.Background(), to, Suspension{TopupID: "tu_01J9ZK3Q8V6Y2N4M7P5R1T0WXS", AmountUSD: "20.00", At: at})
 	}},
+	{"refund-issued-bonus", func(m *Mailer, to string) error {
+		return m.RefundIssued(context.Background(), to, Refund{TopupID: "tu_01J9ZK3Q8V6Y2N4M7P5R1T0WXS", AmountUSD: "20.00",
+			TopupAmountUSD: "50.00", AvailableUSD: "30.9000", BonusReversedUSD: "0.60", At: at})
+	}},
+	{"refund-declined", func(m *Mailer, to string) error {
+		return m.RefundDeclined(context.Background(), to, RefundDecline{RequestID: "rr_01J9ZK3Q8V6Y2N4M7P5R1T0WXS",
+			TopupID: "tu_01J9ZK3Q8V6Y2N4M7P5R1T0WXS", Message: "The credit from this top-up was used by jobs, so there is no unused balance to refund."})
+	}},
 	{"operator-notice", func(m *Mailer, to string) error {
 		return m.Operator(context.Background(), to, OperatorNotice{Title: "dispute opened on tu_01J9ZK3Q8V6Y2N4M7P5R1T0WXS",
 			Body:   "A card payment for a Unify Compute top-up was disputed.",
@@ -35,7 +43,7 @@ func TestRefundMessagesMatchTheirGoldenFiles(t *testing.T) {
 			if err := tc.send(testMailer(c), "ada@example.com"); err != nil {
 				t.Fatal(err)
 			}
-			if c.kind != tc.kind || c.to != "ada@example.com" {
+			if c.kind != strings.TrimSuffix(tc.kind, "-bonus") || c.to != "ada@example.com" {
 				t.Fatalf("delivered %q to %q", c.kind, c.to)
 			}
 			p := parse(t, c.raw)
@@ -64,7 +72,7 @@ func TestRefundIssuedStatesThePolicy(t *testing.T) {
 
 func TestOperatorNoticeFlattensValues(t *testing.T) {
 	c := &capture{}
-	if err := refundMessages[2].send(testMailer(c), "ops@example.com"); err != nil {
+	if err := refundMessages[len(refundMessages)-1].send(testMailer(c), "ops@example.com"); err != nil {
 		t.Fatal(err)
 	}
 	p := parse(t, c.raw)
