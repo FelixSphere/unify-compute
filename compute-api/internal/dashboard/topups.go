@@ -20,24 +20,64 @@ const webhookPath = "/stripe/webhook"
 // script could open sessions (and card attempts inside them) without end.
 var topupCreatePerAccount = accounts.Rule{Bucket: "topup_create_account", Limit: 10, Window: time.Hour}
 
+// refundRequestPerAccount is ADR-0013 §2's throttle: each request emails the
+// operator.
+var refundRequestPerAccount = accounts.Rule{Bucket: "refund_request_account", Limit: 5, Window: 24 * time.Hour}
+
 type topupView struct {
-	ID          string  `json:"id"`
-	Object      string  `json:"object"`
-	AmountUSD   string  `json:"amount_usd"`
-	Status      string  `json:"status"`
-	CreatedAt   int64   `json:"created_at"`
-	PaidAt      *int64  `json:"paid_at"`
-	ReceiptURL  *string `json:"receipt_url"`
-	RefundedUSD string  `json:"refunded_usd"`
+	ID            string             `json:"id"`
+	Object        string             `json:"object"`
+	AmountUSD     string             `json:"amount_usd"`
+	BonusUSD      string             `json:"bonus_usd"`
+	Status        string             `json:"status"`
+	CreatedAt     int64              `json:"created_at"`
+	PaidAt        *int64             `json:"paid_at"`
+	ReceiptURL    *string            `json:"receipt_url"`
+	RefundedUSD   string             `json:"refunded_usd"`
+	RefundableUSD string             `json:"refundable_usd"`
+	RefundRequest *refundRequestView `json:"refund_request"`
+}
+
+type refundRequestView struct {
+	ID         string `json:"id"`
+	Object     string `json:"object"`
+	TopupID    string `json:"topup_id"`
+	AmountUSD  string `json:"amount_usd"`
+	Status     string `json:"status"`
+	Resolution string `json:"resolution"`
+	CreatedAt  int64  `json:"created_at"`
+	ResolvedAt *int64 `json:"resolved_at"`
+}
+
+func viewRefundRequest(r payments.CustomerRequest) *refundRequestView {
+	return &refundRequestView{ID: r.ID, Object: "compute.refund_request", TopupID: r.TopupID, AmountUSD: payments.CentsUSD(r.AmountCents),
+		Status: r.Status, Resolution: r.Resolution, CreatedAt: r.CreatedAt.Unix(), ResolvedAt: unixPtr(r.ResolvedAt)}
 }
 
 func viewTopup(t payments.Topup) topupView {
-	v := topupView{ID: t.ID, Object: "compute.topup", AmountUSD: payments.CentsUSD(t.AmountCents), Status: t.Status,
-		CreatedAt: t.CreatedAt.Unix(), PaidAt: unixPtr(t.PaidAt), RefundedUSD: payments.CentsUSD(t.RefundedCents)}
+	v := topupView{ID: t.ID, Object: "compute.topup", AmountUSD: payments.CentsUSD(t.AmountCents), BonusUSD: payments.CentsUSD(t.BonusCents),
+		Status: t.Status, CreatedAt: t.CreatedAt.Unix(), PaidAt: unixPtr(t.PaidAt), RefundedUSD: payments.CentsUSD(t.RefundedCents),
+		RefundableUSD: payments.CentsUSD(t.RefundableCents)}
 	if t.ReceiptURL != "" {
 		v.ReceiptURL = &t.ReceiptURL
 	}
+	if t.Request != nil {
+		v.RefundRequest = viewRefundRequest(*t.Request)
+	}
 	return v
+}
+
+type bonusTierView struct {
+	MinUSD  string `json:"min_usd"`
+	Percent int    `json:"percent"`
+}
+
+func bonusTiers() []bonusTierView {
+	out := make([]bonusTierView, len(payments.BonusTiers))
+	for i, t := range payments.BonusTiers {
+		out[i] = bonusTierView{MinUSD: payments.CentsUSD(t.MinCents), Percent: t.Percent}
+	}
+	return out
 }
 
 func writePaymentsError(w http.ResponseWriter, e *payments.Error) {
@@ -89,7 +129,8 @@ func (h *Handler) createTopup(w http.ResponseWriter, r *http.Request, _ accounts
 		h.paymentsFailed(w, "create top-up", err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]string{"id": c.ID, "object": "compute.topup", "status": c.Status, "checkout_url": c.CheckoutURL})
+	writeJSON(w, http.StatusCreated, map[string]string{"id": c.ID, "object": "compute.topup", "status": c.Status, "checkout_url": c.CheckoutURL,
+		"bonus_usd": payments.CentsUSD(c.BonusCents)})
 }
 
 // listTopups also says whether top-ups can be made in this deployment, so
@@ -108,7 +149,8 @@ func (h *Handler) listTopups(w http.ResponseWriter, r *http.Request, _ accounts.
 	for i, t := range list {
 		data[i] = viewTopup(t)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data, "has_more": false, "topups_enabled": h.pay.Enabled()})
+	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data, "has_more": false, "topups_enabled": h.pay.Enabled(),
+		"bonus_tiers": bonusTiers()})
 }
 
 func (h *Handler) getTopup(w http.ResponseWriter, r *http.Request, _ accounts.Session, u accounts.User) {
@@ -148,4 +190,51 @@ func (h *Handler) stripeWebhook(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusOK, map[string]any{"received": true, "outcome": outcome})
 	}
+}
+
+type refundRequestBody struct {
+	AmountUSD string `json:"amount_usd"`
+	Reason    string `json:"reason"`
+}
+
+// requestRefund asks the operator to refund a top-up to its card (ADR-0013
+// §2). Nothing is refunded here. The same roles that can top up can ask.
+func (h *Handler) requestRefund(w http.ResponseWriter, r *http.Request, _ accounts.Session, u accounts.User) {
+	if !accounts.CanManage(u.Role) {
+		writeAccountsError(w, accounts.ErrRoleRequired)
+		return
+	}
+	if h.pay == nil {
+		writePaymentsError(w, payments.ErrUnavailable)
+		return
+	}
+	var req refundRequestBody
+	if !decode(w, r, &req) {
+		return
+	}
+	if !h.hit(w, r, refundRequestPerAccount, strconv.FormatInt(u.AccountID, 10)) {
+		return
+	}
+	rr, err := h.pay.CreateRefundRequest(r.Context(), u, r.PathValue("id"), req.AmountUSD, req.Reason, clientInfo(r))
+	if err != nil {
+		h.paymentsFailed(w, "request refund", err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, viewRefundRequest(rr))
+}
+
+func (h *Handler) cancelRefundRequest(w http.ResponseWriter, r *http.Request, _ accounts.Session, u accounts.User) {
+	if !accounts.CanManage(u.Role) {
+		writeAccountsError(w, accounts.ErrRoleRequired)
+		return
+	}
+	if h.pay == nil {
+		writePaymentsError(w, payments.ErrUnavailable)
+		return
+	}
+	if err := h.pay.CancelRefundRequest(r.Context(), u, r.PathValue("id"), clientInfo(r)); err != nil {
+		h.paymentsFailed(w, "cancel refund request", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

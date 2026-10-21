@@ -54,11 +54,13 @@ func (s *Service) RequestRefund(ctx context.Context, r RefundRequest) (RefundIss
 	var t struct {
 		accountID                  int64
 		amount, refunded, disputed int
+		bonus, bonusReversed       int
 		status                     string
 		pi                         *string
 	}
-	err := s.db.QueryRow(ctx, `SELECT account_id, amount_cents, refunded_cents, disputed_cents, status, stripe_payment_intent_id FROM topups WHERE id = $1`,
-		r.TopupID).Scan(&t.accountID, &t.amount, &t.refunded, &t.disputed, &t.status, &t.pi)
+	err := s.db.QueryRow(ctx, `SELECT account_id, amount_cents, refunded_cents, disputed_cents, bonus_cents, bonus_reversed_cents, status,
+		stripe_payment_intent_id FROM topups WHERE id = $1`,
+		r.TopupID).Scan(&t.accountID, &t.amount, &t.refunded, &t.disputed, &t.bonus, &t.bonusReversed, &t.status, &t.pi)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return RefundIssued{}, &ErrRefund{"no top-up " + r.TopupID}
 	}
@@ -83,9 +85,24 @@ func (s *Service) RequestRefund(ctx context.Context, r RefundRequest) (RefundIss
 	if err != nil {
 		return RefundIssued{}, err
 	}
-	if int64(cents)*quotaPerCent > bal.Available {
-		return RefundIssued{}, &ErrRefund{fmt.Sprintf("account %d has USD %s available; refunding USD %s would return compute already used. Refund at most the available balance",
-			t.accountID, billing.USD(bal.Available), CentsUSD(cents))}
+	// The refund takes its share of the top-up's bonus off the balance with
+	// it (ADR-0013 §3), so both must fit in what is unused.
+	debit := func(c int) int64 {
+		bonus := bonusShare(int64(t.amount), int64(t.bonus), int64(t.refunded+t.disputed+c)) - int64(t.bonusReversed)
+		return (int64(c) + max(bonus, 0)) * quotaPerCent
+	}
+	if debit(cents) > bal.Available {
+		fits := 0
+		for lo, hi := 0, cents; lo <= hi; {
+			mid := (lo + hi) / 2
+			if debit(mid) <= bal.Available {
+				fits, lo = mid, mid+1
+			} else {
+				hi = mid - 1
+			}
+		}
+		return RefundIssued{}, &ErrRefund{fmt.Sprintf("account %d has USD %s available; refunding USD %s (with its share of the bonus credit) would return compute already used. Refund at most USD %s",
+			t.accountID, billing.USD(bal.Available), CentsUSD(cents), CentsUSD(fits))}
 	}
 	form := url.Values{"payment_intent": {*t.pi}, "amount": {strconv.Itoa(cents)}, "reason": {"requested_by_customer"}}
 	putMetadata(form, "metadata", s.metadata(t.accountID, r.TopupID))

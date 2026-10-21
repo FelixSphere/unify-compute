@@ -201,13 +201,13 @@ type creditDone struct {
 
 func (s *Service) applySession(ctx context.Context, tx pgx.Tx, ev event, cs CheckoutSession, log *slog.Logger) (string, *creditDone, error) {
 	var t struct {
-		accountID int64
-		cents     int64
-		status    string
-		session   *string
+		accountID    int64
+		cents, bonus int64
+		status       string
+		session      *string
 	}
-	err := tx.QueryRow(ctx, `SELECT account_id, amount_cents, status, stripe_checkout_session_id FROM topups WHERE id = $1 FOR UPDATE`,
-		cs.ClientReferenceID).Scan(&t.accountID, &t.cents, &t.status, &t.session)
+	err := tx.QueryRow(ctx, `SELECT account_id, amount_cents, bonus_cents, status, stripe_checkout_session_id FROM topups WHERE id = $1 FOR UPDATE`,
+		cs.ClientReferenceID).Scan(&t.accountID, &t.cents, &t.bonus, &t.status, &t.session)
 	if errors.Is(err, pgx.ErrNoRows) {
 		log.Error("stripe webhook: compute checkout session names no known top-up", "client_reference_id", cs.ClientReferenceID, "session", cs.ID)
 		return OutcomeRejected, nil, nil
@@ -254,6 +254,11 @@ func (s *Service) applySession(ctx context.Context, tx pgx.Tx, ev event, cs Chec
 	if err != nil {
 		return "", nil, err
 	}
+	if t.bonus > 0 {
+		if bal, err = s.bill.CreditBonusTx(ctx, tx, t.accountID, t.bonus*quotaPerCent, cs.ClientReferenceID); err != nil {
+			return "", nil, err
+		}
+	}
 	var pi *string
 	if cs.PaymentIntent != "" {
 		pi = &cs.PaymentIntent
@@ -265,7 +270,8 @@ func (s *Service) applySession(ctx context.Context, tx pgx.Tx, ev event, cs Chec
 	}
 	if _, err := s.acc.AuditTx(ctx, tx, accounts.AuditEvent{ActorType: accounts.ActorStripe, ActorID: ev.ID, AccountID: t.accountID,
 		Action: accounts.ActionTopupCredited, Detail: map[string]any{"topup_id": cs.ClientReferenceID,
-			"amount_usd": CentsUSD(int(t.cents)), "checkout_session": cs.ID, "available_after_usd": billing.USD(bal.Available)}}); err != nil {
+			"amount_usd": CentsUSD(int(t.cents)), "bonus_usd": CentsUSD(int(t.bonus)), "checkout_session": cs.ID,
+			"available_after_usd": billing.USD(bal.Available)}}); err != nil {
 		return "", nil, err
 	}
 	return OutcomeCredited, &creditDone{topupID: cs.ClientReferenceID, accountID: t.accountID, paymentIntent: cs.PaymentIntent,
