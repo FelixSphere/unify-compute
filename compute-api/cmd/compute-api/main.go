@@ -491,7 +491,12 @@ func runAdmin(args []string) int {
 	// applies it. Keys that the service would refuse are refused here too.
 	if os.Getenv("ACCOUNTS_BACKEND") == backendLocal {
 		set := payments.SettingsFromEnv(os.Getenv)
-		cfg := payments.Config{DB: st.Pool(), Accounts: cli.Accounts, Billing: cli.Biller, Settings: set, Log: quiet}
+		cfg := payments.Config{DB: st.Pool(), Accounts: cli.Accounts, Billing: cli.Biller, Settings: set, Log: quiet,
+			OperatorEmail: os.Getenv("OPERATOR_EMAIL")}
+		// A declined refund request emails the customer from here.
+		if mail != nil {
+			cfg.Mailer = mail
+		}
 		if set.Configured() && set.Check() == nil {
 			cfg.Stripe = &payments.Stripe{Key: set.SecretKey, HTTP: &http.Client{Timeout: 20 * time.Second}}
 		}

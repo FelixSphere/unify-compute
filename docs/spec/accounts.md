@@ -19,8 +19,12 @@
   migration `0012_refunds_disputes.sql`, `internal/payments/refunds.go`,
   `admin topup refund`, the refund, suspension and operator emails) are on
   the branch `feat/refunds-and-disputes`, tested against the Stripe fake
-  only. The top-up receipt email, `admin account limits`, `GET /compute/v1/balance`,
-  account export and close do not exist yet.
+  only. Bonus credit on top-ups and customers' refund requests
+  ([ADR-0013](../adr/0013-topup-bonus-and-refund-requests.md), migration
+  `0015_bonus_and_refund_requests.sql`) are on the branch
+  `feat/topup-bonus-refund-requests`, tested against the Stripe fake only.
+  `admin account limits`, `GET /compute/v1/balance`, account export and close
+  do not exist yet.
 - Task breakdown: [`plan-own-accounts.md`](../plan-own-accounts.md).
 - Depends on: [`job-api.md`](job-api.md) (error envelope, job routes),
   [`metering.md`](metering.md) (holds H1–H7, settlement R1–R6, the quota unit),
@@ -151,7 +155,7 @@ Key format: `uck_` followed by 40 characters from `[0-9A-Za-z]`, from
 | `id` | `text` PK | `be_` + ULID |
 | `seq` | `bigint` identity unique | Write order |
 | `account_id` | `bigint` | |
-| `kind` | `text` | `topup`, `hold`, `extend`, `settle`, `release`, `refund`, `dispute`, `dispute_reversal`, `admin_credit`, `admin_debit`, `writeoff` |
+| `kind` | `text` | `topup`, `topup_bonus`, `hold`, `extend`, `settle`, `release`, `refund`, `dispute`, `dispute_reversal`, `admin_credit`, `admin_debit`, `writeoff`. `topup_bonus` is a top-up's bonus credit (`topup_bonus:tu_…`), the share a refund or dispute takes back (negative, `topup_bonus_reversal:…`), or what a won dispute restores (`topup_bonus_restore:dp_…`) |
 | `available_delta`, `held_delta` | `bigint` | Signed quota units. A `hold` is (−q, +q); `settle` (0, −q); `release` (+q, −q); `topup` (+q, 0) |
 | `available_after`, `held_after` | `bigint` | Snapshot, so a balance can be audited from the entries alone |
 | `ref_type`, `ref_id` | `text` | `topup`/`tu_…`, `hold`/`hold_…`, `job`/`job_…`, `admin`/audit id |
@@ -223,6 +227,7 @@ After the cutover its `user_id` holds the account id and `token_id` the key id.
 | `stripe_payment_intent_id`, `stripe_charge_id` | `text` | The PaymentIntent from the completed session; the charge and receipt looked up after the credit |
 | `receipt_url` | `text` | Stripe's hosted receipt |
 | `refunded_cents`, `disputed_cents` | `integer` | Refunded so far (the charge's cumulative `amount_refunded` last applied) and the amount under open disputes (B2) |
+| `bonus_cents`, `bonus_reversed_cents` | `integer` | The bonus credit fixed at creation (`payments.BonusFor`: 3% from USD 50, 5% at USD 100; ADR-0013), and how much of it refunds and open disputes have taken back |
 | `created_at`, `paid_at`, `expires_at` | `timestamptz` | `expires_at` = Checkout's, one hour after creation (`payments.CheckoutTTL`) |
 
 ### `stripe_events`
@@ -240,7 +245,17 @@ Only compute's own events are stored; see [Stripe webhook](#stripe-webhook-post-
 account from `active` to `suspended`), `opened_event_id`,
 `closed_event_id`, `created_at`, `closed_at`. Keyed on the dispute, so a
 dispute is debited and reinstated at most once whatever order its events
-arrive in.
+arrive in. `bonus_cents` is the share of the top-up's bonus this dispute
+took back, which a won dispute restores (ADR-0013).
+
+### `refund_requests`
+
+A customer's request (ADR-0013 §3): `id` (`rr_` + ULID), `account_id`,
+`user_id`, `topup_id`, `amount_cents`, `reason` (at most 500 characters),
+`status` (`open` → `refunded` | `declined` | `cancelled`), `resolution` (the
+operator's message on a decline), `refund_event` (the Stripe event whose
+refund closed it), `created_at`, `resolved_at`. At most one `open` per
+top-up (partial unique index).
 
 ### `payment_emails`
 
@@ -266,7 +281,8 @@ own data. Folding them together means storing the message detail in
 `password_changed`, `key_created`, `key_revoked`, `invited`,
 `invite_accepted`, `invite_revoked`, `member_removed`, `role_changed`,
 `account_renamed`, `topup_created`,
-`topup_credited`, `refund`, `dispute_opened`, `dispute_closed`,
+`topup_credited`, `refund`, `refund_requested`, `refund_request_cancelled`,
+`refund_request_declined`, `dispute_opened`, `dispute_closed`,
 `account_suspended`, `account_reinstated`, `compute_enabled`,
 `limits_changed`, `admin_credit`, `admin_debit`, `export`, `account_closed`,
 `low_balance_changed` (detail `low_balance_usd`).
@@ -387,6 +403,32 @@ key is `401 invalid_key`, with no cache.
 - Not handled: a refund that later fails (`charge.refund.updated` with
   `status = failed`) stays debited; Stripe's `charge.dispute.funds_*`
   events are not used.
+- **Bonus credit** (ADR-0013). The webhook that credits a top-up credits its
+  `bonus_cents` too, as a `topup_bonus` entry in the same transaction. A
+  refund or a dispute takes back the same share of it,
+  `floor(bonus × (refunded + disputed) / amount)` on running totals (all of
+  it once nothing of the payment is left), as a negative `topup_bonus`
+  entry next to the `refund` or `dispute` entry; a won dispute restores what
+  it took. `admin topup refund` refuses a refund whose debit, refund plus
+  bonus share, does not fit in `available`, and names the largest that
+  would. "Refund issued" names the bonus removed.
+- An applied refund of a top-up closes its open refund request (below) as
+  `refunded`, whatever amount was asked.
+
+### Refund request
+
+```
+POST /topups/{id}/refund-request
+(none) ──────────▶ open ──charge.refunded applied──▶ refunded
+                    ├──admin refund-request decline──▶ declined (the message is emailed)
+                    └──DELETE /refund-requests/{id}──▶ cancelled
+```
+
+Only a top-up with something refundable (`credited` or
+`partially_refunded`, `refundable_usd` above zero) can be asked about, for
+at most that amount, and only by owners and admins. Asking moves no money;
+it queues an operator notice to `OPERATOR_EMAIL` in `payment_emails` under
+the request id.
 
 ### Account
 
@@ -526,8 +568,10 @@ after the response, so neither the status nor the time depends on it.
 | `GET /jobs/{id}/artifacts` | — | As the job API: the listing and presigned GET URLs. Without it the job page could not offer downloads, because the page has a session and the job API takes only a key. Built (A7d) |
 | `GET /usage?month=YYYY-MM` or `?from=YYYY-MM-DD&to=YYYY-MM-DD` | — | `{ object: "compute.usage", month? (calendar months only), from, to (inclusive dates), currency: "USD", jobs, gpu_seconds, gpu_usd, storage_usd, egress_usd, total_usd, by_sku: [{ sku, gpu_seconds, usd }], by_day: [{ date, gpu_seconds, usd }] (every day of the month, zeros included), by_key: [{ key: { id, name, display }, jobs, gpu_seconds, usd }] (largest first) }` for one UTC month (absent: the current one; malformed: `400 invalid_month`) or an inclusive date range of at most 366 days (`400 invalid_period` for month with from/to, a malformed date, to before from, or a longer span). Totals the settles accepted in the month by SKU, in quota units converted once, so `total_usd` is exactly what the month's settle entries took; `gpu_seconds` counts what each settle added. Usage accrued but not yet settled is not in it. Holds whose SKU is `storage` or `egress` (R5, not built) go to those meters, so both read `0.0000` today. Built (A7d) |
 | `POST /topups` | `{ amount_usd: "20.00" }` | `201 { id, object: "compute.topup", status: "open", checkout_url }`. Checks the account is active and the limits, expires an open top-up's session (above), creates the Customer on the first top-up and the Checkout Session: mode `payment`, one USD line item, `payment_method_types[0]=card`, `saved_payment_method_options[payment_method_save]=disabled`, no `setup_future_usage`, `client_reference_id` and idempotency key from the top-up id, `metadata` and `payment_intent_data[metadata]` = `product: unify-compute`, `account_id`, `topup_id`, `environment`, return URLs `APP_ORIGIN/billing?topup=<id>&checkout=success` / `=cancelled`, expiring after 1 h. Writes `topup_created`. Built (B1) |
-| `GET /topups` | — | `{ object: "list", data, has_more: false, topups_enabled }`: the 50 newest, newest first, each `{ id, object: "compute.topup", amount_usd, status, created_at, paid_at, receipt_url, refunded_usd }`. `topups_enabled` says whether `POST` can work here, so the page offers the form only then. Built (B1) |
+| `GET /topups` | — | `{ object: "list", data, has_more: false, topups_enabled, bonus_tiers }`: the 50 newest, newest first, each `{ id, object: "compute.topup", amount_usd, bonus_usd, status, created_at, paid_at, receipt_url, refunded_usd, refundable_usd, refund_request }` (`refund_request`: the open one, else the newest, else null). `topups_enabled` says whether `POST` can work here, so the page offers the form only then; `bonus_tiers` (`[{ min_usd, percent }]`, highest first) lets it show the credit before payment. Built (B1, ADR-0013) |
 | `GET /topups/{id}` | — | One top-up, as listed; another account's is `404 not_found`. What `/billing` polls after the return from Checkout. Built (B1) |
+| `POST /topups/{id}/refund-request` | `{ amount_usd?, reason? }` | `201 { id, object: "compute.refund_request", topup_id, amount_usd, status: "open", resolution, created_at, resolved_at }`. See [Refund request](#refund-request). Owners and admins (`403 role_required`). `amount_usd` defaults to all of `refundable_usd`. Errors: `400 invalid_amount`, `400 invalid_reason`, `404 not_found`, `409 refund_request_open`, `409 topup_not_refundable`, `429` (5 per account per 24 h). Writes `refund_requested`. ADR-0013 |
+| `DELETE /refund-requests/{id}` | — | `204`; the account's own open request, owners and admins (`404 not_found`, `409 refund_request_closed`). Writes `refund_request_cancelled`. ADR-0013 |
 | `POST /stripe/webhook` | Stripe event | Not for the pages: see [Stripe webhook](#stripe-webhook-post-dashboardv1stripewebhook). Built (B1) |
 | `GET /usage/jobs?month=|from=&to=&sku=&key=&after=&limit=` | — | The per-job view of the same settles: `{ object: "list", data: [{ object: "compute.job_usage", job_id, sku, status, key: { id, name, display }, started_at, finished_at, settled_at, gpu_seconds, usd }], has_more, next? }`, newest settle first, keyset on `(settled_at, job_id)`, `limit` 1–100 (default 20). `sku` and `key` (an API key id) filter; the page's `usd` values sum to `/usage`'s `gpu_usd` when unfiltered. Errors: `invalid_month`, `invalid_key`, `invalid_limit`, `invalid_cursor`. The console's per-request log, at the job grain |
 | `GET /usage/export?month=|from=&to=` | — | The same rows as `/usage/jobs`, unfiltered, as a CSV attachment named `unify-compute-usage-<from>-<to>.csv` with FOCUS 1.0 column names (`BillingAccountId`, `BillingPeriodStart/End`, `ChargePeriodStart/End`, `ChargeCategory`, `ServiceName`, `ResourceId`, `SkuId`, `ConsumedQuantity`, `ConsumedUnit`, `BilledCost`, `EffectiveCost`, …) plus `x_ApiKeyId`, `x_ApiKeyName`, `x_JobStatus`. At most 10 000 rows. Product-design C10 |
@@ -705,6 +749,8 @@ admin account suspend|reinstate <id> --reason …
 admin account limits <id> [--topup-max-usd N] [--balance-max-usd N] [--topups-per-day N] --reason …
 admin balance credit|debit <id> --usd 12.50 --reason …      # admin_credit / admin_debit entries
 admin topup refund <tu_…> [--usd N] --reason …               # Stripe refund; the webhook writes the refund entry
+admin refund-request list                                     # open customer requests, oldest first
+admin refund-request decline <rr_…> --message … --reason …    # --message is emailed to the customer
 admin audit [--account <id>]                                  # checks the balance invariant
 ```
 
@@ -780,7 +826,8 @@ something the subject does not say.
 | API key created | `POST /keys` | CTA "Review keys" | `A new Unify Compute API key was created` |
 | Top-up received | webhook credits | CTA "View receipt" (Stripe `receipt_url`), or "View billing" (`/billing`) when the receipt lookup failed; details: amount, new balance, top-up id, paid. Built (W2) | `Unify Compute: USD 20.00 added to your balance` |
 | Low balance | `available` crosses below `low_balance_quota` (see [Low-balance warning](#low-balance-warning)) | CTA "Top up" (`/billing`); details: available balance, held by running jobs, alert below. Built (W6) | `Unify Compute: your balance is below USD 5.00` |
-| Refund issued | `charge.refunded` applied (from the CLI or the Stripe dashboard); states the refund policy | CTA "View balance" (`/billing`) | `Unify Compute: refund of USD 20.00 issued` |
+| Refund issued | `charge.refunded` applied (from the CLI or the Stripe dashboard); states the refund policy and, when there is one, the bonus credit removed (ADR-0013) | CTA "View balance" (`/billing`) | `Unify Compute: refund of USD 20.00 issued` |
+| Refund declined | `admin refund-request decline` (to the requester); the operator's message is the intro | CTA "View billing" (`/billing`) | `About your Unify Compute refund request`. ADR-0013 |
 | Account suspended | a dispute that suspends the account (not sent for an admin suspension yet) | CTA "Contact us" (mailto `contactus@felixsphere.com`, per UI-STANDARD) | `Your Unify Compute account is suspended` |
 | Compute enabled | admin `enable-compute` | CTA "Create an API key" | `Your Unify Compute account can now run jobs` |
 | Invitation | `POST /members/invitations` | CTA "Accept invitation" (link with token in the fragment); details: account name, inviter, role | `<inviter> invited you to <account> on Unify Compute` |
@@ -788,7 +835,7 @@ something the subject does not say.
 | Removed from account | `DELETE /members/{id}` (to the removed address) | none (safety line names the account and who to contact) | `You were removed from <account> on Unify Compute` |
 | Job finished / failed / billing stopped | as `notifications.md` | as `notifications.md` | as `notifications.md`; the safety lines' "Unify API console" becomes the Unify Compute dashboard. Built (W2) |
 | Storage arrears started / artifacts deletion scheduled / deleted | ADR-0008 | CTA "Top up" | `Unify Compute: storage unpaid, artifacts deleted on <date>` (and variants) |
-| Operator: dispute opened, dispute won/lost, refund left a balance negative | B2 webhook; limit refusals are not emailed | — (plain operator notice to `OPERATOR_EMAIL`) | `[Unify Compute ops] dispute opened on tu_…` |
+| Operator: dispute opened, dispute won/lost, refund left a balance negative, refund requested | B2 webhook; `POST /topups/{id}/refund-request` (ADR-0013); limit refusals are not emailed | — (plain operator notice to `OPERATOR_EMAIL`) | `[Unify Compute ops] dispute opened on tu_…` |
 
 The links open these dashboard pages on `APP_ORIGIN`: `/login`,
 `/forgot-password`, `/reset-password#token=…`, `/keys`, `/members` and
@@ -845,7 +892,8 @@ Two known gaps, left for the legal review before the first live top-up
    credit that is spent per second. The operator decided the policy on
    2026-10-14 (unused prepaid balance can be refunded on request; compute
    already used is not), and the refund email states it; the terms and the
-   email's wording still need the legal review.
+   email's wording still need the legal review. Bonus credit (ADR-0013: no
+   cash value, reduced pro rata on a refund) is not in the terms either.
 2. **Acceptable use.** It has no acceptable-use policy: nothing forbids
    cryptocurrency mining, abuse of GPUs, or the other uses the upstream GPU
    providers' own terms require us to prohibit and enforce.
