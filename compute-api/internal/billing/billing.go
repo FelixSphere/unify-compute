@@ -675,6 +675,24 @@ func (l *Local) CreditTopupTx(ctx context.Context, tx pgx.Tx, accountID int64, q
 	return Balance{Available: a.available, Held: a.held}, nil
 }
 
+// CreditBonusTx adds a top-up's bonus credit (ADR-0013) in the webhook's
+// transaction, after CreditTopupTx, keyed topup_bonus:<id> for the same
+// reason.
+func (l *Local) CreditBonusTx(ctx context.Context, tx pgx.Tx, accountID int64, quota int64, topupID string) (Balance, error) {
+	if quota <= 0 {
+		return Balance{}, errors.New("billing: bonus of zero or less")
+	}
+	a, err := lockAccount(ctx, tx, accountID)
+	if err != nil {
+		return Balance{}, err
+	}
+	if err := l.move(ctx, tx, a, entry{kind: "topup_bonus", available: quota, refType: "topup", refID: topupID,
+		idemp: "topup_bonus:" + topupID}); err != nil {
+		return Balance{}, err
+	}
+	return Balance{Available: a.available, Held: a.held}, nil
+}
+
 // Mismatch is an account whose balance columns differ from the sum of its
 // entries' deltas.
 type Mismatch struct {

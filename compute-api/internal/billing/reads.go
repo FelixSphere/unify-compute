@@ -38,7 +38,7 @@ type HistoryPage struct {
 
 // Kinds is every balance_entries.kind, in the order the CHECK constraint
 // lists them. A filter naming anything else is refused before the query.
-var Kinds = []string{"topup", "hold", "extend", "settle", "release", "refund", "dispute", "dispute_reversal", "admin_credit", "admin_debit", "writeoff"}
+var Kinds = []string{"topup", "topup_bonus", "hold", "extend", "settle", "release", "refund", "dispute", "dispute_reversal", "admin_credit", "admin_debit", "writeoff"}
 
 func ValidKind(k string) bool {
 	for _, known := range Kinds {
