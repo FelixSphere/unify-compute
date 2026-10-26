@@ -2308,7 +2308,7 @@ button[aria-busy='true'] {
 
 body.app .stat-value[id]:not([data-loaded]),
 body.app .head-stat-value[id]:not([data-loaded]),
-body.app [data-i18n^='common.loading'] {
+body.app [data-i18n^='common.loading']:not([data-loaded]) {
   color: transparent;
   border-radius: var(--u-radius);
   background: linear-gradient(90deg, var(--u-border) 25%, color-mix(in srgb, var(--u-border) 40%, transparent) 50%, var(--u-border) 75%) 0 0 / 200% 100%;
@@ -2325,18 +2325,18 @@ body.app .head-stat-value[id]:not([data-loaded]) {
   width: 2ch;
 }
 
-body.app [data-i18n^='common.loading'] {
+body.app [data-i18n^='common.loading']:not([data-loaded]) {
   min-height: 96px;
 }
 
-body.app .stat-card [data-i18n^='common.loading'] {
+body.app .stat-card [data-i18n^='common.loading']:not([data-loaded]) {
   min-height: 36px;
 }
 
 @media (prefers-reduced-motion: reduce) {
   body.app .stat-value[id]:not([data-loaded]),
   body.app .head-stat-value[id]:not([data-loaded]),
-  body.app [data-i18n^='common.loading'] {
+  body.app [data-i18n^='common.loading']:not([data-loaded]) {
     animation: none;
   }
 
