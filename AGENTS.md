@@ -165,6 +165,17 @@ make smoke BASE_URL=https://staging.compute.unifyai.us
 - Don't add abstractions, flags, or error handling for cases that cannot happen.
 - Site copy must not promise pricing, availability, or capabilities that do not
   exist yet. "In development" stays until the CI/CD agent says otherwise.
+- The marketing site is in the UnifyAI standard's eleven languages
+  (`~/unifyai-brand-kit/UI-STANDARD.md`, "Languages"): English at `/`, the
+  others under `/zh`, `/zh-hant`, `/ja`, `/ko`, `/es`, `/fr`, `/de`, `/pt-br`,
+  `/vi` and `/ar` (right-to-left). Pages live in `app/_pages/` and are routed twice,
+  by `app/(en)/` and `app/[locale]/`, each with its own root layout so the
+  exported HTML carries the right `<html lang dir>`. Copy goes through `t()`
+  (`lib/i18n/translate.ts`); translations are keyed by the exact English text
+  in `lib/i18n/messages/<locale>.json`, and a missing one shows English.
+  Changing or adding English copy means translating it in all ten files;
+  `npm run check:i18n` (run by CI) fails until you do. Never translate
+  product names, model IDs, code, paths, domains, emails or the © line.
 - `components/ui/` and `hooks/` are generated shadcn output. Leave them
   alone; lint is scoped to `app/ lib/` for that reason.
 

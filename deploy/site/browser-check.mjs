@@ -1341,10 +1341,12 @@ try {
     'HubSpot loader duplicated or lost by navigation',
   );
 
-  // UI-STANDARD "Marketing header": Log in, then Sign up, on the right.
-  await setViewport(1280, 900, false);
+  // UI-STANDARD "Marketing header": Log in, then Sign up, on the right. The
+  // nav links are inline from 1360px: below that the eleven languages' labels
+  // do not fit beside the language menu (app/globals.css).
+  await setViewport(1440, 900, false);
   await load('/');
-  await waitFor(`!!document.querySelector(${JSON.stringify(COOKIE_LINK)})`, 'hydration at 1280');
+  await waitFor(`!!document.querySelector(${JSON.stringify(COOKIE_LINK)})`, 'hydration at 1440');
   for (const [href, text, cls] of [
     [LOGIN, 'Log in', '.nav-login'],
     [REGISTER, 'Sign up', '.button.primary'],
@@ -1353,14 +1355,14 @@ try {
     check(
       (await evaluate(visible(sel))) &&
         (await evaluate(`document.querySelector(${JSON.stringify(sel)}).textContent.trim()`)) === text,
-      `1280: header "${text}" visible → ${href}`,
-      `1280: header "${text}" link to ${href} missing or not visible`,
+      `1440: header "${text}" visible → ${href}`,
+      `1440: header "${text}" link to ${href} missing or not visible`,
     );
   }
   check(
     await evaluate(visible('header .nav-inline a[href="/start"]')),
-    '1280: header "Quick start" visible',
-    '1280: header "Quick start" link missing or not visible',
+    '1440: header "Quick start" visible',
+    '1440: header "Quick start" link missing or not visible',
   );
   await clickToStart('header .nav-inline a[href="/start"]', 'header "Quick start"');
   await back();
@@ -1373,8 +1375,8 @@ try {
   ]) {
     check(
       (await evaluate(`document.querySelector(${JSON.stringify(sel)})?.textContent.trim()`)) === text,
-      `1280: ${label} → ${sel.match(/href="([^"]+)"/)[1]}`,
-      `1280: ${label} link missing or mislabelled`,
+      `1440: ${label} → ${sel.match(/href="([^"]+)"/)[1]}`,
+      `1440: ${label} link missing or mislabelled`,
     );
   }
 
@@ -1458,6 +1460,36 @@ try {
     const line = await evaluate(COMPANY_LINE);
     const want = `${BRAND_LINE}\n${ENTITY_LINE}`;
     check(line === want, '/privacy footer names FelixSphere LLC under the brand line', `/privacy footer company line: ${JSON.stringify(line)}`);
+  }
+
+  // The eleven languages (UI-STANDARD "Languages"): the footer switcher keeps the
+  // visitor on the same page, the choice is remembered in fs_lang (no
+  // redirect is ever made from it), and Arabic is right-to-left with code
+  // left-to-right.
+  await load('/start');
+  await waitFor(`!!document.querySelector(${JSON.stringify(COOKIE_LINK)})`, 'hydration on /start');
+  await evaluate(`document.querySelector('footer a[hreflang="ar"]').click()`);
+  if (await waitFor(`location.pathname === '/ar/start' && document.readyState === 'complete'`, 'the Arabic /start')) {
+    check(
+      (await evaluate(`[document.documentElement.lang, document.documentElement.dir].join('|')`)) === 'ar|rtl',
+      '/ar/start is <html lang="ar" dir="rtl">',
+      '/ar/start is not lang="ar" dir="rtl"',
+    );
+    check(
+      await evaluate(`document.cookie.split('; ').includes('fs_lang=ar')`),
+      'language choice remembered in fs_lang',
+      'switching language did not set fs_lang=ar',
+    );
+    check(
+      (await evaluate(`getComputedStyle(document.querySelector('pre.code')).direction`)) === 'ltr',
+      '/ar/start code stays left-to-right',
+      '/ar/start code is not left-to-right',
+    );
+    check(
+      (await evaluate(`document.querySelector('footer a[aria-current="true"]')?.textContent`)) === 'العربية',
+      '/ar/start switcher marks العربية current',
+      '/ar/start switcher does not mark the current language',
+    );
   }
 
   await load('/does-not-exist');

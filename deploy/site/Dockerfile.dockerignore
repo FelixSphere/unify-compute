@@ -14,6 +14,8 @@
 !lib/
 !public/
 !dashboard/
+# Writes sitemap.xml and robots.txt after the export (package.json "build").
+!scripts/site-sitemap.mjs
 # The marketplace pages are generated from the catalogue compute-api serves (ADR-0012).
 !compute-api/config/skus.json
 !compute-api/config/templates.json
