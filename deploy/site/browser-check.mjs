@@ -598,6 +598,11 @@ async function dashboardChecks() {
     'focal number in Space Grotesk 40px (W8: the first stat card, not a 64px hero)',
     `focal number is ${shellBox.metric} ${shellBox.metricFont}`,
   );
+  // Once the data is in, no placeholder may still be a shimmering skeleton
+  // (#136 shipped text lines that kept the skeleton after being filled).
+  await waitFor(`!!document.querySelector('#recent-jobs a[href^="/jobs/"]')`, 'overview data loaded');
+  const stillSkeleton = await evaluate(`[...document.querySelectorAll('main *')].filter((e) => getComputedStyle(e).animationName === 'uc-shimmer').map((e) => e.id || e.className || e.tagName)`);
+  check(stillSkeleton.length === 0, 'overview: no skeleton left once loaded', `overview: still a skeleton after load: ${stillSkeleton.join(', ')}`);
   check(
     (await text('#balance-sub')).includes('2.54'),
     'overview shows the held amount under the balance',
