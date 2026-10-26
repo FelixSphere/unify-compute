@@ -90,8 +90,13 @@ function takeEarly<T>(path: string): Promise<Result<T>> | undefined {
   return performance.now() - bootAt < EARLY_MS ? (p as Promise<Result<T>>) : undefined;
 }
 
+// A read of one particular object (`/topups/tu_…`, `/jobs/job_…`) answers
+// this visit — a Checkout return polling its top-up — not the page's usual
+// data, and replaying it on the next load would poll what nobody asked for.
+const ONE_OBJECT = /\/[a-z]+_[0-9A-Za-z]{10,}/;
+
 function remember(path: string) {
-  if (path === '/me' || seen.has(path) || performance.now() - bootAt > EARLY_MS) return;
+  if (path === '/me' || ONE_OBJECT.test(path) || seen.has(path) || performance.now() - bootAt > EARLY_MS) return;
   seen.add(path);
   try {
     sessionStorage.setItem(EARLY_KEY, JSON.stringify([...seen]));
