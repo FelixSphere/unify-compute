@@ -151,6 +151,7 @@ export async function usage() {
     const r = await get<Usage>(`/usage?${periodQuery(period)}`);
     if (!r.ok) {
       setText('usage-total', '—');
+      setText('usage-gpu-time', '—');
       fill(
         'usage-breakdown',
         muted(notBuilt(r.error) ? t('usage.monthly-usage-will-appear-here') : r.error.message),

@@ -60,6 +60,7 @@ function showAccess(status: string, computeEnabled: boolean) {
 async function showSpend() {
   const r = await get<Usage>('/usage');
   if (!r.ok) {
+    setText('spend-total', '—');
     setText('spend-sub', notBuilt(r.error) ? t('overview.this-month-s-spend-will') : r.error.message);
     return;
   }

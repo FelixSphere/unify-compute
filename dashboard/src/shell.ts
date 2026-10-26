@@ -64,9 +64,47 @@ export function toLogin<T>(): Promise<T> {
 }
 
 export async function get<T>(path: string): Promise<Result<T>> {
-  const r = await call<T>('GET', path);
+  const early = takeEarly<T>(path);
+  const r = await (early ?? call<T>('GET', path));
   if (!r.ok && r.error.status === 401) return toLogin();
+  remember(path);
   return r;
+}
+
+// ---------------------------------------------------------------- early reads
+// A page's data used to start only after GET /me answered: two round trips
+// in a row before anything showed. Each page now remembers, for this tab,
+// the reads it made on its last load, and the next load starts them in
+// parallel with /me (warm(), from main.ts). get() takes the started request
+// instead of making its own; a write drops whatever is still unclaimed.
+const EARLY_KEY = 'uc_early:' + location.pathname;
+const EARLY_MS = 5000;
+const early = new Map<string, Promise<Result<unknown>>>();
+const seen = new Set<string>();
+let bootAt = 0;
+
+function takeEarly<T>(path: string): Promise<Result<T>> | undefined {
+  const p = early.get(path);
+  if (!p) return undefined;
+  early.delete(path);
+  return performance.now() - bootAt < EARLY_MS ? (p as Promise<Result<T>>) : undefined;
+}
+
+function remember(path: string) {
+  if (path === '/me' || seen.has(path) || performance.now() - bootAt > EARLY_MS) return;
+  seen.add(path);
+  try {
+    sessionStorage.setItem(EARLY_KEY, JSON.stringify([...seen]));
+  } catch {}
+}
+
+export function warm() {
+  bootAt = performance.now();
+  let paths: string[] = [];
+  try {
+    paths = JSON.parse(sessionStorage.getItem(EARLY_KEY) ?? '[]');
+  } catch {}
+  for (const p of paths) if (typeof p === 'string' && p.startsWith('/') && p !== '/me') early.set(p, call('GET', p));
 }
 
 // The CSRF token from this page's GET /me. A state-changing request uses it
@@ -80,6 +118,7 @@ async function freshCsrf(): Promise<Result<Me>> {
   return m;
 }
 export async function send<T>(method: 'POST' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<Result<T>> {
+  early.clear();
   if (!csrf) {
     const m = await freshCsrf();
     if (!m.ok) return m;
@@ -137,13 +176,24 @@ export function h<K extends keyof HTMLElementTagNameMap>(
 
 export const mono = (text: string) => h('span', { class: 'mono' }, text);
 export const muted = (text: string, ...more: Child[]) => h('p', { class: 'muted' }, text, ...more);
+// The first time a placeholder gets its content, it eases in (app.css
+// .uc-reveal) instead of popping; later refreshes of the same element do not.
+function reveal(el: HTMLElement) {
+  if (el.dataset.loaded) return;
+  el.dataset.loaded = '1';
+  el.classList.add('uc-reveal');
+}
 export const fill = (id: string, ...nodes: Child[]) => {
   const el = $(id);
-  if (el) el.replaceChildren(...nodes.filter((n): n is Node | string => !!n));
+  if (!el) return;
+  el.replaceChildren(...nodes.filter((n): n is Node | string => !!n));
+  reveal(el);
 };
 export const setText = (id: string, text: string) => {
   const el = $(id);
-  if (el) el.textContent = text;
+  if (!el) return;
+  el.textContent = text;
+  reveal(el);
 };
 
 export function table(label: string, head: { text: string; num?: boolean }[], rows: Child[][]): HTMLElement {
@@ -279,6 +329,17 @@ export function wireMenus() {
   });
   const out = $<HTMLButtonElement>('logout')!;
   out.addEventListener('click', () => void logout(out));
+
+  // The next page's HTML, fetched while the pointer is on its link.
+  const fetched = new Set<string>();
+  const prefetch = (e: Event) => {
+    const a = (e.target as Element).closest<HTMLAnchorElement>('a[href^="/"]');
+    if (!a || a.getAttribute('aria-current') === 'page' || fetched.has(a.pathname)) return;
+    fetched.add(a.pathname);
+    document.head.append(Object.assign(document.createElement('link'), { rel: 'prefetch', href: a.pathname }));
+  };
+  nav.addEventListener('pointerover', prefetch);
+  nav.addEventListener('focusin', prefetch);
 
   // Collapse: the sidebar down to its icons, remembered on this browser.
   const collapse = $<HTMLButtonElement>('nav-collapse');
@@ -457,8 +518,10 @@ export async function showBalance(fresh = false): Promise<Balance | null> {
     );
     return r.data;
   } else if (notBuilt(r.error)) {
+    setText('balance-available', '—');
     setText('balance-sub', t('common.your-balance-will-show-here'));
   } else {
+    setText('balance-available', '—');
     setText('balance-sub', r.error.message);
   }
   return null;
