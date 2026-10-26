@@ -113,15 +113,19 @@ account. Two consequences:
   PREVIOUS_RELEASE is `fd586e94…` / `c2899e5f…`, so `mode=rollback` is a
   site-only step. Records: `deploy/releases/2026-10-17-*`. Throwaway
   accounts 25 and 26 remain on staging (compute off, keys revoked).
-- **2026-10-26, smooth-load (#136, site `c4d87233…` from `1d5c16e`) held:**
-  released to staging (run 40265141412), failed the exercise (loading
-  sub-lines stay transparent and shimmering after load: the
-  `[data-i18n^='common.loading']` rules lack `:not([data-loaded])`), and
-  staging was rolled back (40265908953). **Both hosts are still on
-  smooth-shell** (`fd586e94…` / `bd9edfdb…`). Staging's PREVIOUS_RELEASE is
-  now the broken `c4d87233…`, so do not use `mode=rollback` on staging
-  until the next release replaces it. Throwaway account 27 also remains
-  (compute off, key 7 revoked). Records: `deploy/releases/2026-10-26-*`.
+- **2026-10-26, both hosts on smooth-load-fix:** compute-api `fd586e94…`
+  (`e7fe722`, unchanged) and site `26d2e66c…` (`2c7669f`, #136 early reads,
+  skeletons, ease-in, sidebar prefetch + #138 filled loading lines drop
+  their skeleton). Staging run 40267687668, production 40268860104. No
+  migration. Both hosts' PREVIOUS_RELEASE is `fd586e94…` / `bd9edfdb…`, so
+  `mode=rollback` is a site-only step on both (staging no longer points at
+  the broken `c4d87233…`). The first attempt (`1d5c16e`, site `c4d87233…`)
+  was held on staging and rolled back the same day. Throwaway accounts 25–28
+  remain on staging (compute off, keys revoked). Records:
+  `deploy/releases/2026-10-26-*`. Known, not blocking: on an empty month,
+  Usage keeps a "Loading usage…" placeholder inside the hidden
+  `#usage-detail`. It is invisible and not animating, but a
+  computed-style `uc-shimmer` selector counts it.
 - **IMDS lockdown:** applied to both hosts on 2026-10-03 (staging, then
   production): firewall unit, credentials timer, `docker-compose.imds.yml`,
   hop limit 1 by Terraform. `check-imds.sh` gave `CHECK_IMDS_OK` before and after
