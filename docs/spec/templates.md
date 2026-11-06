@@ -143,6 +143,7 @@ ran. *Planned:* the Job also records the template id; it does not yet.
 | `batch-embed` | `vllm/vllm-openai:v0.30.0-cu129@sha256:a67f8f18…` | `a10g-24gb-x1` | yes (not yet run on a real cloud) |
 | `batch-infer-vllm` | same | `a10g-24gb-x1` | yes (same caveat) |
 | `batch-infer-lora` | `ghcr.io/felixsphere/unify-compute-finetune:finetune-2026-10-04@sha256:6d426175…` | `a10g-24gb-x1` | yes (not yet run on a real cloud) |
+| `batch-infer-sglang` | `lmsysorg/sglang:v0.5.19-cu129-runtime@sha256:fe08f6f5…` | `a10g-24gb-x1` | yes (not yet run on a real cloud) |
 | `finetune-lora` | same | `a10g-24gb-x1` | yes (same caveat) |
 
 ### Image provenance
@@ -251,6 +252,57 @@ base model and revision default to `batch-infer-vllm`'s, which are
 `finetune-lora`'s `BASE_MODEL`; an adapter trained on another base needs
 `MODEL`/`MODEL_REVISION` overridden to that base. `TestBatchInferLoraPairsWithFinetuneLora`
 pins the pairing.
+
+### `batch-infer-sglang`
+
+`batch-infer-vllm`'s contract on SGLang instead of vLLM: the same
+`/mnt/in/requests.jsonl` in, `/mnt/out/results.jsonl` out in the batch
+runner's line shape, the same `MODEL`, `MODEL_REVISION` and `MAX_MODEL_LEN`
+defaults, SKU and runtime, so one file can be run through both engines and the
+results and job durations compared. `TestBatchInferSGLangMatchesBatchInferVLLM`
+pins that.
+
+Why offer a second engine: SGLang's RadixAttention keeps the KV cache of
+every prefix it has computed in a radix tree and reuses it for any later
+request that starts the same way. Batch files are usually one long shared
+prefix (system prompt, instructions, few-shot examples) followed by a short
+per-line part, so the shared part is prefilled once rather than once per line.
+vLLM has automatic prefix caching too; which engine is faster for a given
+file has not been measured on our hardware, and the template description says
+only what each does.
+
+SGLang has no counterpart to `vllm run-batch` (its server lists no
+`/v1/batches` route at v0.5.19), so the command does it in two steps inside the
+one job: it starts `python3 -m sglang.launch_server` on `127.0.0.1:30000`,
+waits for `/health_generate` (failing with the server's own exit status if it
+dies first, for example out of GPU memory), then a stdlib-only Python driver
+sends every line to the server with `CONCURRENCY` (default 64) requests in
+flight. Concurrency matters: it is what lets SGLang's scheduler batch
+continuously and share prefixes between in-flight requests. The driver:
+
+- accepts `/v1/chat/completions` and `/v1/completions` lines; any other `url`
+  gets an `error` (`unsupported_url`), and a line that is not JSON gets
+  `invalid_json`, without stopping the batch;
+- replaces each body's `model` with `MODEL` (the server is started with
+  `--served-model-name "$MODEL"`) and forces `stream: false`;
+- writes results in input order; a non-200 answer is recorded as `response`
+  with its status code and body, a connection failure as `error`;
+- exits 0 once every line has a result, like `vllm run-batch`, and prints how
+  many succeeded to the log.
+
+The EXIT trap stops the server when the driver finishes; the driver is not
+`exec`ed for that reason. Exercised locally on 2026-11-06 against a stand-in
+`sglang.launch_server` (ordering, per-line errors, the server-dies path), not
+on a GPU.
+
+The image is `lmsysorg/sglang`, the SGLang project's own image on Docker Hub,
+Apache-2.0 (`LICENSE` at tag `v0.5.19` of github.com/sgl-project/sglang). The
+`-cu129-runtime` variant: CUDA 12.9 for the same driver reason as the vLLM
+image (v0.5.19 is the newest release built for 12.9; v0.5.20 onwards ship CUDA
+13.0 only), and `runtime` because the job compiles nothing. The digest is the
+multi-arch index read from `registry-1.docker.io` on 2026-11-06 (`linux/amd64`
+and `linux/arm64`). Server flags were checked against
+`python/sglang/srt/server_args.py` at v0.5.19.
 
 ## Open questions
 
