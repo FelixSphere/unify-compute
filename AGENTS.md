@@ -165,6 +165,17 @@ make smoke BASE_URL=https://staging.compute.unifyai.us
 - Don't add abstractions, flags, or error handling for cases that cannot happen.
 - Site copy must not promise pricing, availability, or capabilities that do not
   exist yet. "In development" stays until the CI/CD agent says otherwise.
+- The marketing site is in the UnifyAI standard's eleven languages
+  (`~/unifyai-brand-kit/UI-STANDARD.md`, "Languages"): English at `/`, the
+  others under `/zh`, `/zh-hant`, `/ja`, `/ko`, `/es`, `/fr`, `/de`, `/pt-br`,
+  `/vi` and `/ar` (right-to-left). Pages live in `app/_pages/` and are routed twice,
+  by `app/(en)/` and `app/[locale]/`, each with its own root layout so the
+  exported HTML carries the right `<html lang dir>`. Copy goes through `t()`
+  (`lib/i18n/translate.ts`); translations are keyed by the exact English text
+  in `lib/i18n/messages/<locale>.json`, and a missing one shows English.
+  Changing or adding English copy means translating it in all ten files;
+  `npm run check:i18n` (run by CI) fails until you do. Never translate
+  product names, model IDs, code, paths, domains, emails or the © line.
 - `components/ui/` and `hooks/` are generated shadcn output. Leave them
   alone; lint is scoped to `app/ lib/` for that reason.
 
@@ -173,6 +184,14 @@ make smoke BASE_URL=https://staging.compute.unifyai.us
 Two agents must never edit the same checkout. Use `git worktree add` per task,
 pick a port per agent for `npm run dev` and for `compute-api`, and say which
 one you used when you hand off.
+
+## Configuration before code
+
+**Operator rule (2026-11-08): if a behaviour can be achieved by changing a setting — in an admin UI or by writing the database row that UI writes — that is the first and preferred fix. A code change is not recommended.** In this product that means each host's environment settings (`ACCOUNTS_BACKEND`, `APP_ORIGIN`, the SES and Stripe settings, `SKYPILOT_API_SERVER_URL`), the operator's per-account compute enablement and credit, and the `deploy/aws` Terraform variables and SSM parameters.
+
+Write code only when configuration genuinely cannot express the behaviour, or the same fix would have to be repeated by hand across many places. The PR must then say which settings were checked and why each cannot do it; if unsure, ask the operator before coding. A config change is still a production change: back up the prior value, exercise it against the exact image on staging (or a throwaway stack), verify live, and record what changed and where in AGENTS.md, because a setting has no git history.
+
+The full rule and the case that set it (console #280, `gpt-5.6-luna`, replaced by one conditional channel `param_override`) are in the workspace `AGENTS.md` (FelixSphere/unifyai-workspace).
 
 ## Releases go to staging first
 
