@@ -174,6 +174,14 @@ Two agents must never edit the same checkout. Use `git worktree add` per task,
 pick a port per agent for `npm run dev` and for `compute-api`, and say which
 one you used when you hand off.
 
+## Configuration before code
+
+**Operator rule (2026-11-08): if a behaviour can be achieved by changing a setting — in an admin UI or by writing the database row that UI writes — that is the first and preferred fix. A code change is not recommended.** In this product that means each host's environment settings (`ACCOUNTS_BACKEND`, `APP_ORIGIN`, the SES and Stripe settings, `SKYPILOT_API_SERVER_URL`), the operator's per-account compute enablement and credit, and the `deploy/aws` Terraform variables and SSM parameters.
+
+Write code only when configuration genuinely cannot express the behaviour, or the same fix would have to be repeated by hand across many places. The PR must then say which settings were checked and why each cannot do it; if unsure, ask the operator before coding. A config change is still a production change: back up the prior value, exercise it against the exact image on staging (or a throwaway stack), verify live, and record what changed and where in AGENTS.md, because a setting has no git history.
+
+The full rule and the case that set it (console #280, `gpt-5.6-luna`, replaced by one conditional channel `param_override`) are in the workspace `AGENTS.md` (FelixSphere/unifyai-workspace).
+
 ## Releases go to staging first
 
 **Across UnifyAI, every change reaches production through staging** — not just
