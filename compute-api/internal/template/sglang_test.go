@@ -58,3 +58,78 @@ func TestBatchInferSGLangMatchesBatchInferVLLM(t *testing.T) {
 		t.Error("the driver must not exec: the EXIT trap stops the server")
 	}
 }
+
+// batch-infer-lora-sglang is batch-infer-lora on SGLang: it takes the adapter
+// finetune-lora writes, on the same mount, with the same base model, rank
+// limit and adapter name, so an adapter can be run through either engine.
+func TestBatchInferLoraSGLangPairsWithFinetuneLora(t *testing.T) {
+	s, err := Load("../../config/templates.json", shippedCatalogue(t), ceiling)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ls, err := s.Get("batch-infer-lora-sglang")
+	if err != nil {
+		t.Fatal(err)
+	}
+	vl, _ := s.Get("batch-infer-lora")
+	ft, _ := s.Get("finetune-lora")
+	sg, _ := s.Get("batch-infer-sglang")
+
+	if !ls.Available || ls.Image != sg.Image || ls.ImageLicence == "" || ls.ImageSource != sg.ImageSource {
+		t.Fatalf("runs the same pinned SGLang image as batch-infer-sglang: %+v", ls)
+	}
+	for _, k := range []string{"MODEL", "MODEL_REVISION", "MAX_MODEL_LEN", "MAX_LORA_RANK", "LORA_NAME"} {
+		if ls.Env[k] != vl.Env[k] {
+			t.Errorf("%s drifted from batch-infer-lora: %q vs %q", k, ls.Env[k], vl.Env[k])
+		}
+	}
+	if ls.Env["MODEL"] != ft.Env["BASE_MODEL"] || ls.Env["CONCURRENCY"] != sg.Env["CONCURRENCY"] {
+		t.Fatalf("base model or concurrency drifted: %v", ls.Env)
+	}
+	if ls.SKU != vl.SKU || ls.MaxRuntimeSeconds != vl.MaxRuntimeSeconds {
+		t.Fatalf("defaults should match batch-infer-lora: %s/%d", ls.SKU, ls.MaxRuntimeSeconds)
+	}
+	if len(ls.Inputs) != 2 || ls.Inputs[0].Mount != "/mnt/in" || ls.Inputs[1].Mount != "/mnt/adapter" || len(ls.Outputs) != 1 || ls.Outputs[0].Mount != "/mnt/out" {
+		t.Fatalf("mounts: %+v %+v", ls.Inputs, ls.Outputs)
+	}
+	script := strings.Join(ls.Command, " ")
+	for _, step := range []string{
+		"tar -xzf \"$a\" -C /mnt/adapter",
+		"-name adapter_config.json -print -quit",
+		"--lora-paths \"$LORA_NAME=$ADAPTER\"",
+		"--max-lora-rank \"$MAX_LORA_RANK\"",
+		"set -- \"$LORA_NAME\"",
+		// SGLang picks the adapter from "base:adapter" in the model field.
+		`os.environ["MODEL"] + (":" + LORA if LORA else "")`,
+		`parsed["model"] = LORA`,
+	} {
+		if !strings.Contains(script, step) {
+			t.Errorf("command lacks %q", step)
+		}
+	}
+}
+
+// Both SGLang templates carry the batch driver inline, because the image is
+// upstream's and has no file of ours in it. The copies must not drift: a fix
+// to one is a fix to both.
+func TestSGLangTemplatesShareOneDriver(t *testing.T) {
+	s, err := Load("../../config/templates.json", shippedCatalogue(t), ceiling)
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver := func(id string) string {
+		tpl, err := s.Get(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		script := strings.Join(tpl.Command, " ")
+		i := strings.Index(script, "python3 - /mnt/in/requests.jsonl")
+		if i < 0 {
+			t.Fatalf("%s: no driver", id)
+		}
+		return script[i:]
+	}
+	if a, b := driver("batch-infer-sglang"), driver("batch-infer-lora-sglang"); a != b {
+		t.Fatal("batch-infer-sglang and batch-infer-lora-sglang drivers differ")
+	}
+}

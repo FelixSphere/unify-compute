@@ -143,7 +143,8 @@ ran. *Planned:* the Job also records the template id; it does not yet.
 | `batch-embed` | `vllm/vllm-openai:v0.30.0-cu129@sha256:a67f8f18…` | `a10g-24gb-x1` | yes (not yet run on a real cloud) |
 | `batch-infer-vllm` | same | `a10g-24gb-x1` | yes (same caveat) |
 | `batch-infer-lora` | `ghcr.io/felixsphere/unify-compute-finetune:finetune-2026-10-04@sha256:6d426175…` | `a10g-24gb-x1` | yes (not yet run on a real cloud) |
-| `batch-infer-sglang` | `lmsysorg/sglang:v0.5.19-cu129-runtime@sha256:fe08f6f5…` | `a10g-24gb-x1` | yes (not yet run on a real cloud) |
+| `batch-infer-lora-sglang` | `lmsysorg/sglang:v0.5.19-cu129-runtime@sha256:fe08f6f5…` | `a10g-24gb-x1` | yes (not yet run on a real cloud) |
+| `batch-infer-sglang` | same | `a10g-24gb-x1` | yes (not yet run on a real cloud) |
 | `finetune-lora` | same | `a10g-24gb-x1` | yes (same caveat) |
 
 ### Image provenance
@@ -291,7 +292,9 @@ continuously and share prefixes between in-flight requests. The driver:
   many succeeded to the log.
 
 The EXIT trap stops the server when the driver finishes; the driver is not
-`exec`ed for that reason. Exercised locally on 2026-11-06 against a stand-in
+`exec`ed for that reason. The driver is shared word for word with
+`batch-infer-lora-sglang` (below); `TestSGLangTemplatesShareOneDriver` fails
+if the two copies differ. Exercised locally on 2026-11-06 against a stand-in
 `sglang.launch_server` (ordering, per-line errors, the server-dies path), not
 on a GPU.
 
@@ -303,6 +306,29 @@ image (v0.5.19 is the newest release built for 12.9; v0.5.20 onwards ship CUDA
 multi-arch index read from `registry-1.docker.io` on 2026-11-06 (`linux/amd64`
 and `linux/arm64`). Server flags were checked against
 `python/sglang/srt/server_args.py` at v0.5.19.
+
+### `batch-infer-lora-sglang`
+
+`batch-infer-lora` on SGLang, built the same way as `batch-infer-sglang`. It
+takes the same two inputs (`/mnt/in/requests.jsonl` and
+`/mnt/adapter/adapter.tar.gz` as `finetune-lora` writes it) and the same
+`MODEL`, `MODEL_REVISION`, `MAX_MODEL_LEN`, `MAX_LORA_RANK` and `LORA_NAME`
+defaults, so one adapter can be run through either engine.
+`TestBatchInferLoraSGLangPairsWithFinetuneLora` pins the pairing.
+
+The command unpacks the archive, finds `adapter_config.json` wherever the
+archive put it (exit 2 if there is none), and starts the server with
+`--lora-paths "$LORA_NAME=$ADAPTER" --max-lora-rank "$MAX_LORA_RANK"`, which
+loads the adapter before the server reports healthy. SGLang chooses the adapter
+per request from the `model` field written `base:adapter`
+(`_parse_model_parameter` in `entrypoints/openai/serving_base.py` at v0.5.19),
+so the driver sends `MODEL:LORA_NAME` on every line and writes `LORA_NAME` back
+as the result's `model`, as `batch-infer-lora` does. The adapter's target
+modules must be ones SGLang supports; `finetune/train.py` targets
+`q/k/v/o_proj` and `gate/up/down_proj`, all in v0.5.19's
+`SUPPORTED_LORA_TARGET_MODULES`. Exercised locally on 2026-11-08 against a
+stand-in server (the adapter reaches `--lora-paths`, every line is sent as
+`base:lora`, a missing `adapter_config.json` exits 2), not on a GPU.
 
 ## Open questions
 
