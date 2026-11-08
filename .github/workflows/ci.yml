@@ -74,6 +74,9 @@ jobs:
       # output and fail oxlint's a11y and react-compiler rules as shipped; see
       # AGENTS.md. Formatting is not checked yet: app/ predates .oxfmtrc.json.
       - run: npx oxlint app lib dashboard
+      # Every English string in every language, with its placeholders and
+      # product names intact (UI-STANDARD "Languages").
+      - run: npm run check:i18n
       - run: npm run build
 
   # The site container, run for real: every route the export must answer, the

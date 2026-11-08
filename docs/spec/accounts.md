@@ -850,7 +850,7 @@ Two known gaps, left for the legal review before the first live top-up
    cryptocurrency mining, abuse of GPUs, or the other uses the upstream GPU
    providers' own terms require us to prohibit and enforce.
 
-The privacy policy (`app/privacy/page.tsx`) names FelixSphere LLC as the
+The privacy policy (`app/_pages/privacy.tsx`) names FelixSphere LLC as the
 Company and data controller, and says "Unify Compute is a UnifyAI product
 operated by FelixSphere LLC, 6 Karen Ct, CA 94010, United States." On
 2026-10-03 the operator made FelixSphere LLC (US) the legal entity for terms,

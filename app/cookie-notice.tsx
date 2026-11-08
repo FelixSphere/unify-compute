@@ -1,6 +1,8 @@
 'use client';
 
 import Link from 'next/link';
+import { localizeHref, type Locale } from '@/lib/i18n/config';
+import { rich } from '@/lib/i18n/rich';
 import { useState, useSyncExternalStore } from 'react';
 
 // Same storage keys and timings as felixsphere.com, so both sites behave identically.
@@ -46,7 +48,9 @@ function hubspot(...command: unknown[]) {
   (window._hsq = window._hsq || []).push(command);
 }
 
-export function CookieNotice() {
+export type CookieLabels = { title: string; text: string; reject: string; accept: string };
+
+export function CookieNotice({ locale, labels }: { locale: Locale; labels: CookieLabels }) {
   // Hidden on the server (no cookies or storage there); the client snapshot decides after hydration.
   const shouldShowNotice = useSyncExternalStore(
     subscribeNever,
@@ -83,22 +87,20 @@ export function CookieNotice() {
       // A div, as on felixsphere.com: a non-modal <dialog>'s UA styles fight the fixed positioning.
       // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role
       role="dialog"
-      aria-label="Cookie notice"
+      aria-label={labels.title}
       className="fixed bottom-24 left-4 right-4 z-50 max-w-[480px] rounded-lg bg-(--u-btn-secondary-bg) p-5 text-(--u-btn-secondary-fg) sm:bottom-6 sm:left-6 sm:right-auto"
     >
       <p className="m-0 font-mono text-(length:--u-text-xs) uppercase tracking-[0.14em] text-(--u-muted-on-dark)">
-        Cookie notice
+        {labels.title}
       </p>
       <p className="m-0 mt-3 text-(length:--u-text-sm) leading-[1.55]">
-        We use required, functional, and advertising cookies. Reject to keep
-        only essential cookies. See our{' '}
-        <Link
-          href="/privacy"
-          className="underline! underline-offset-2 hover:decoration-2"
-        >
-          Privacy Policy
-        </Link>
-        .
+        {rich(labels.text, {
+          a: (text) => (
+            <Link href={localizeHref('/privacy', locale)} className="underline! underline-offset-2 hover:decoration-2">
+              {text}
+            </Link>
+          ),
+        })}
       </p>
       <div className="mt-4 flex gap-2">
         {/* Equal weight on purpose: rejecting must be as easy as accepting, and UI-STANDARD allows one primary per view (the page has it). */}
@@ -107,14 +109,14 @@ export function CookieNotice() {
           onClick={reject}
           className="h-(--u-btn-height) flex-1 cursor-pointer rounded-lg border border-(--u-btn-ghost-border) bg-(--u-btn-ghost-bg) text-[15px] font-semibold text-(--u-btn-ghost-fg) hover:bg-(--u-paper)"
         >
-          Reject cookies
+          {labels.reject}
         </button>
         <button
           type="button"
           onClick={accept}
           className="h-(--u-btn-height) flex-1 cursor-pointer rounded-lg border border-(--u-btn-ghost-border) bg-(--u-btn-ghost-bg) text-[15px] font-semibold text-(--u-btn-ghost-fg) hover:bg-(--u-paper)"
         >
-          Accept all
+          {labels.accept}
         </button>
       </div>
     </div>

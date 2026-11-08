@@ -1,12 +1,18 @@
-import type { Metadata } from 'next';
+import type { Locale } from '@/lib/i18n/config';
+import { getT } from '@/lib/i18n/translate';
 import { SiteFooter } from '../site-footer';
 import { SiteHeader } from '../site-header';
+import { pageMetadata } from '../shell';
 
-export const metadata: Metadata = {
-  title: 'Privacy Policy — Unify Compute',
-  description:
-    'How FelixSphere LLC collects, uses, and protects your information, and the cookies this site uses.',
-};
+export function privacyMetadata(locale: Locale) {
+  const t = getT(locale);
+  return pageMetadata(
+    locale,
+    '/privacy',
+    t('Privacy Policy — Unify Compute'),
+    t('How FelixSphere LLC collects, uses, and protects your information, and the cookies this site uses.'),
+  );
+}
 
 // FelixSphere LLC is the Company and data controller (operator decision, 2026-10-03), because it
 // contracts with customers, owns the Stripe account (ADR-0011 D2) and publishes the Terms this
@@ -14,15 +20,26 @@ export const metadata: Metadata = {
 // from FelixSphere's and no longer tracks it; edit it here. The footer's "© <year> UnifyAI"
 // line is the brand's company line (UI-STANDARD); the "Operated by" line under it on this page names the entity.
 // The contact mailbox stays on felixsphere.com until a unifyai.us mailbox exists.
-export default function PrivacyPolicy() {
+//
+// The English text governs (UI-STANDARD "Languages", legal pages). The other
+// languages translate the page around the policy and say so in one line; the
+// policy itself stays English, marked lang="en".
+export function PrivacyPage({ locale }: { locale: Locale }) {
+  const t = getT(locale);
   return (
     <main id="top">
       <a className="skip-link" href="#policy">
-        Skip to content
+        {t('Skip to content')}
       </a>
-      <SiteHeader />
+      <SiteHeader locale={locale} path="/privacy" />
       <article className="legal wrap" id="policy">
-        <h1>Privacy Policy</h1>
+        <h1>{t('Privacy Policy')}</h1>
+        {locale !== 'en' && (
+          <p className="legal-note" role="note">
+            {t('This policy is published in English only; the English version governs.')}
+          </p>
+        )}
+        <div lang="en" dir="ltr">
         <p className="legal-updated">Last updated: October 3, 2026</p>
 
         <p>
@@ -824,8 +841,9 @@ export default function PrivacyPolicy() {
         <p>By email: contactus@felixsphere.com</p>
 
         <p>By phone number: 408.462.2806</p>
+        </div>
       </article>
-      <SiteFooter current="/privacy" />
+      <SiteFooter locale={locale} path="/privacy" current="/privacy" />
     </main>
   );
 }
