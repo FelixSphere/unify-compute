@@ -135,6 +135,14 @@ account. Two consequences:
   host is `site.staging.compute.unifyai.us`; `staging.compute.unifyai.us`
   is compute-api and answers 404 for site paths. Records:
   `deploy/releases/2026-11-08-*`.
+- **2026-11-09, staging only on sglang-templates:** compute-api
+  `b7474c94…` and site `ed5de01a…` (both `322f705`, #145 three SGLang batch
+  templates, no migration), run 42584482012. Production stays on
+  site-i18n-std (`fd586e94…` / `5925c7c1…`): the operator made production
+  conditional on every staging check, and `400 missing_input` for
+  `batch-extract-sglang` was not exercised (no valid `uck_` key, no AWS
+  access from the agent). Staging's PREVIOUS_RELEASE is `fd586e94…` /
+  `5925c7c1…`. Record: `deploy/releases/2026-11-09-staging-sglang-templates.md`.
 - **IMDS lockdown:** applied to both hosts on 2026-10-03 (staging, then
   production): firewall unit, credentials timer, `docker-compose.imds.yml`,
   hop limit 1 by Terraform. `check-imds.sh` gave `CHECK_IMDS_OK` before and after
