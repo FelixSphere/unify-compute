@@ -109,7 +109,7 @@ func TestBatchInferLoraSGLangPairsWithFinetuneLora(t *testing.T) {
 	}
 }
 
-// Both SGLang templates carry the batch driver inline, because the image is
+// The SGLang templates carry the batch driver inline, because the image is
 // upstream's and has no file of ours in it. The copies must not drift: a fix
 // to one is a fix to both.
 func TestSGLangTemplatesShareOneDriver(t *testing.T) {
@@ -129,7 +129,60 @@ func TestSGLangTemplatesShareOneDriver(t *testing.T) {
 		}
 		return script[i:]
 	}
-	if a, b := driver("batch-infer-sglang"), driver("batch-infer-lora-sglang"); a != b {
-		t.Fatal("batch-infer-sglang and batch-infer-lora-sglang drivers differ")
+	base := driver("batch-infer-sglang")
+	for _, id := range []string{"batch-infer-lora-sglang", "batch-extract-sglang"} {
+		if driver(id) != base {
+			t.Errorf("%s's driver differs from batch-infer-sglang's", id)
+		}
+	}
+}
+
+// batch-extract-sglang is batch-infer-sglang with one JSON Schema imposed on
+// every answer through SGLang's grammar-guided decoding. The schema arrives as
+// its own input and is checked before the server starts, so a bad schema costs
+// seconds, not a model download.
+func TestBatchExtractSGLangConstrainsEveryAnswer(t *testing.T) {
+	s, err := Load("../../config/templates.json", shippedCatalogue(t), ceiling)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex, err := s.Get("batch-extract-sglang")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sg, _ := s.Get("batch-infer-sglang")
+
+	if !ex.Available || ex.Image != sg.Image || ex.SKU != sg.SKU || ex.MaxRuntimeSeconds != sg.MaxRuntimeSeconds {
+		t.Fatalf("same image and defaults as batch-infer-sglang: %+v", ex)
+	}
+	if len(ex.Env) != len(sg.Env) {
+		t.Fatalf("env: %v vs %v", ex.Env, sg.Env)
+	}
+	for k, v := range sg.Env {
+		if ex.Env[k] != v {
+			t.Errorf("%s drifted from batch-infer-sglang: %q vs %q", k, ex.Env[k], v)
+		}
+	}
+	if len(ex.Inputs) != 2 || ex.Inputs[0].Mount != "/mnt/in" || ex.Inputs[1].Mount != "/mnt/schema" || len(ex.Outputs) != 1 || ex.Outputs[0].Mount != "/mnt/out" {
+		t.Fatalf("mounts: %+v %+v", ex.Inputs, ex.Outputs)
+	}
+	script := strings.Join(ex.Command, " ")
+	check := strings.Index(script, "json.load(open(sys.argv[1]))' /mnt/schema/schema.json")
+	launch := strings.Index(script, "sglang.launch_server")
+	if check < 0 || launch < 0 || check > launch {
+		t.Fatal("the schema must be checked before the server starts")
+	}
+	for _, step := range []string{
+		`set -- "" /mnt/schema/schema.json`,
+		`"type": "json_schema", "json_schema": {"name": "output", "schema": SCHEMA, "strict": True}`,
+		`body["json_schema"] = json.dumps(SCHEMA)`,
+		"answers parse as JSON",
+	} {
+		if !strings.Contains(script, step) {
+			t.Errorf("command lacks %q", step)
+		}
+	}
+	if strings.Contains(script, "--lora-paths") {
+		t.Error("no adapter: extraction runs the base model")
 	}
 }

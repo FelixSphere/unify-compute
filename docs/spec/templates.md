@@ -140,10 +140,11 @@ ran. *Planned:* the Job also records the template id; it does not yet.
 
 | id | Image | Default SKU | Available |
 |---|---|---|---|
+| `batch-extract-sglang` | `lmsysorg/sglang:v0.5.19-cu129-runtime@sha256:fe08f6f5…` | `a10g-24gb-x1` | yes (not yet run on a real cloud) |
 | `batch-embed` | `vllm/vllm-openai:v0.30.0-cu129@sha256:a67f8f18…` | `a10g-24gb-x1` | yes (not yet run on a real cloud) |
 | `batch-infer-vllm` | same | `a10g-24gb-x1` | yes (same caveat) |
 | `batch-infer-lora` | `ghcr.io/felixsphere/unify-compute-finetune:finetune-2026-10-04@sha256:6d426175…` | `a10g-24gb-x1` | yes (not yet run on a real cloud) |
-| `batch-infer-lora-sglang` | `lmsysorg/sglang:v0.5.19-cu129-runtime@sha256:fe08f6f5…` | `a10g-24gb-x1` | yes (not yet run on a real cloud) |
+| `batch-infer-lora-sglang` | same | `a10g-24gb-x1` | yes (not yet run on a real cloud) |
 | `batch-infer-sglang` | same | `a10g-24gb-x1` | yes (not yet run on a real cloud) |
 | `finetune-lora` | same | `a10g-24gb-x1` | yes (same caveat) |
 
@@ -293,8 +294,8 @@ continuously and share prefixes between in-flight requests. The driver:
 
 The EXIT trap stops the server when the driver finishes; the driver is not
 `exec`ed for that reason. The driver is shared word for word with
-`batch-infer-lora-sglang` (below); `TestSGLangTemplatesShareOneDriver` fails
-if the two copies differ. Exercised locally on 2026-11-06 against a stand-in
+`batch-infer-lora-sglang` and `batch-extract-sglang` (below);
+`TestSGLangTemplatesShareOneDriver` fails if the copies differ. Exercised locally on 2026-11-06 against a stand-in
 `sglang.launch_server` (ordering, per-line errors, the server-dies path), not
 on a GPU.
 
@@ -329,6 +330,40 @@ modules must be ones SGLang supports; `finetune/train.py` targets
 `SUPPORTED_LORA_TARGET_MODULES`. Exercised locally on 2026-11-08 against a
 stand-in server (the adapter reaches `--lora-paths`, every line is sent as
 `base:lora`, a missing `adapter_config.json` exits 2), not on a GPU.
+
+### `batch-extract-sglang`
+
+`batch-infer-sglang` with one JSON Schema imposed on every answer. A second
+input, `/mnt/schema/schema.json`, is the schema (its URL must end in
+`schema.json`, for the same reason `requests.jsonl`'s must). The command checks
+that it parses as JSON before the server starts, so a bad schema fails in
+seconds rather than after the model download. Same image, env defaults, SKU and
+runtime as `batch-infer-sglang`; `TestBatchExtractSGLangConstrainsEveryAnswer`
+pins it.
+
+The driver sets the schema on every line, replacing any `response_format` the
+line had: on `/v1/chat/completions` as
+`response_format: {"type": "json_schema", "json_schema": {"name": "output",
+"schema": …, "strict": true}}`, and on `/v1/completions` as SGLang's own
+`json_schema` field (a string), since that endpoint has no `response_format` in
+the OpenAI API. SGLang then decodes under a grammar compiled from the schema
+(xgrammar, its default backend; `to_sampling_params` in
+`entrypoints/openai/protocol.py` at v0.5.19), so every token the model may emit
+keeps the answer a valid prefix of a matching document. The answer is therefore
+complete and matching unless generation stops first, usually at the line's
+`max_tokens`. The log reports `N of M answers parse as JSON` to make that case
+visible; it checks parsing only, not the schema, because the image has no
+validator we can rely on.
+
+Without this template, a customer can already get the same decoding from
+`batch-infer-sglang` by putting `response_format` on each line, since that
+driver passes it through. What this template adds is one schema for the whole
+file, the early check and the count.
+
+Exercised locally on 2026-11-09 against a stand-in server (a line's own
+`response_format` replaced, `/v1/completions` given `json_schema`, a truncated
+answer counted as not parsing, a non-JSON schema failing before launch), not on
+a GPU.
 
 ## Open questions
 
