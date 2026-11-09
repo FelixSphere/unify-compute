@@ -155,6 +155,14 @@ account. Two consequences:
   `SELECT count(*) FROM topups WHERE bonus_cents > 0` is 0. Throwaway account
   29 remains on staging (compute off, no keys). Records:
   `deploy/releases/2026-11-09-*bonus-refund-requests.md`.
+- **Your AWS credentials in a cloud session:** as of 2026-11-09 there are
+  none. `AWS_ACCESS_KEY_ID` is a proxy placeholder (`prox…`), and AWS answers
+  `InvalidClientTokenId`; a substituted placeholder cannot work for SigV4.
+  `deploy/aws/shared/cicd-agent` defines your identity (IAM user
+  `unify-compute-cicd-agent`: SSM RunCommand on the staging instance only, no
+  Terraform state, no IAM). It is **not applied** until a record or this line
+  says so; until then, a check that needs a shell on a host is reported as not
+  exercised, never worked around.
 - **IMDS lockdown:** applied to both hosts on 2026-10-03 (staging, then
   production): firewall unit, credentials timer, `docker-compose.imds.yml`,
   hop limit 1 by Terraform. `check-imds.sh` gave `CHECK_IMDS_OK` before and after
