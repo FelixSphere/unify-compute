@@ -126,6 +126,15 @@ account. Two consequences:
   Usage keeps a "Loading usage…" placeholder inside the hidden
   `#usage-detail`. It is invisible and not animating, but a
   computed-style `uc-shimmer` selector counts it.
+- **2026-11-08, both hosts on site-i18n-std:** compute-api `fd586e94…`
+  (`e7fe722`, unchanged) and site `5925c7c1…` (`fc0edb0`, #110 the
+  marketing site in the standard's 11 languages). Staging run 42491696406,
+  production 42491954565; `check-i18n.sh` PASS on `/` and `/privacy` on
+  both. No migration. Both hosts' PREVIOUS_RELEASE is `fd586e94…` /
+  `26d2e66c…`, so `mode=rollback` is a site-only step. The staging site
+  host is `site.staging.compute.unifyai.us`; `staging.compute.unifyai.us`
+  is compute-api and answers 404 for site paths. Records:
+  `deploy/releases/2026-11-08-*`.
 - **IMDS lockdown:** applied to both hosts on 2026-10-03 (staging, then
   production): firewall unit, credentials timer, `docker-compose.imds.yml`,
   hop limit 1 by Terraform. `check-imds.sh` gave `CHECK_IMDS_OK` before and after
