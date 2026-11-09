@@ -1,6 +1,9 @@
 # ADR-0011 — Unify Compute owns its accounts, keys, balance and payments
 
 - **Status:** Accepted (operator, 2026-10-03; decisions recorded under "Operator decisions" below)
+- **Amended by:** [ADR-0013](0013-topup-bonus-and-refund-requests.md)
+  (2026-10-10): customers can ask for refunds from the dashboard, and
+  top-ups earn bonus credit.
 - **Date:** 2026-10-03
 - **Supersedes, once accepted:** [ADR-0001](0001-unifyapi-owns-accounts-and-billing.md)
   (Unify API owns accounts, keys and the balance).

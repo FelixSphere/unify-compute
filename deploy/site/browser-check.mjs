@@ -816,10 +816,10 @@ async function dashboardChecks() {
     'billing: focal action or cards wrong with top-ups enabled',
   );
   check(
-    (await evaluate(`[...document.querySelectorAll('#topups tbody tr')].map((tr) => [...tr.cells].map((c) => c.textContent).slice(1, 4).join('|')).join()`)) ===
-      '15.00|Added|View receipt' &&
+    (await evaluate(`[...document.querySelectorAll('#topups tbody tr')].map((tr) => [...tr.cells].map((c) => c.textContent).slice(1, 5).join('|')).join()`)) ===
+      '15.00|—|Added|View receipt' &&
       (await evaluate(`document.querySelector('#topups a')?.getAttribute('href')`)) === TOPUP_OLD.receipt_url,
-    'billing: top-ups listed with status and Stripe receipt link',
+    'billing: top-ups listed with bonus, status and Stripe receipt link',
     `billing: top-up rows: ${await evaluate(`document.querySelector('#topups')?.textContent`)}`,
   );
   await onePrimary('/billing');

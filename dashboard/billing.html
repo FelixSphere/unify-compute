@@ -33,11 +33,13 @@
       <section class="card narrow" id="topup" aria-labelledby="topup-title" hidden>
         <h2 id="topup-title" tabindex="-1" data-i18n="billing.add-credit">Add credit</h2>
         <p class="muted" data-i18n="billing.you-pay-by-card-on">You pay by card on Stripe's payment page and come back here. The credit appears once Stripe confirms the payment, usually within seconds. Cards are not saved.</p>
+        <p class="muted" id="bonus-note" hidden></p>
         <form id="topup-form" novalidate>
           <div class="field">
             <label for="amount_usd" data-i18n="billing.amount-usd">Amount (USD)</label>
             <input id="amount_usd" name="amount_usd" type="text" inputmode="decimal" autocomplete="off" required aria-describedby="amount_usd-hint amount_usd-error" />
             <p class="hint" id="amount_usd-hint" data-i18n="billing.usd-10-00-to-100">USD 10.00 to 100.00 per top-up.</p>
+            <p class="hint" id="amount_usd-credit" aria-live="polite"></p>
             <p class="field-error" id="amount_usd-error" hidden></p>
           </div>
           <div class="actions">
@@ -65,6 +67,7 @@
       <section class="section" id="topups-section" aria-labelledby="topups-title" hidden>
         <h2 id="topups-title" data-i18n="billing.card-top-ups">Card top-ups</h2>
         <div id="topups" aria-live="polite"></div>
+        <p class="muted" data-i18n="billing.refund-note">Unused credit can be refunded to the card that paid for it. Bonus credit has no cash value and is reduced by the same share when part of a top-up is refunded.</p>
       </section>
       <section class="section" aria-labelledby="history-title">
         <div class="section-head">
@@ -74,7 +77,7 @@
               <select id="history-kind">
                 <option value="" selected data-i18n="billing.everything">Everything</option>
                 <option value="settle" data-i18n="billing.charges">Charges</option>
-                <option value="topup,refund" data-i18n="billing.top-ups-and-refunds">Top-ups and refunds</option>
+                <option value="topup,topup_bonus,refund" data-i18n="billing.top-ups-and-refunds">Top-ups and refunds</option>
                 <option value="hold,extend,release" data-i18n="billing.holds-and-releases">Holds and releases</option>
                 <option value="admin_credit,admin_debit,writeoff,dispute,dispute_reversal" data-i18n="billing.adjustments-and-disputes">Adjustments and disputes</option>
               </select>
@@ -84,6 +87,27 @@
         <div id="history" aria-live="polite"><p class="muted" data-i18n="common.loading-balance-history">Loading balance history…</p></div>
         <button class="ghost more" type="button" id="history-more" hidden data-i18n="common.load-more">Load more</button>
       </section>
+      <dialog id="refund-dialog" aria-labelledby="refund-title">
+        <form method="dialog" id="refund-form" novalidate>
+          <h2 id="refund-title" data-i18n="billing.ask-for-a-refund">Ask for a refund</h2>
+          <p data-i18n="billing.refund-explain">The refund goes back to the card that paid for this top-up, from your unused balance only. We review each request and email you when it's done.</p>
+          <div class="field">
+            <label for="refund-amount" data-i18n="billing.amount-usd">Amount (USD)</label>
+            <input id="refund-amount" name="amount_usd" type="text" inputmode="decimal" autocomplete="off" aria-describedby="refund-amount-hint refund-amount-error" />
+            <p class="hint" id="refund-amount-hint"></p>
+            <p class="field-error" id="refund-amount-error" hidden></p>
+          </div>
+          <div class="field">
+            <label for="refund-reason" data-i18n="billing.reason-optional">Reason (optional)</label>
+            <textarea id="refund-reason" name="reason" rows="3" maxlength="500" aria-describedby="refund-reason-error"></textarea>
+            <p class="field-error" id="refund-reason-error" hidden></p>
+          </div>
+          <div class="actions">
+            <button class="primary" type="submit" value="send" id="refund-send" data-i18n="billing.send-request">Send request</button>
+            <button class="ghost" type="submit" value="cancel" data-i18n="common.cancel">Cancel</button>
+          </div>
+        </form>
+      </dialog>
     </main>
   </body>
 </html>

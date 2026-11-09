@@ -10,10 +10,12 @@ import (
 // Reversal is money that came back out of, or back into, the balance at
 // Stripe (task B2): a refund, a dispute's debit, or a won dispute's
 // reinstatement. Quota is negative for refund and dispute, positive for
-// dispute_reversal.
+// dispute_reversal. topup_bonus is the share of a top-up's bonus credit that
+// goes with any of them (ADR-0013): negative with a refund or dispute,
+// positive with a won dispute.
 type Reversal struct {
 	AccountID int64
-	Kind      string // refund, dispute or dispute_reversal
+	Kind      string // refund, dispute, dispute_reversal or topup_bonus
 	Quota     int64
 	RefType   string
 	RefID     string
@@ -36,6 +38,10 @@ func (l *Local) ReverseTx(ctx context.Context, tx pgx.Tx, r Reversal) (Balance, 
 	case r.Kind == "dispute_reversal":
 		if r.Quota <= 0 {
 			return Balance{}, errors.New("billing: a dispute reversal must credit")
+		}
+	case r.Kind == "topup_bonus":
+		if r.Quota == 0 {
+			return Balance{}, errors.New("billing: a bonus reversal of zero")
 		}
 	default:
 		return Balance{}, errors.New("billing: unknown reversal kind " + r.Kind)

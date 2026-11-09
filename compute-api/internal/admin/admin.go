@@ -40,6 +40,8 @@ const Usage = `usage: compute-api admin <command>
   balance credit <account_id> --usd AMOUNT --reason TEXT
   balance debit <account_id> --usd AMOUNT --reason TEXT
   topup refund <tu_id> [--usd AMOUNT] --reason TEXT
+  refund-request list
+  refund-request decline <rr_id> --message TEXT --reason TEXT
   audit [--account <account_id>]
   listing queue | show <lst_id> | approve|reject|unlist <lst_id> --reason …
 
@@ -73,8 +75,8 @@ type CLI struct {
 	// Listings is the marketplace's account side; nil when the deployment
 	// has no local accounts (then `listing` says so).
 	Listings *listings.Store
-	// Payments issues `topup refund` through Stripe; nil when the
-	// deployment has no local accounts.
+	// Payments issues `topup refund` through Stripe and handles refund
+	// requests; nil when the deployment has no local accounts.
 	Payments *payments.Service
 	// Actor is who ran the command, recorded as the audit event's actor_id.
 	Actor string
@@ -101,6 +103,8 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		return c.listing(ctx, args[1:])
 	case "topup":
 		return c.topup(ctx, args[1:])
+	case "refund-request":
+		return c.refundRequest(ctx, args[1:])
 	}
 	return usage("unknown command %q", args[0])
 }
