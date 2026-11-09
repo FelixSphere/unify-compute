@@ -140,9 +140,12 @@ ran. *Planned:* the Job also records the template id; it does not yet.
 
 | id | Image | Default SKU | Available |
 |---|---|---|---|
+| `batch-extract-sglang` | `lmsysorg/sglang:v0.5.19-cu129-runtime@sha256:fe08f6f5…` | `a10g-24gb-x1` | yes (not yet run on a real cloud) |
 | `batch-embed` | `vllm/vllm-openai:v0.30.0-cu129@sha256:a67f8f18…` | `a10g-24gb-x1` | yes (not yet run on a real cloud) |
 | `batch-infer-vllm` | same | `a10g-24gb-x1` | yes (same caveat) |
 | `batch-infer-lora` | `ghcr.io/felixsphere/unify-compute-finetune:finetune-2026-10-04@sha256:6d426175…` | `a10g-24gb-x1` | yes (not yet run on a real cloud) |
+| `batch-infer-lora-sglang` | same | `a10g-24gb-x1` | yes (not yet run on a real cloud) |
+| `batch-infer-sglang` | same | `a10g-24gb-x1` | yes (not yet run on a real cloud) |
 | `finetune-lora` | same | `a10g-24gb-x1` | yes (same caveat) |
 
 ### Image provenance
@@ -251,6 +254,116 @@ base model and revision default to `batch-infer-vllm`'s, which are
 `finetune-lora`'s `BASE_MODEL`; an adapter trained on another base needs
 `MODEL`/`MODEL_REVISION` overridden to that base. `TestBatchInferLoraPairsWithFinetuneLora`
 pins the pairing.
+
+### `batch-infer-sglang`
+
+`batch-infer-vllm`'s contract on SGLang instead of vLLM: the same
+`/mnt/in/requests.jsonl` in, `/mnt/out/results.jsonl` out in the batch
+runner's line shape, the same `MODEL`, `MODEL_REVISION` and `MAX_MODEL_LEN`
+defaults, SKU and runtime, so one file can be run through both engines and the
+results and job durations compared. `TestBatchInferSGLangMatchesBatchInferVLLM`
+pins that.
+
+Why offer a second engine: SGLang's RadixAttention keeps the KV cache of
+every prefix it has computed in a radix tree and reuses it for any later
+request that starts the same way. Batch files are usually one long shared
+prefix (system prompt, instructions, few-shot examples) followed by a short
+per-line part, so the shared part is prefilled once rather than once per line.
+vLLM has automatic prefix caching too; which engine is faster for a given
+file has not been measured on our hardware, and the template description says
+only what each does.
+
+SGLang has no counterpart to `vllm run-batch` (its server lists no
+`/v1/batches` route at v0.5.19), so the command does it in two steps inside the
+one job: it starts `python3 -m sglang.launch_server` on `127.0.0.1:30000`,
+waits for `/health_generate` (failing with the server's own exit status if it
+dies first, for example out of GPU memory), then a stdlib-only Python driver
+sends every line to the server with `CONCURRENCY` (default 64) requests in
+flight. Concurrency matters: it is what lets SGLang's scheduler batch
+continuously and share prefixes between in-flight requests. The driver:
+
+- accepts `/v1/chat/completions` and `/v1/completions` lines; any other `url`
+  gets an `error` (`unsupported_url`), and a line that is not JSON gets
+  `invalid_json`, without stopping the batch;
+- replaces each body's `model` with `MODEL` (the server is started with
+  `--served-model-name "$MODEL"`) and forces `stream: false`;
+- writes results in input order; a non-200 answer is recorded as `response`
+  with its status code and body, a connection failure as `error`;
+- exits 0 once every line has a result, like `vllm run-batch`, and prints how
+  many succeeded to the log.
+
+The EXIT trap stops the server when the driver finishes; the driver is not
+`exec`ed for that reason. The driver is shared word for word with
+`batch-infer-lora-sglang` and `batch-extract-sglang` (below);
+`TestSGLangTemplatesShareOneDriver` fails if the copies differ. Exercised locally on 2026-11-06 against a stand-in
+`sglang.launch_server` (ordering, per-line errors, the server-dies path), not
+on a GPU.
+
+The image is `lmsysorg/sglang`, the SGLang project's own image on Docker Hub,
+Apache-2.0 (`LICENSE` at tag `v0.5.19` of github.com/sgl-project/sglang). The
+`-cu129-runtime` variant: CUDA 12.9 for the same driver reason as the vLLM
+image (v0.5.19 is the newest release built for 12.9; v0.5.20 onwards ship CUDA
+13.0 only), and `runtime` because the job compiles nothing. The digest is the
+multi-arch index read from `registry-1.docker.io` on 2026-11-06 (`linux/amd64`
+and `linux/arm64`). Server flags were checked against
+`python/sglang/srt/server_args.py` at v0.5.19.
+
+### `batch-infer-lora-sglang`
+
+`batch-infer-lora` on SGLang, built the same way as `batch-infer-sglang`. It
+takes the same two inputs (`/mnt/in/requests.jsonl` and
+`/mnt/adapter/adapter.tar.gz` as `finetune-lora` writes it) and the same
+`MODEL`, `MODEL_REVISION`, `MAX_MODEL_LEN`, `MAX_LORA_RANK` and `LORA_NAME`
+defaults, so one adapter can be run through either engine.
+`TestBatchInferLoraSGLangPairsWithFinetuneLora` pins the pairing.
+
+The command unpacks the archive, finds `adapter_config.json` wherever the
+archive put it (exit 2 if there is none), and starts the server with
+`--lora-paths "$LORA_NAME=$ADAPTER" --max-lora-rank "$MAX_LORA_RANK"`, which
+loads the adapter before the server reports healthy. SGLang chooses the adapter
+per request from the `model` field written `base:adapter`
+(`_parse_model_parameter` in `entrypoints/openai/serving_base.py` at v0.5.19),
+so the driver sends `MODEL:LORA_NAME` on every line and writes `LORA_NAME` back
+as the result's `model`, as `batch-infer-lora` does. The adapter's target
+modules must be ones SGLang supports; `finetune/train.py` targets
+`q/k/v/o_proj` and `gate/up/down_proj`, all in v0.5.19's
+`SUPPORTED_LORA_TARGET_MODULES`. Exercised locally on 2026-11-08 against a
+stand-in server (the adapter reaches `--lora-paths`, every line is sent as
+`base:lora`, a missing `adapter_config.json` exits 2), not on a GPU.
+
+### `batch-extract-sglang`
+
+`batch-infer-sglang` with one JSON Schema imposed on every answer. A second
+input, `/mnt/schema/schema.json`, is the schema (its URL must end in
+`schema.json`, for the same reason `requests.jsonl`'s must). The command checks
+that it parses as JSON before the server starts, so a bad schema fails in
+seconds rather than after the model download. Same image, env defaults, SKU and
+runtime as `batch-infer-sglang`; `TestBatchExtractSGLangConstrainsEveryAnswer`
+pins it.
+
+The driver sets the schema on every line, replacing any `response_format` the
+line had: on `/v1/chat/completions` as
+`response_format: {"type": "json_schema", "json_schema": {"name": "output",
+"schema": …, "strict": true}}`, and on `/v1/completions` as SGLang's own
+`json_schema` field (a string), since that endpoint has no `response_format` in
+the OpenAI API. SGLang then decodes under a grammar compiled from the schema
+(xgrammar, its default backend; `to_sampling_params` in
+`entrypoints/openai/protocol.py` at v0.5.19), so every token the model may emit
+keeps the answer a valid prefix of a matching document. The answer is therefore
+complete and matching unless generation stops first, usually at the line's
+`max_tokens`. The log reports `N of M answers parse as JSON` to make that case
+visible; it checks parsing only, not the schema, because the image has no
+validator we can rely on.
+
+Without this template, a customer can already get the same decoding from
+`batch-infer-sglang` by putting `response_format` on each line, since that
+driver passes it through. What this template adds is one schema for the whole
+file, the early check and the count.
+
+Exercised locally on 2026-11-09 against a stand-in server (a line's own
+`response_format` replaced, `/v1/completions` given `json_schema`, a truncated
+answer counted as not parsing, a non-JSON schema failing before launch), not on
+a GPU.
 
 ## Open questions
 
