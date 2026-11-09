@@ -142,7 +142,19 @@ account. Two consequences:
   `batch-extract-sglang`): no valid `uck_` key, and the agent's AWS
   credentials were rejected. Both hosts' PREVIOUS_RELEASE is `fd586e94…` /
   `5925c7c1…`, so `mode=rollback` is a plain step back. Records:
-  `deploy/releases/2026-11-09-*`.
+  `deploy/releases/2026-11-09-*sglang-templates.md`.
+- **2026-11-09, both hosts on bonus-refund-requests (#134, ADR-0013):**
+  compute-api `15cf14fb…` and site `a8281c78…` (both `792b4ea`). Schema
+  **0015** on both (additive). Staging run 42678010483, production
+  42679416679. Live Checkout now grants bonus credit (3% at USD 50, 5% at
+  USD 100). Customers can file refund requests; `admin refund-request
+  list|decline` handles them. **Never run against Stripe in any mode**, and
+  the wording has had no legal review (O5). Production had 0 top-ups at
+  release. PREVIOUS_RELEASE is `b7474c94…` / `ed5de01a…` on both:
+  `mode=rollback` needs no dump restore while
+  `SELECT count(*) FROM topups WHERE bonus_cents > 0` is 0. Throwaway account
+  29 remains on staging (compute off, no keys). Records:
+  `deploy/releases/2026-11-09-*bonus-refund-requests.md`.
 - **Your AWS credentials in a cloud session:** as of 2026-11-09 there are
   none. `AWS_ACCESS_KEY_ID` is a proxy placeholder (`prox…`), and AWS answers
   `InvalidClientTokenId`; a substituted placeholder cannot work for SigV4.
