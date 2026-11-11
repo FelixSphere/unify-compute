@@ -155,6 +155,12 @@ account. Two consequences:
   `SELECT count(*) FROM topups WHERE bonus_cents > 0` is 0. Throwaway account
   29 remains on staging (compute off, no keys). Records:
   `deploy/releases/2026-11-09-*bonus-refund-requests.md`.
+- **2026-11-11, both hosts on compute-descriptor (#155):** site
+  `b31260da…` (`47f54d8`; the header descriptor reads "Compute", no
+  "& Flatkey"), compute-api `15cf14fb…` unchanged (`792b4ea`), schema 0015.
+  Staging run 43059641149, production 43060309921. PREVIOUS_RELEASE is
+  `15cf14fb…` / `a8281c78…` on both, so `mode=rollback` is a site-only
+  step. Records: `deploy/releases/2026-11-11-*compute-descriptor.md`.
 - **Your AWS credentials in a cloud session:** as of 2026-11-09 there are
   none. `AWS_ACCESS_KEY_ID` is a proxy placeholder (`prox…`), and AWS answers
   `InvalidClientTokenId`; a substituted placeholder cannot work for SigV4.
