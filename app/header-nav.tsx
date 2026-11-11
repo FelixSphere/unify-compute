@@ -95,9 +95,9 @@ export function HeaderNav({
           <Image unoptimized loading="eager" src="/brand/unifyai-mark-black.svg" alt="" width={42} height={41.6} className="brand-mark" />
         </Link>
         <span className="product-divider" aria-hidden="true" />
-        {/* Partner descriptor, like Unify Data's "Data & Realset": same type, one string. Names, so never translated. */}
+        {/* A product name, so never translated. */}
         <span className="product-name" dir="ltr">
-          Compute <span className="product-partner">&amp; Flatkey</span>
+          Compute
         </span>
       </div>
       <nav aria-label={labels.nav} className="nav-inline">

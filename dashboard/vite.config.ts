@@ -89,7 +89,7 @@ const partials: Record<string, (arg: string) => string> = {
   brand: () => `<div class="brand">
           <img src="/brand/unifyai-lockup-horizontal-black.svg" alt="UnifyAI" width="148" height="51" loading="eager" />
           <span class="divider" aria-hidden="true"></span>
-          <span class="descriptor">Compute <span class="partner">&amp; Flatkey</span></span>
+          <span class="descriptor">Compute</span>
         </div>`,
   'form-error': () => `<div class="form-error" id="form-error" role="alert" tabindex="-1" hidden>${ALERT}<p></p></div>`,
   toggle: (id) =>
@@ -116,7 +116,7 @@ const partials: Record<string, (arg: string) => string> = {
       <a class="brand" href="/" aria-label="Unify Compute overview" data-i18n-attr="aria-label:common.overview-link">
         <img src="/brand/unifyai-lockup-horizontal-black.svg" alt="UnifyAI" width="148" height="51" loading="eager" />
         <span class="divider" aria-hidden="true"></span>
-        <span class="descriptor">Compute <span class="partner">&amp; Flatkey</span></span>
+        <span class="descriptor">Compute</span>
       </a>
       <a class="mark" href="/" aria-label="Unify Compute overview" data-i18n-attr="aria-label:common.overview-link"><img src="/brand/unifyai-mark-black.svg" alt="UnifyAI" width="32" height="32" loading="eager" /></a>
       <div class="header-actions">
@@ -172,7 +172,7 @@ const partials: Record<string, (arg: string) => string> = {
       <a class="brand" id="topbar-brand" href="https://compute.unifyai.us/" aria-label="Unify Compute" data-i18n-attr="aria-label:common.site-link">
         <img src="/brand/unifyai-lockup-horizontal-black.svg" alt="UnifyAI" width="148" height="51" loading="eager" />
         <span class="divider" aria-hidden="true"></span>
-        <span class="descriptor">Compute <span class="partner">&amp; Flatkey</span></span>
+        <span class="descriptor">Compute</span>
       </a>
       <a class="mark" href="https://compute.unifyai.us/" aria-label="Unify Compute" data-i18n-attr="aria-label:common.site-link"><img src="/brand/unifyai-mark-black.svg" alt="UnifyAI" width="32" height="32" loading="eager" /></a>
       <div class="header-actions">
