@@ -185,6 +185,57 @@ Two agents must never edit the same checkout. Use `git worktree add` per task,
 pick a port per agent for `npm run dev` and for `compute-api`, and say which
 one you used when you hand off.
 
+## Existing tests: change them carefully, approve them yourself
+
+**Operator rule, revised 2026-11-18** (verbatim: "告诉所有智能体，以后不需要我的LGTM了，除非是非常非常没有把握，高风险的PR，所有都是这样"):
+a PR **no longer needs the operator's `LGTM`**, and that includes changing an
+existing test. You decide and approve it yourself. You still ask the operator
+and wait only when you are **genuinely unsure, or the change is high-risk**.
+That applies in every UnifyAI repository. It replaces the 2026-09-22 rule that
+every test change needed the operator's personal approval.
+
+What has not changed:
+
+- **Say it in the PR.** Name every existing test you changed and give the three
+  answers: (1) why it must change, as distinct from why it is inconvenient;
+  (2) what it asserts afterwards that it does not today; (3) what regression it
+  could let through, i.e. the defect class the old assertion catches and
+  whether the new one still catches it. Keep test edits in their own commit.
+- **A failing test is evidence, not an obstacle.** Find out why it fails before
+  touching it. Updating an expected value to a behaviour the operator decided
+  (a new price, a renamed vendor) is routine. Loosening an assertion until a
+  red build turns green is not: that is how a pricing sweep once passed with
+  `gpt-4o` mutated from $2.50 to $0.25.
+
+**Still ask the operator first** in either of these cases:
+
+- **You cannot say with confidence that the change is right.**
+- **It deletes a test, or loosens an assertion, guarding something expensive:**
+  billing, prices or money movement; auth, permissions, credentials or other
+  security boundaries; irreversible data deletion; production data; or the
+  licence attribution.
+
+Updating an expected value to a behaviour the operator has already decided is
+not high-risk, even in a billing test.
+
+When you do ask, post the three answers and wait for the operator's `LGTM`, an
+approving review, or their `APPROVED-TEST-CHANGE` comment.
+
+**How to approve your own test change.** The CI gate (`.github/workflows/test-guard.yml`)
+still runs and still blocks until a test change is approved; it is now the
+record of which test changed and who decided. Approve it yourself with a PR
+comment, posted after the head commit:
+
+    APPROVED-TEST-CHANGE <head sha> -- agent self-approval (operator rule 2026-11-18): <one line on why this is safe>
+
+Read the SHA from `gh pr view <n> --json headRefOid`; an invented one is
+rejected. A comment does not re-trigger the check by itself everywhere, so if
+it stays red, re-run it with `gh run rerun --failed <run id>`.
+
+**Never post a bare `LGTM` yourself.** Agents and the operator share one GitHub
+account, so that word stays the operator's. The record has to show who
+decided.
+
 ## Configuration before code
 
 **Operator rule (2026-11-08): if a behaviour can be achieved by changing a setting — in an admin UI or by writing the database row that UI writes — that is the first and preferred fix. A code change is not recommended.** In this product that means each host's environment settings (`ACCOUNTS_BACKEND`, `APP_ORIGIN`, the SES and Stripe settings, `SKYPILOT_API_SERVER_URL`), the operator's per-account compute enablement and credit, and the `deploy/aws` Terraform variables and SSM parameters.
