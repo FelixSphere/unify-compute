@@ -77,6 +77,9 @@ jobs:
       # Every English string in every language, with its placeholders and
       # product names intact (UI-STANDARD "Languages").
       - run: npm run check:i18n
+      # Motion: every animation stops under prefers-reduced-motion, and every
+      # animate-* class a component uses exists.
+      - run: npm test
       - run: npm run build
 
   # The site container, run for real: every route the export must answer, the
