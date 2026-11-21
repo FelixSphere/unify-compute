@@ -10,6 +10,7 @@
     "build": "vinext build && node scripts/site-sitemap.mjs && npm run build:app",
     "lint": "oxlint",
     "check:i18n": "node scripts/check-site-i18n.mjs",
+    "test": "node --test 'app/__tests__/*.test.mjs'",
     "format": "oxfmt",
     "build:app": "vite build --config dashboard/vite.config.ts"
   },
