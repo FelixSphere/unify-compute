@@ -161,15 +161,19 @@ account. Two consequences:
   Staging run 43059641149, production 43060309921. PREVIOUS_RELEASE is
   `15cf14fb…` / `a8281c78…` on both, so `mode=rollback` is a site-only
   step. Records: `deploy/releases/2026-11-11-*compute-descriptor.md`.
-- **2026-11-21, staging only on support-conversations (#159, ADR-0014):**
+- **2026-11-21, both hosts on support-conversations (#159, ADR-0014):**
   compute-api `577de6b8…` and site `297a7974…` (both `72a4d30`). Schema
-  **0016** on staging (additive: `support_conversations`,
-  `support_messages`). Staging run 44957025547. Production is still on
-  compute-api `15cf14fb…` / site `b31260da…` (compute-descriptor,
-  2026-11-11) and schema 0015 until the operator has exercised staging.
-  Staging's PREVIOUS_RELEASE is `15cf14fb…` / `b31260da…`: `mode=rollback`
-  needs no dump restore. Record:
-  `deploy/releases/2026-11-21-staging-support-conversations.md`.
+  **0016** on both (additive: `support_conversations`,
+  `support_messages`). Staging run 44957025547, production 44957938798.
+  Records: `deploy/releases/2026-11-21-*support-conversations.md`.
+- **2026-11-21, both hosts on site-motion-redesign (#161):** compute-api
+  `577de6b8…` (unchanged) and site `196535d2…` (`2ca4c4f`, homepage motion
+  panels, new 03 Placement / 04 Marketplace sections). Staging run
+  44958477501, production 44959603174. No migration. Both hosts'
+  PREVIOUS_RELEASE is `577de6b8…` / `297a7974…`, so `mode=rollback` is a
+  site-only step. Known, cosmetic: at 375 px the placement row ellipsises
+  `us-east-1`, and `/ar` panel captions are letter-spaced Arabic. Records:
+  `deploy/releases/2026-11-21-*site-motion-redesign.md`.
 - **Your AWS credentials in a cloud session:** as of 2026-11-09 there are
   none. `AWS_ACCESS_KEY_ID` is a proxy placeholder (`prox…`), and AWS answers
   `InvalidClientTokenId`; a substituted placeholder cannot work for SigV4.
