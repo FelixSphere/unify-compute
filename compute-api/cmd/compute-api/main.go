@@ -30,6 +30,7 @@ import (
 	"github.com/FelixSphere/unify-compute/compute-api/internal/quota"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/sku"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/store"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/support"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/template"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/upstream"
 )
@@ -267,7 +268,8 @@ func main() {
 			lst := listings.New(st.Pool(), cat, platform.MaxRuntimeSeconds, templates, os.Getenv("ENVIRONMENT"), nil)
 			handler.Listings = lst
 			dash, err = dashboard.New(dashboard.Config{Accounts: acc, Mailer: mail, AppOrigin: os.Getenv("APP_ORIGIN"), Log: log,
-				Jobs: handler.AccountJobs(), Market: handler.AccountJobs(), Ledger: local, Payments: pay, Listings: lst, Notifier: notes})
+				Jobs: handler.AccountJobs(), Market: handler.AccountJobs(), Ledger: local, Payments: pay, Listings: lst, Notifier: notes,
+				Support: support.New(st.Pool(), supportMailer(mail), os.Getenv("OPERATOR_EMAIL"), nil)})
 			if err != nil {
 				log.Error("dashboard", "err", err)
 				os.Exit(1)
@@ -501,6 +503,8 @@ func runAdmin(args []string) int {
 			cfg.Stripe = &payments.Stripe{Key: set.SecretKey, HTTP: &http.Client{Timeout: 20 * time.Second}}
 		}
 		cli.Payments = payments.New(cfg)
+		// A staff reply emails the customer from here.
+		cli.Support, cli.In = support.New(st.Pool(), supportMailer(mail), os.Getenv("OPERATOR_EMAIL"), nil), os.Stdin
 	}
 	err = cli.Run(ctx, args)
 	switch {
@@ -513,6 +517,14 @@ func runAdmin(args []string) int {
 		fmt.Fprintln(os.Stderr, "compute-api admin:", err)
 		return 1
 	}
+}
+
+// supportMailer keeps a nil *mailer.Mailer from becoming a non-nil interface.
+func supportMailer(m *mailer.Mailer) support.Mailer {
+	if m == nil {
+		return nil
+	}
+	return m
 }
 
 // operator names who ran an admin command for the audit trail: the person

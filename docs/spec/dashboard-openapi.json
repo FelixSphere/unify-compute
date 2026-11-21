@@ -5064,6 +5064,454 @@
           }
         }
       }
+    },
+    "/dashboard/v1/support/conversations": {
+      "get": {
+        "operationId": "listSupportConversations",
+        "summary": "The signed-in user's support conversations",
+        "description": "Newest first, without messages; each carries a preview of its newest message. A conversation belongs to the user who started it, not to the account: other members do not see it (ADR-0014). Read-limited.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The conversations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportConversationList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: the account's read limit. Always with Retry-After (seconds).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "not_implemented: this deployment has no support conversations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "startSupportConversation",
+        "summary": "Start a support conversation",
+        "description": "Opens the user's conversation with its first message; it waits for a person (state open) and the operator address is emailed that it does, without the text. A user has at most one conversation that is not closed. Any signed-in user may write, whatever the account's status.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "message"
+                ],
+                "properties": {
+                  "message": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000,
+                    "description": "Plain text; surrounding whitespace is trimmed."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Started, with its first message.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportConversation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_message (param message): empty, or longer than 4000 characters; malformed_body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "csrf_failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "conversation_open: the user already has a conversation that is not closed; write there.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: 20 messages an hour per user. Always with Retry-After (seconds).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "not_implemented: this deployment has no support conversations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/support/conversations/{id}": {
+      "get": {
+        "operationId": "getSupportConversation",
+        "summary": "One conversation with its messages",
+        "description": "Messages oldest first. Staff messages carry from_staff and no author. Read-limited.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The conversation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportConversation"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no such conversation of this user, or Host is not the app host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: the account's read limit. Always with Retry-After (seconds).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "not_implemented: this deployment has no support conversations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/support/conversations/{id}/messages": {
+      "post": {
+        "operationId": "writeSupportMessage",
+        "summary": "Write in a conversation",
+        "description": "Adds the user's message; the conversation waits for a person again (state open). The operator address is emailed when it was not already waiting.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "message"
+                ],
+                "properties": {
+                  "message": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000,
+                    "description": "Plain text; surrounding whitespace is trimmed."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The message.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportMessage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_message (param message): empty, or longer than 4000 characters; malformed_body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "csrf_failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no such conversation of this user, or Host is not the app host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "conversation_closed: start a new conversation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: 20 messages an hour per user. Always with Retry-After (seconds).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "not_implemented: this deployment has no support conversations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/support/conversations/{id}/close": {
+      "post": {
+        "operationId": "closeSupportConversation",
+        "summary": "Close a conversation",
+        "description": "Ends the user's own conversation; closing a closed one answers the same 200. The next message starts a new conversation.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Closed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportConversation"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "csrf_failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no such conversation of this user, or Host is not the app host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "not_implemented: this deployment has no support conversations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -6163,6 +6611,118 @@
           "created_at",
           "expires_at"
         ]
+      },
+      "SupportMessage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "object",
+          "from_staff",
+          "body",
+          "created_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Increases with time across all conversations."
+          },
+          "object": {
+            "const": "compute.support_message"
+          },
+          "from_staff": {
+            "type": "boolean",
+            "description": "true for the Unify Compute team's reply, false for the user's own message."
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "created_at": {
+            "type": "integer",
+            "description": "Unix seconds."
+          }
+        }
+      },
+      "SupportConversation": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "object",
+          "state",
+          "preview",
+          "created_at",
+          "updated_at",
+          "closed_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^sc_[0-9A-HJKMNP-TV-Z]{26}$"
+          },
+          "object": {
+            "const": "compute.support_conversation"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "open",
+              "answered",
+              "closed"
+            ],
+            "description": "open: the newest message is the user's and waits for a person. answered: the newest message is staff's. closed: ended by either side."
+          },
+          "preview": {
+            "type": "string",
+            "description": "The first 140 characters of the newest message."
+          },
+          "created_at": {
+            "type": "integer",
+            "description": "Unix seconds."
+          },
+          "updated_at": {
+            "type": "integer",
+            "description": "Unix seconds of the newest message or the close."
+          },
+          "closed_at": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SupportMessage"
+            },
+            "description": "Oldest first. Present on a single conversation, absent in the list."
+          }
+        }
+      },
+      "SupportConversationList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "object",
+          "data",
+          "has_more"
+        ],
+        "properties": {
+          "object": {
+            "const": "list"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SupportConversation"
+            }
+          },
+          "has_more": {
+            "const": false
+          }
+        }
       }
     }
   }

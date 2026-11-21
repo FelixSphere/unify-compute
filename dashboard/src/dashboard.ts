@@ -13,6 +13,7 @@ import { listings } from './pages/listings';
 import { marketplace } from './pages/marketplace';
 import { members } from './pages/members';
 import { overview } from './pages/overview';
+import { support } from './pages/support';
 import { usage } from './pages/usage';
 
-export const dashboard: Record<string, () => Promise<void>> = { overview, keys, jobs, job, usage, billing, account, marketplace, listings, members };
+export const dashboard: Record<string, () => Promise<void>> = { overview, keys, jobs, job, usage, billing, account, marketplace, listings, members, support };

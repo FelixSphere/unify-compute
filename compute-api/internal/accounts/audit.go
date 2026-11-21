@@ -53,6 +53,8 @@ const (
 	ActionAdminDebit        = "admin_debit"
 	ActionExport            = "export"
 	ActionAccountClosed     = "account_closed"
+	ActionSupportReplied    = "support_replied"
+	ActionSupportClosed     = "support_closed"
 )
 
 // ErrReasonRequired: every admin action carries a reason. The table refuses

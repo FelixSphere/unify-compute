@@ -257,6 +257,17 @@ operator's message on a decline), `refund_event` (the Stripe event whose
 refund closed it), `created_at`, `resolved_at`. At most one `open` per
 top-up (partial unique index).
 
+### `support_conversations`, `support_messages`
+
+The customer support conversation (ADR-0014, migration 0016). A
+conversation: `id` (`sc_` + ULID), `account_id`, `user_id` (it belongs to
+that user, not the account), `state` (`open` | `answered` | `closed`),
+`created_at`, `updated_at`, `closed_at`, `closed_by` (`user` or the
+operator's name). At most one that is not `closed` per user (partial unique
+index). A message: `id` (bigint identity, so "after message N" is one
+comparison), `conversation_id`, `from_staff`, `author` (the user id, or the
+operator's name), `body` (1 to 4,000 characters, plain text), `created_at`.
+
 ### `payment_emails`
 
 `(event_id, kind, recipient)` PK, `account_id`, `detail jsonb`,
@@ -430,6 +441,22 @@ at most that amount, and only by owners and admins. Asking moves no money;
 it queues an operator notice to `OPERATOR_EMAIL` in `payment_emails` under
 the request id.
 
+### Support conversation
+
+```
+POST /support/conversations
+(none) ──────────▶ open ──admin support reply──▶ answered
+                    ▲                               │
+                    └──POST …/{id}/messages─────────┘
+open | answered ──POST …/{id}/close | admin support close──▶ closed
+```
+
+`open` means a person owes an answer; a customer message always leads there.
+`closed` takes no more messages from either side: the customer's next
+message starts a new conversation. The operator address (`OPERATOR_EMAIL`)
+is emailed when a conversation enters `open` from nothing or from
+`answered`, with the conversation id and no customer text.
+
 ### Account
 
 `active ⇄ suspended → closed`. Suspension is automatic on a dispute
@@ -593,6 +620,22 @@ after the response, so neither the status nor the time depends on it.
 Submitting jobs from the dashboard is not in the first version: customers
 submit with a key.
 
+Support conversations (ADR-0014; built, not yet released):
+
+| Route | Body | Answer |
+|---|---|---|
+| `GET /support/conversations` | — | `{ object: "list", data: [conversation…] }`: the signed-in user's own, newest first, without messages; each has `state` and a `preview` of its newest message. Read-limited |
+| `POST /support/conversations` | `{ message }` | `201` the conversation with its first message; `400 invalid_message` (empty, or over 4,000 characters), `409 conversation_open` if the user has one that is not closed |
+| `GET /support/conversations/{id}` | — | The conversation with `messages` (`id`, `from_staff`, `body`, `created_at`), oldest first; `404` for another user's. Read-limited |
+| `POST /support/conversations/{id}/messages` | `{ message }` | `201` the message; the conversation is `open` again; `409 conversation_closed` |
+| `POST /support/conversations/{id}/close` | — | `200` the closed conversation; closing a closed one answers the same |
+
+Any signed-in user may write, whatever the account's status. The two writes
+share 20 an hour per user (`429 rate_limited`). Without a support service
+the routes answer `501 not_implemented` (main wires one with
+`ACCOUNTS_BACKEND=local`). The `/support` page shows the live conversation,
+polls it every 30 s while open, and lists closed ones.
+
 The pages (A7c, `dashboard/`) call every route above except export and
 close, and every one they call is built. `/billing` sends the browser to
 `checkout_url` with a full navigation (no Stripe script on our pages, so the
@@ -751,8 +794,19 @@ admin balance credit|debit <id> --usd 12.50 --reason …      # admin_credit / a
 admin topup refund <tu_…> [--usd N] --reason …               # Stripe refund; the webhook writes the refund entry
 admin refund-request list                                     # open customer requests, oldest first
 admin refund-request decline <rr_…> --message … --reason …    # --message is emailed to the customer
+admin support list [--json]                                   # conversations waiting for a person, longest wait first
+admin support show <sc_…> [--after N] [--json]                # the messages (after message N) and the user's address
+admin support reply <sc_…> --message … | --stdin              # posts as staff; the user is emailed that there is an answer
+admin support close <sc_…>
 admin audit [--account <id>]                                  # checks the balance invariant
 ```
+
+The `support` verbs (ADR-0014) are the exception to `--reason`: `reply` and
+`close` write `audit_events` (`support_replied`, `support_closed`) naming
+the conversation and the message, which say why. `list` prints no customer
+address and `list --json` no customer text; `show` prints both. `reply
+--stdin` reads the message from standard input. A reply whose email fails is
+saved, and the command exits 1 saying the email did not go.
 
 `balance credit` is how the first vertical slice funds an account before
 Stripe exists. It refuses an account with no verified user, because
@@ -828,6 +882,7 @@ something the subject does not say.
 | Low balance | `available` crosses below `low_balance_quota` (see [Low-balance warning](#low-balance-warning)) | CTA "Top up" (`/billing`); details: available balance, held by running jobs, alert below. Built (W6) | `Unify Compute: your balance is below USD 5.00` |
 | Refund issued | `charge.refunded` applied (from the CLI or the Stripe dashboard); states the refund policy and, when there is one, the bonus credit removed (ADR-0013) | CTA "View balance" (`/billing`) | `Unify Compute: refund of USD 20.00 issued` |
 | Refund declined | `admin refund-request decline` (to the requester); the operator's message is the intro | CTA "View billing" (`/billing`) | `About your Unify Compute refund request`. ADR-0013 |
+| Support reply | `admin support reply` (to the user who wrote); says there is an answer, never the answer itself | CTA "Read the reply" (`/support`) | `Unify Compute support replied to you`. ADR-0014 |
 | Account suspended | a dispute that suspends the account (not sent for an admin suspension yet) | CTA "Contact us" (mailto `contactus@felixsphere.com`, per UI-STANDARD) | `Your Unify Compute account is suspended` |
 | Compute enabled | admin `enable-compute` | CTA "Create an API key" | `Your Unify Compute account can now run jobs` |
 | Invitation | `POST /members/invitations` | CTA "Accept invitation" (link with token in the fragment); details: account name, inviter, role | `<inviter> invited you to <account> on Unify Compute` |

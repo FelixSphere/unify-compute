@@ -102,6 +102,12 @@ this list does not repeat image digests, because they go stale here first.
   monthly budget (`deploy/aws/shared/gpu-budget`, action
   `b4302f8f-c1df-40b6-8157-d71a203ae18a`) that denies new launches at 100%
   by itself (dry run proven 2026-10-03).
+- Support conversations (ADR-0014): merged, **not released**. A signed-in
+  user writes on `/support`, the operator answers with `compute-api admin
+  support list|show|reply|close` on the host, and the user is emailed that
+  there is an answer. No AI responder, no web inbox. The Slack bridge that
+  will carry it to `#unifyai-support-handoff` lives in
+  `FelixSphere/unifyai-workspace` and is not built yet.
 - Marketplace: M2 is released on both hosts (2026-10-14); on production
   account listings are closed (`ENVIRONMENT=production`, ADR-0012 §4). M3
   (the dashboard Marketplace and My listings pages) is merged, not released.
