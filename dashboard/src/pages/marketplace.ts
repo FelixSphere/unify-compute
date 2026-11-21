@@ -183,7 +183,7 @@ export async function marketplace() {
       };
       const select = h('select', {}, ...options.map((k) => h('option', { value: k.id, selected: k.id === t.sku, disabled: !k.available }, label(k))));
       nodes.push(field('run-sku', tr('marketplace.gpu-sku'), select, tr('marketplace.runs-on-unless', { sku: t.sku })));
-      // No provider choice: which cloud runs a SKU is ours (ADR-0006, ADR-0013).
+      // No provider choice: which cloud runs a SKU is ours (ADR-0006, ADR-0015).
     }
     if (can('spec.env')) {
       for (const [k, v] of Object.entries(t.env)) {

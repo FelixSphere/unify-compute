@@ -40,6 +40,50 @@
       "available": true
     },
     {
+      "id": "batch-extract-sglang",
+      "title": "Structured extraction with SGLang",
+      "description": "Runs an OpenAI batch file of /v1/chat/completions (or /v1/completions) requests through SGLang with every answer constrained to one JSON Schema you supply, and writes one result line per request, in the same shape as batch-infer-sglang. Decoding is grammar-guided, so each answer parses and matches the schema unless it hits max_tokens first; the log reports how many parse. Default model Qwen3-4B-Instruct-2507 (Apache-2.0), downloaded from Hugging Face at start.",
+      "image": "lmsysorg/sglang:v0.5.19-cu129-runtime@sha256:fe08f6f52bea380415792849a703d92279c86320f8c39283bcd04043f8b63c41",
+      "image_licence": "Apache-2.0",
+      "image_source": "https://hub.docker.com/r/lmsysorg/sglang (tag v0.5.19-cu129-runtime, pushed 2026-09-04, the newest CUDA 12.9 build; multi-arch index read from registry-1.docker.io on 2026-11-06; LICENSE at github.com/sgl-project/sglang/blob/v0.5.19/LICENSE)",
+      "command": [
+        "bash",
+        "-c",
+        "set -euo pipefail\n# Fail before the model download if the schema is not JSON.\npython3 -c 'import json, sys; json.load(open(sys.argv[1]))' /mnt/schema/schema.json\n# As batch-infer-sglang, with every answer constrained by the grammar backend\n# (xgrammar) to schema.json, so each one parses and matches it.\npython3 -m sglang.launch_server --model-path \"$MODEL\" ${MODEL_REVISION:+--revision \"$MODEL_REVISION\"} --served-model-name \"$MODEL\" --context-length \"$MAX_MODEL_LEN\" --host 127.0.0.1 --port 30000 &\nSERVER=$!\ntrap 'kill \"$SERVER\" 2>/dev/null || true' EXIT\nuntil python3 -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:30000/health_generate\", timeout=10)' 2>/dev/null; do\n  kill -0 \"$SERVER\" 2>/dev/null || { echo 'sglang server exited before it was ready' >&2; wait \"$SERVER\"; exit 1; }\n  sleep 5\ndone\nset -- \"\" /mnt/schema/schema.json\npython3 - /mnt/in/requests.jsonl /mnt/out/results.jsonl \"$@\" <<'PY'\nimport concurrent.futures, json, os, sys, urllib.error, urllib.request, uuid\n\nBASE = \"http://127.0.0.1:30000\"\nURLS = (\"/v1/chat/completions\", \"/v1/completions\")\nLORA = sys.argv[3] if len(sys.argv) > 3 else \"\"\nMODEL = os.environ[\"MODEL\"] + (\":\" + LORA if LORA else \"\")\nSCHEMA = json.load(open(sys.argv[4])) if len(sys.argv) > 4 else None\n\ndef text(body):\n    try:\n        c = body[\"choices\"][0]\n        return c[\"message\"][\"content\"] if \"message\" in c else c[\"text\"]\n    except (KeyError, IndexError, TypeError):\n        return None\n\ndef one(line):\n    out = {\"id\": \"batch_req_\" + uuid.uuid4().hex, \"custom_id\": None, \"response\": None, \"error\": None}\n    try:\n        req = json.loads(line)\n        out[\"custom_id\"] = req.get(\"custom_id\")\n    except ValueError as e:\n        out[\"error\"] = {\"code\": \"invalid_json\", \"message\": str(e)}\n        return out\n    if req.get(\"url\") not in URLS:\n        out[\"error\"] = {\"code\": \"unsupported_url\", \"message\": \"url %r is not one of %s\" % (req.get(\"url\"), \", \".join(URLS))}\n        return out\n    body = dict(req.get(\"body\") or {}, model=MODEL, stream=False)\n    if SCHEMA is not None and req[\"url\"] == \"/v1/chat/completions\":\n        body[\"response_format\"] = {\"type\": \"json_schema\", \"json_schema\": {\"name\": \"output\", \"schema\": SCHEMA, \"strict\": True}}\n    elif SCHEMA is not None:\n        body[\"json_schema\"] = json.dumps(SCHEMA)\n    http = urllib.request.Request(BASE + req[\"url\"], json.dumps(body).encode(), {\"Content-Type\": \"application/json\"})\n    try:\n        with urllib.request.urlopen(http, timeout=3600) as r:\n            status, raw = r.status, r.read()\n    except urllib.error.HTTPError as e:\n        status, raw = e.code, e.read()\n    except OSError as e:\n        out[\"error\"] = {\"code\": \"request_failed\", \"message\": str(e)}\n        return out\n    try:\n        parsed = json.loads(raw)\n    except ValueError:\n        parsed = {\"raw\": raw.decode(errors=\"replace\")}\n    if LORA and isinstance(parsed, dict) and \"model\" in parsed:\n        parsed[\"model\"] = LORA\n    out[\"response\"] = {\"status_code\": status, \"request_id\": out[\"id\"], \"body\": parsed}\n    return out\n\nwith open(sys.argv[1]) as f:\n    lines = [l for l in f if l.strip()]\nok = parsed = 0\nwith open(sys.argv[2], \"w\") as w, concurrent.futures.ThreadPoolExecutor(int(os.environ[\"CONCURRENCY\"])) as pool:\n    for res in pool.map(one, lines):\n        if res[\"response\"] is not None and res[\"response\"][\"status_code\"] == 200:\n            ok += 1\n            try:\n                json.loads(text(res[\"response\"][\"body\"]))\n                parsed += 1\n            except (TypeError, ValueError):\n                pass\n        w.write(json.dumps(res) + \"\\n\")\nprint(\"%d of %d requests succeeded\" % (ok, len(lines)), file=sys.stderr)\nif SCHEMA is not None:\n    print(\"%d of %d answers parse as JSON\" % (parsed, ok), file=sys.stderr)\nPY\n"
+      ],
+      "env": {
+        "MODEL": "Qwen/Qwen3-4B-Instruct-2507",
+        "MODEL_REVISION": "cdbee75f17c01a7cc42f958dc650907174af0554",
+        "MAX_MODEL_LEN": "8192",
+        "CONCURRENCY": "64"
+      },
+      "sku": "a10g-24gb-x1",
+      "max_runtime_seconds": 3600,
+      "inputs": [
+        {
+          "mount": "/mnt/in",
+          "description": "Directory containing requests.jsonl: one OpenAI batch line per request with url /v1/chat/completions or /v1/completions; the model field is replaced with MODEL and any response_format with the schema"
+        },
+        {
+          "mount": "/mnt/schema",
+          "description": "schema.json: the JSON Schema every answer must match"
+        }
+      ],
+      "outputs": [
+        {
+          "mount": "/mnt/out",
+          "description": "results.jsonl: one OpenAI batch result line per request, in input order, matched by custom_id; each answer's content is a JSON document matching schema.json"
+        }
+      ],
+      "overridable": [
+        "sku",
+        "providers",
+        "spec.env",
+        "spec.max_runtime_seconds"
+      ],
+      "available": true
+    },
+    {
       "id": "batch-infer-lora",
       "title": "Batch chat completions with your LoRA adapter",
       "description": "Runs an OpenAI batch file of /v1/chat/completions requests through vLLM with a LoRA adapter applied (for example the adapter.tar.gz a finetune-lora job produced) and writes one result line per request, like batch-infer-vllm. Default base model Qwen3-4B-Instruct-2507 (Apache-2.0); the adapter must have been trained on the same base.",
@@ -74,6 +118,92 @@
         {
           "mount": "/mnt/out",
           "description": "results.jsonl: one OpenAI batch result line per request, matched by custom_id, model = LORA_NAME"
+        }
+      ],
+      "overridable": [
+        "sku",
+        "providers",
+        "spec.env",
+        "spec.max_runtime_seconds"
+      ],
+      "available": true
+    },
+    {
+      "id": "batch-infer-lora-sglang",
+      "title": "Batch chat completions with your LoRA adapter on SGLang",
+      "description": "batch-infer-lora on SGLang: runs an OpenAI batch file of /v1/chat/completions (or /v1/completions) requests with a LoRA adapter applied (for example the adapter.tar.gz a finetune-lora job produced) and writes one result line per request, model = LORA_NAME. Shared prompt prefixes are prefilled once, as in batch-infer-sglang. Default base model Qwen3-4B-Instruct-2507 (Apache-2.0); the adapter must have been trained on the same base.",
+      "image": "lmsysorg/sglang:v0.5.19-cu129-runtime@sha256:fe08f6f52bea380415792849a703d92279c86320f8c39283bcd04043f8b63c41",
+      "image_licence": "Apache-2.0",
+      "image_source": "https://hub.docker.com/r/lmsysorg/sglang (tag v0.5.19-cu129-runtime, pushed 2026-09-04, the newest CUDA 12.9 build; multi-arch index read from registry-1.docker.io on 2026-11-06; LICENSE at github.com/sgl-project/sglang/blob/v0.5.19/LICENSE)",
+      "command": [
+        "bash",
+        "-c",
+        "set -euo pipefail\nfor a in /mnt/adapter/*.tar.gz /mnt/adapter/*.tgz; do [ -f \"$a\" ] && tar -xzf \"$a\" -C /mnt/adapter; done\nCFG=$(find /mnt/adapter -name adapter_config.json -print -quit)\n[ -n \"$CFG\" ] || { echo 'adapter archive must contain adapter_config.json' >&2; exit 2; }\nADAPTER=$(dirname \"$CFG\")\n# As batch-infer-sglang, with the adapter loaded at start under LORA_NAME and\n# every request routed to it.\npython3 -m sglang.launch_server --model-path \"$MODEL\" ${MODEL_REVISION:+--revision \"$MODEL_REVISION\"} --served-model-name \"$MODEL\" --context-length \"$MAX_MODEL_LEN\" --host 127.0.0.1 --port 30000 --lora-paths \"$LORA_NAME=$ADAPTER\" --max-lora-rank \"$MAX_LORA_RANK\" &\nSERVER=$!\ntrap 'kill \"$SERVER\" 2>/dev/null || true' EXIT\nuntil python3 -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:30000/health_generate\", timeout=10)' 2>/dev/null; do\n  kill -0 \"$SERVER\" 2>/dev/null || { echo 'sglang server exited before it was ready' >&2; wait \"$SERVER\"; exit 1; }\n  sleep 5\ndone\nset -- \"$LORA_NAME\"\npython3 - /mnt/in/requests.jsonl /mnt/out/results.jsonl \"$@\" <<'PY'\nimport concurrent.futures, json, os, sys, urllib.error, urllib.request, uuid\n\nBASE = \"http://127.0.0.1:30000\"\nURLS = (\"/v1/chat/completions\", \"/v1/completions\")\nLORA = sys.argv[3] if len(sys.argv) > 3 else \"\"\nMODEL = os.environ[\"MODEL\"] + (\":\" + LORA if LORA else \"\")\nSCHEMA = json.load(open(sys.argv[4])) if len(sys.argv) > 4 else None\n\ndef text(body):\n    try:\n        c = body[\"choices\"][0]\n        return c[\"message\"][\"content\"] if \"message\" in c else c[\"text\"]\n    except (KeyError, IndexError, TypeError):\n        return None\n\ndef one(line):\n    out = {\"id\": \"batch_req_\" + uuid.uuid4().hex, \"custom_id\": None, \"response\": None, \"error\": None}\n    try:\n        req = json.loads(line)\n        out[\"custom_id\"] = req.get(\"custom_id\")\n    except ValueError as e:\n        out[\"error\"] = {\"code\": \"invalid_json\", \"message\": str(e)}\n        return out\n    if req.get(\"url\") not in URLS:\n        out[\"error\"] = {\"code\": \"unsupported_url\", \"message\": \"url %r is not one of %s\" % (req.get(\"url\"), \", \".join(URLS))}\n        return out\n    body = dict(req.get(\"body\") or {}, model=MODEL, stream=False)\n    if SCHEMA is not None and req[\"url\"] == \"/v1/chat/completions\":\n        body[\"response_format\"] = {\"type\": \"json_schema\", \"json_schema\": {\"name\": \"output\", \"schema\": SCHEMA, \"strict\": True}}\n    elif SCHEMA is not None:\n        body[\"json_schema\"] = json.dumps(SCHEMA)\n    http = urllib.request.Request(BASE + req[\"url\"], json.dumps(body).encode(), {\"Content-Type\": \"application/json\"})\n    try:\n        with urllib.request.urlopen(http, timeout=3600) as r:\n            status, raw = r.status, r.read()\n    except urllib.error.HTTPError as e:\n        status, raw = e.code, e.read()\n    except OSError as e:\n        out[\"error\"] = {\"code\": \"request_failed\", \"message\": str(e)}\n        return out\n    try:\n        parsed = json.loads(raw)\n    except ValueError:\n        parsed = {\"raw\": raw.decode(errors=\"replace\")}\n    if LORA and isinstance(parsed, dict) and \"model\" in parsed:\n        parsed[\"model\"] = LORA\n    out[\"response\"] = {\"status_code\": status, \"request_id\": out[\"id\"], \"body\": parsed}\n    return out\n\nwith open(sys.argv[1]) as f:\n    lines = [l for l in f if l.strip()]\nok = parsed = 0\nwith open(sys.argv[2], \"w\") as w, concurrent.futures.ThreadPoolExecutor(int(os.environ[\"CONCURRENCY\"])) as pool:\n    for res in pool.map(one, lines):\n        if res[\"response\"] is not None and res[\"response\"][\"status_code\"] == 200:\n            ok += 1\n            try:\n                json.loads(text(res[\"response\"][\"body\"]))\n                parsed += 1\n            except (TypeError, ValueError):\n                pass\n        w.write(json.dumps(res) + \"\\n\")\nprint(\"%d of %d requests succeeded\" % (ok, len(lines)), file=sys.stderr)\nif SCHEMA is not None:\n    print(\"%d of %d answers parse as JSON\" % (parsed, ok), file=sys.stderr)\nPY\n"
+      ],
+      "env": {
+        "MODEL": "Qwen/Qwen3-4B-Instruct-2507",
+        "MODEL_REVISION": "cdbee75f17c01a7cc42f958dc650907174af0554",
+        "MAX_MODEL_LEN": "8192",
+        "MAX_LORA_RANK": "64",
+        "LORA_NAME": "lora",
+        "CONCURRENCY": "64"
+      },
+      "sku": "a10g-24gb-x1",
+      "max_runtime_seconds": 3600,
+      "inputs": [
+        {
+          "mount": "/mnt/in",
+          "description": "requests.jsonl: one OpenAI batch line per request with url /v1/chat/completions or /v1/completions; the model field is ignored, the adapter applies to every line"
+        },
+        {
+          "mount": "/mnt/adapter",
+          "description": "adapter.tar.gz: a PEFT LoRA adapter directory (adapter_config.json, adapter_model.safetensors), as finetune-lora writes it"
+        }
+      ],
+      "outputs": [
+        {
+          "mount": "/mnt/out",
+          "description": "results.jsonl: one OpenAI batch result line per request, in input order, matched by custom_id, model = LORA_NAME; a line SGLang could not answer carries error instead of response"
+        }
+      ],
+      "overridable": [
+        "sku",
+        "providers",
+        "spec.env",
+        "spec.max_runtime_seconds"
+      ],
+      "available": true
+    },
+    {
+      "id": "batch-infer-sglang",
+      "title": "Batch chat completions with SGLang",
+      "description": "Runs an OpenAI batch file of /v1/chat/completions (or /v1/completions) requests through an SGLang server started inside the job and writes one result line per request, in the same shape as batch-infer-vllm. SGLang's RadixAttention reuses the KV cache of prefixes the lines share, so a batch with one long system prompt or few-shot block does that prefill once. Default model Qwen3-4B-Instruct-2507 (Apache-2.0), downloaded from Hugging Face at start.",
+      "image": "lmsysorg/sglang:v0.5.19-cu129-runtime@sha256:fe08f6f52bea380415792849a703d92279c86320f8c39283bcd04043f8b63c41",
+      "image_licence": "Apache-2.0",
+      "image_source": "https://hub.docker.com/r/lmsysorg/sglang (tag v0.5.19-cu129-runtime, pushed 2026-09-04, the newest CUDA 12.9 build; multi-arch index read from registry-1.docker.io on 2026-11-06; LICENSE at github.com/sgl-project/sglang/blob/v0.5.19/LICENSE)",
+      "command": [
+        "bash",
+        "-c",
+        "set -euo pipefail\n# SGLang has no offline batch-file runner like `vllm run-batch`, so the job starts\n# its OpenAI-compatible server on loopback and feeds it the file concurrently.\n# Concurrency is what lets the scheduler batch continuously and RadixAttention\n# reuse the KV cache of prefixes the lines share (system prompt, few-shot block).\npython3 -m sglang.launch_server --model-path \"$MODEL\" ${MODEL_REVISION:+--revision \"$MODEL_REVISION\"} --served-model-name \"$MODEL\" --context-length \"$MAX_MODEL_LEN\" --host 127.0.0.1 --port 30000 &\nSERVER=$!\ntrap 'kill \"$SERVER\" 2>/dev/null || true' EXIT\nuntil python3 -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:30000/health_generate\", timeout=10)' 2>/dev/null; do\n  kill -0 \"$SERVER\" 2>/dev/null || { echo 'sglang server exited before it was ready' >&2; wait \"$SERVER\"; exit 1; }\n  sleep 5\ndone\nset --\npython3 - /mnt/in/requests.jsonl /mnt/out/results.jsonl \"$@\" <<'PY'\nimport concurrent.futures, json, os, sys, urllib.error, urllib.request, uuid\n\nBASE = \"http://127.0.0.1:30000\"\nURLS = (\"/v1/chat/completions\", \"/v1/completions\")\nLORA = sys.argv[3] if len(sys.argv) > 3 else \"\"\nMODEL = os.environ[\"MODEL\"] + (\":\" + LORA if LORA else \"\")\nSCHEMA = json.load(open(sys.argv[4])) if len(sys.argv) > 4 else None\n\ndef text(body):\n    try:\n        c = body[\"choices\"][0]\n        return c[\"message\"][\"content\"] if \"message\" in c else c[\"text\"]\n    except (KeyError, IndexError, TypeError):\n        return None\n\ndef one(line):\n    out = {\"id\": \"batch_req_\" + uuid.uuid4().hex, \"custom_id\": None, \"response\": None, \"error\": None}\n    try:\n        req = json.loads(line)\n        out[\"custom_id\"] = req.get(\"custom_id\")\n    except ValueError as e:\n        out[\"error\"] = {\"code\": \"invalid_json\", \"message\": str(e)}\n        return out\n    if req.get(\"url\") not in URLS:\n        out[\"error\"] = {\"code\": \"unsupported_url\", \"message\": \"url %r is not one of %s\" % (req.get(\"url\"), \", \".join(URLS))}\n        return out\n    body = dict(req.get(\"body\") or {}, model=MODEL, stream=False)\n    if SCHEMA is not None and req[\"url\"] == \"/v1/chat/completions\":\n        body[\"response_format\"] = {\"type\": \"json_schema\", \"json_schema\": {\"name\": \"output\", \"schema\": SCHEMA, \"strict\": True}}\n    elif SCHEMA is not None:\n        body[\"json_schema\"] = json.dumps(SCHEMA)\n    http = urllib.request.Request(BASE + req[\"url\"], json.dumps(body).encode(), {\"Content-Type\": \"application/json\"})\n    try:\n        with urllib.request.urlopen(http, timeout=3600) as r:\n            status, raw = r.status, r.read()\n    except urllib.error.HTTPError as e:\n        status, raw = e.code, e.read()\n    except OSError as e:\n        out[\"error\"] = {\"code\": \"request_failed\", \"message\": str(e)}\n        return out\n    try:\n        parsed = json.loads(raw)\n    except ValueError:\n        parsed = {\"raw\": raw.decode(errors=\"replace\")}\n    if LORA and isinstance(parsed, dict) and \"model\" in parsed:\n        parsed[\"model\"] = LORA\n    out[\"response\"] = {\"status_code\": status, \"request_id\": out[\"id\"], \"body\": parsed}\n    return out\n\nwith open(sys.argv[1]) as f:\n    lines = [l for l in f if l.strip()]\nok = parsed = 0\nwith open(sys.argv[2], \"w\") as w, concurrent.futures.ThreadPoolExecutor(int(os.environ[\"CONCURRENCY\"])) as pool:\n    for res in pool.map(one, lines):\n        if res[\"response\"] is not None and res[\"response\"][\"status_code\"] == 200:\n            ok += 1\n            try:\n                json.loads(text(res[\"response\"][\"body\"]))\n                parsed += 1\n            except (TypeError, ValueError):\n                pass\n        w.write(json.dumps(res) + \"\\n\")\nprint(\"%d of %d requests succeeded\" % (ok, len(lines)), file=sys.stderr)\nif SCHEMA is not None:\n    print(\"%d of %d answers parse as JSON\" % (parsed, ok), file=sys.stderr)\nPY\n"
+      ],
+      "env": {
+        "MODEL": "Qwen/Qwen3-4B-Instruct-2507",
+        "MODEL_REVISION": "cdbee75f17c01a7cc42f958dc650907174af0554",
+        "MAX_MODEL_LEN": "8192",
+        "CONCURRENCY": "64"
+      },
+      "sku": "a10g-24gb-x1",
+      "max_runtime_seconds": 3600,
+      "inputs": [
+        {
+          "mount": "/mnt/in",
+          "description": "Directory containing requests.jsonl: one OpenAI batch line per request with url /v1/chat/completions or /v1/completions; the model field is replaced with MODEL"
+        }
+      ],
+      "outputs": [
+        {
+          "mount": "/mnt/out",
+          "description": "results.jsonl: one OpenAI batch result line per request, in input order, matched by custom_id; a line SGLang could not answer carries error instead of response"
         }
       ],
       "overridable": [

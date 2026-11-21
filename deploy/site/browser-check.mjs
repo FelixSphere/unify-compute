@@ -556,19 +556,20 @@ const pressKey = async (key, code, keyCode) => {
   for (const type of ['keyDown', 'keyUp'])
     await page('Input.dispatchKeyEvent', { type, key, code, windowsVirtualKeyCode: keyCode, ...(type === 'keyDown' && key === 'Enter' ? { text: '\r' } : {}) });
 };
-// Every state-changing call carries the CSRF token, and the token came from a
-// GET /me made just before it.
+// Every state-changing call carries the CSRF token, and the token came from
+// a GET /me made earlier on the page (since #131 the page reuses it and
+// re-fetches only on 403 csrf_failed, instead of a GET /me per action).
 const csrfChecked = (label, from) => {
   const calls = apiCalls.slice(from);
   const mutating = calls.filter((c) => c.method !== 'GET');
   const bad = mutating.filter((c) => {
-    const i = calls.indexOf(c);
-    const prior = calls.slice(0, i).reverse().find((p) => p.method === 'GET' && p.path === '/me');
+    const i = apiCalls.indexOf(c);
+    const prior = apiCalls.slice(0, i).reverse().find((p) => p.method === 'GET' && p.path === '/me');
     return c.headers['X-CSRF-Token'] !== CSRF || !prior;
   });
   check(
     mutating.length > 0 && bad.length === 0,
-    `${label}: ${mutating.map((c) => `${c.method} ${c.path}`).join(', ')} sent X-CSRF-Token from a fresh GET /me`,
+    `${label}: ${mutating.map((c) => `${c.method} ${c.path}`).join(', ')} sent X-CSRF-Token from the page's GET /me`,
     `${label}: CSRF missing or not re-fetched on ${bad.map((c) => `${c.method} ${c.path}`).join(', ') || '(no mutating call seen)'}`,
   );
 };
@@ -597,6 +598,11 @@ async function dashboardChecks() {
     'focal number in Space Grotesk 40px (W8: the first stat card, not a 64px hero)',
     `focal number is ${shellBox.metric} ${shellBox.metricFont}`,
   );
+  // Once the data is in, no placeholder may still be a shimmering skeleton
+  // (#136 shipped text lines that kept the skeleton after being filled).
+  await waitFor(`!!document.querySelector('#recent-jobs a[href^="/jobs/"]')`, 'overview data loaded');
+  const stillSkeleton = await evaluate(`[...document.querySelectorAll('main *')].filter((e) => getComputedStyle(e).animationName === 'uc-shimmer').map((e) => e.id || e.className || e.tagName)`);
+  check(stillSkeleton.length === 0, 'overview: no skeleton left once loaded', `overview: still a skeleton after load: ${stillSkeleton.join(', ')}`);
   check(
     (await text('#balance-sub')).includes('2.54'),
     'overview shows the held amount under the balance',
@@ -810,10 +816,10 @@ async function dashboardChecks() {
     'billing: focal action or cards wrong with top-ups enabled',
   );
   check(
-    (await evaluate(`[...document.querySelectorAll('#topups tbody tr')].map((tr) => [...tr.cells].map((c) => c.textContent).slice(1, 4).join('|')).join()`)) ===
-      '15.00|Added|View receipt' &&
+    (await evaluate(`[...document.querySelectorAll('#topups tbody tr')].map((tr) => [...tr.cells].map((c) => c.textContent).slice(1, 5).join('|')).join()`)) ===
+      '15.00|—|Added|View receipt' &&
       (await evaluate(`document.querySelector('#topups a')?.getAttribute('href')`)) === TOPUP_OLD.receipt_url,
-    'billing: top-ups listed with status and Stripe receipt link',
+    'billing: top-ups listed with bonus, status and Stripe receipt link',
     `billing: top-up rows: ${await evaluate(`document.querySelector('#topups')?.textContent`)}`,
   );
   await onePrimary('/billing');
@@ -1340,10 +1346,12 @@ try {
     'HubSpot loader duplicated or lost by navigation',
   );
 
-  // UI-STANDARD "Marketing header": Log in, then Sign up, on the right.
-  await setViewport(1280, 900, false);
+  // UI-STANDARD "Marketing header": Log in, then Sign up, on the right. The
+  // nav links are inline from 1360px: below that the eleven languages' labels
+  // do not fit beside the language menu (app/globals.css).
+  await setViewport(1440, 900, false);
   await load('/');
-  await waitFor(`!!document.querySelector(${JSON.stringify(COOKIE_LINK)})`, 'hydration at 1280');
+  await waitFor(`!!document.querySelector(${JSON.stringify(COOKIE_LINK)})`, 'hydration at 1440');
   for (const [href, text, cls] of [
     [LOGIN, 'Log in', '.nav-login'],
     [REGISTER, 'Sign up', '.button.primary'],
@@ -1352,14 +1360,14 @@ try {
     check(
       (await evaluate(visible(sel))) &&
         (await evaluate(`document.querySelector(${JSON.stringify(sel)}).textContent.trim()`)) === text,
-      `1280: header "${text}" visible → ${href}`,
-      `1280: header "${text}" link to ${href} missing or not visible`,
+      `1440: header "${text}" visible → ${href}`,
+      `1440: header "${text}" link to ${href} missing or not visible`,
     );
   }
   check(
     await evaluate(visible('header .nav-inline a[href="/start"]')),
-    '1280: header "Quick start" visible',
-    '1280: header "Quick start" link missing or not visible',
+    '1440: header "Quick start" visible',
+    '1440: header "Quick start" link missing or not visible',
   );
   await clickToStart('header .nav-inline a[href="/start"]', 'header "Quick start"');
   await back();
@@ -1372,8 +1380,8 @@ try {
   ]) {
     check(
       (await evaluate(`document.querySelector(${JSON.stringify(sel)})?.textContent.trim()`)) === text,
-      `1280: ${label} → ${sel.match(/href="([^"]+)"/)[1]}`,
-      `1280: ${label} link missing or mislabelled`,
+      `1440: ${label} → ${sel.match(/href="([^"]+)"/)[1]}`,
+      `1440: ${label} link missing or mislabelled`,
     );
   }
 
@@ -1457,6 +1465,36 @@ try {
     const line = await evaluate(COMPANY_LINE);
     const want = `${BRAND_LINE}\n${ENTITY_LINE}`;
     check(line === want, '/privacy footer names FelixSphere LLC under the brand line', `/privacy footer company line: ${JSON.stringify(line)}`);
+  }
+
+  // The eleven languages (UI-STANDARD "Languages"): the footer switcher keeps the
+  // visitor on the same page, the choice is remembered in fs_lang (no
+  // redirect is ever made from it), and Arabic is right-to-left with code
+  // left-to-right.
+  await load('/start');
+  await waitFor(`!!document.querySelector(${JSON.stringify(COOKIE_LINK)})`, 'hydration on /start');
+  await evaluate(`document.querySelector('footer a[hreflang="ar"]').click()`);
+  if (await waitFor(`location.pathname === '/ar/start' && document.readyState === 'complete'`, 'the Arabic /start')) {
+    check(
+      (await evaluate(`[document.documentElement.lang, document.documentElement.dir].join('|')`)) === 'ar|rtl',
+      '/ar/start is <html lang="ar" dir="rtl">',
+      '/ar/start is not lang="ar" dir="rtl"',
+    );
+    check(
+      await evaluate(`document.cookie.split('; ').includes('fs_lang=ar')`),
+      'language choice remembered in fs_lang',
+      'switching language did not set fs_lang=ar',
+    );
+    check(
+      (await evaluate(`getComputedStyle(document.querySelector('pre.code')).direction`)) === 'ltr',
+      '/ar/start code stays left-to-right',
+      '/ar/start code is not left-to-right',
+    );
+    check(
+      (await evaluate(`document.querySelector('footer a[aria-current="true"]')?.textContent`)) === 'العربية',
+      '/ar/start switcher marks العربية current',
+      '/ar/start switcher does not mark the current language',
+    );
   }
 
   await load('/does-not-exist');

@@ -19,7 +19,7 @@ import {
   wireToggles,
 } from './lib';
 import { dashboard } from './dashboard';
-import { esc } from './shell';
+import { esc, warm } from './shell';
 import { acceptInvitation } from './pages/accept-invitation';
 
 const PENDING_EMAIL = 'uc_pending_email';
@@ -231,6 +231,13 @@ const pages: Record<string, (form: HTMLFormElement | null) => void> = {
 
 pages['accept-invitation'] = (form) => void acceptInvitation(form);
 
+// Before the first render (the script blocks it): the sidebar's state, so a
+// collapsed sidebar never paints open first.
+try {
+  if (localStorage.getItem('uc_nav') === 'collapsed') document.documentElement.classList.add('nav-collapsed');
+} catch {}
+// The page's usual reads start now, beside the language and GET /me.
+if (document.body.classList.contains('app')) warm();
 await start();
 wireToggles();
 const page = document.body.dataset.page ?? '';

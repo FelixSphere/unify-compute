@@ -16,6 +16,7 @@
 package jobs
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -79,6 +80,9 @@ type Config struct {
 	Quota *quota.Enforcer
 	// Outputs uploads spec.outputs (internal/artifacts); nil refuses them.
 	Outputs backend.OutputUploader
+	// LogArchive reads a job's log after its cluster is gone (the run step
+	// uploads it with the outputs). Nil serves only what the cluster has.
+	LogArchive LogArchive
 	// Elect makes the service drive jobs (backend loop, ledger tick, cancels)
 	// only while it holds the store's worker lock, so two processes on one
 	// database never both do. Without it the service always drives, which
@@ -103,11 +107,18 @@ type sweeper interface {
 	Sweep(ctx context.Context) (int, error)
 }
 
+// LogArchive is internal/artifacts' read of a job's archived log.
+type LogArchive interface {
+	Log(ctx context.Context, jobID string) ([]byte, error)
+}
+
 type Service struct {
 	Store   *store.Store
 	Ledger  *ledger.Engine
 	Backend *backend.Backend
 	Events  *events.Worker
+
+	logArchive LogArchive
 
 	catalogue *sku.Catalogue
 	quota     *quota.Enforcer
@@ -149,7 +160,7 @@ func New(cfg Config) *Service {
 	s := &Service{
 		Store: cfg.Store, catalogue: cfg.Catalogue, quota: cfg.Quota, task: task, now: now, log: cfg.Log,
 		ended: map[string]backend.Event{}, stops: map[string]ledger.EndReason{}, elect: cfg.Elect,
-		mail: cfg.Mailer, notifier: cfg.Notifier,
+		mail: cfg.Mailer, notifier: cfg.Notifier, logArchive: cfg.LogArchive,
 	}
 	s.drive.Store(!cfg.Elect)
 	var biller ledger.Biller = cfg.Console
@@ -387,20 +398,51 @@ func (s *Service) endUntracked(ctx context.Context, id string, jobErr *store.Job
 	return ferr
 }
 
-// Logs copies what the backend can still read of the job's output. Nothing
-// is retained after teardown yet (backend.md open question 4), so a finished
-// or never-launched job has no logs.
+// Logs writes the job's output. A job not yet launched has none. A finished
+// one is served from its archived log (the run step uploads it with the
+// outputs), since its cluster is gone; a running one from its cluster, and
+// from the archive when the cluster cannot be read.
 func (s *Service) Logs(ctx context.Context, owner, id string, w interface{ Write([]byte) (int, error) }) error {
-	if _, err := s.Store.Get(ctx, owner, id); err != nil {
+	job, err := s.Store.Get(ctx, owner, id)
+	if err != nil {
 		return err
 	}
-	if s.Backend == nil {
+	switch {
+	case job.Status == store.StatusQueued || job.Status == store.StatusProvisioning:
 		return nil
+	case job.Status.Terminal():
+		return s.archivedLog(ctx, id, w, nil)
+	case s.Backend == nil:
+		return s.archivedLog(ctx, id, w, nil)
 	}
-	err := s.Backend.Logs(ctx, id, w)
+	var live bytes.Buffer
+	err = s.Backend.Logs(ctx, id, &live)
+	if err == nil && live.Len() > 0 {
+		_, err = w.Write(live.Bytes())
+		return err
+	}
 	if errors.Is(err, backend.ErrUnknownJob) {
-		return nil
+		err = nil
 	}
+	return s.archivedLog(ctx, id, w, err)
+}
+
+// archivedLog writes the archive, or returns fallback when there is none.
+func (s *Service) archivedLog(ctx context.Context, id string, w interface{ Write([]byte) (int, error) }, fallback error) error {
+	if s.logArchive == nil {
+		return fallback
+	}
+	b, err := s.logArchive.Log(ctx, id)
+	if err != nil {
+		if fallback != nil {
+			return fallback
+		}
+		return err
+	}
+	if len(b) == 0 {
+		return fallback
+	}
+	_, err = w.Write(b)
 	return err
 }
 

@@ -1,5 +1,5 @@
 // Package demand records what customers asked for and could not have yet
-// (ADR-0013): a GPU whose providers this deployment has not enabled. The
+// (ADR-0015): a GPU whose providers this deployment has not enabled. The
 // row is the signal to provision; the operator email is the nudge.
 package demand
 
@@ -62,7 +62,7 @@ func (s *Service) Record(ctx context.Context, owner, skuID string) {
 			return s.Mailer.Operator(ctx, to, mailer.OperatorNotice{
 				Title:  "GPU demand: " + skuID,
 				Body:   "A customer submitted a job for a GPU this deployment cannot launch yet. The submit was refused with gpu_not_provisioned and recorded in gpu_demand.",
-				Action: "Provision it: raise the quota or enable the upstream for this SKU (ADR-0006, ADR-0013), then tell the customer.",
+				Action: "Provision it: raise the quota or enable the upstream for this SKU (ADR-0006, ADR-0015), then tell the customer.",
 				Facts:  [][2]string{{"SKU", skuID}, {"Requested by", owner}, {"Day (UTC)", day}},
 			})
 		})

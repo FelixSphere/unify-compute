@@ -74,7 +74,7 @@ type Server struct {
 	Now func() time.Time
 
 	// Demand, when set, records a submit for a SKU none of whose providers
-	// is enabled here (ADR-0013): the customer gets 503 gpu_not_provisioned,
+	// is enabled here (ADR-0015): the customer gets 503 gpu_not_provisioned,
 	// the operator a row and an email.
 	Demand DemandRecorder
 
@@ -460,7 +460,7 @@ func clampRuntime(v int64) int {
 }
 
 // DemandRecorder is told of a submit for a GPU this deployment cannot launch
-// yet (ADR-0013). It must not block: the customer has already been answered.
+// yet (ADR-0015). It must not block: the customer has already been answered.
 type DemandRecorder interface {
 	Record(ctx context.Context, owner, skuID string)
 }
@@ -476,7 +476,7 @@ func (s *Server) place(w http.ResponseWriter, r *http.Request, sub submission, o
 		case errors.Is(err, upstream.ErrNoEnabledProvider) && len(sub.providers) == 0 && len(s.Upstreams.Clouds()) > 0:
 			// The SKU is listed and the customer asked for nothing special;
 			// we have upstreams, just not this SKU's. That is demand
-			// (ADR-0013), not a misconfiguration.
+			// (ADR-0015), not a misconfiguration.
 			if s.Demand != nil {
 				s.Demand.Record(r.Context(), owner, sub.item.ID)
 			}

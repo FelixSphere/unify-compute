@@ -1655,6 +1655,7 @@
                 "type": "string",
                 "enum": [
                   "topup",
+                  "topup_bonus",
                   "hold",
                   "extend",
                   "settle",
@@ -2958,6 +2959,216 @@
                 }
               }
             },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/topups/{id}/refund-request": {
+      "post": {
+        "operationId": "requestRefund",
+        "summary": "Ask for a refund of a top-up to its card",
+        "description": "Records a refund request and emails the operator (ADR-0013 §2). Nothing is refunded here: the operator refunds to the original card with `admin topup refund`, and the refund, once Stripe's charge.refunded is applied, closes the request and emails the customer; or the operator declines it with a message that is emailed. amount_usd defaults to everything still refundable. A refund takes its share of the top-up's bonus with it and must fit in the unused balance; the operator checks that. Writes refund_requested. At most one open request per top-up; 5 requests per account per 24 hours. Owners and admins only.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "amount_usd": {
+                    "type": "string",
+                    "description": "USD with at most 2 decimals; at most refundable_usd."
+                  },
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 500
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The open request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RefundRequest"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_amount (not an amount, zero, or more than refundable_usd), invalid_reason (over 500 characters), malformed_body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "role_required (permission_error): a member; only owners and admins ask for refunds. csrf_failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no such top-up in this account, or Host is not the app host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "refund_request_open: this top-up already has an open request. topup_not_refundable: nothing is left to refund (not credited, fully refunded, or disputed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than 5 refund requests from this account in 24 hours. Always with Retry-After (seconds).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/refund-requests/{id}": {
+      "delete": {
+        "operationId": "cancelRefundRequest",
+        "summary": "Withdraw an open refund request",
+        "description": "Only the account's own open request; owners and admins. Writes refund_request_cancelled.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Cancelled."
+          },
+          "401": {
+            "description": "session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "role_required (permission_error): a member. csrf_failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no such request in this account, or Host is not the app host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "refund_request_closed: already refunded, declined or cancelled.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4853,6 +5064,454 @@
           }
         }
       }
+    },
+    "/dashboard/v1/support/conversations": {
+      "get": {
+        "operationId": "listSupportConversations",
+        "summary": "The signed-in user's support conversations",
+        "description": "Newest first, without messages; each carries a preview of its newest message. A conversation belongs to the user who started it, not to the account: other members do not see it (ADR-0014). Read-limited.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The conversations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportConversationList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: the account's read limit. Always with Retry-After (seconds).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "not_implemented: this deployment has no support conversations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "startSupportConversation",
+        "summary": "Start a support conversation",
+        "description": "Opens the user's conversation with its first message; it waits for a person (state open) and the operator address is emailed that it does, without the text. A user has at most one conversation that is not closed. Any signed-in user may write, whatever the account's status.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "message"
+                ],
+                "properties": {
+                  "message": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000,
+                    "description": "Plain text; surrounding whitespace is trimmed."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Started, with its first message.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportConversation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_message (param message): empty, or longer than 4000 characters; malformed_body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "csrf_failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "conversation_open: the user already has a conversation that is not closed; write there.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: 20 messages an hour per user. Always with Retry-After (seconds).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "not_implemented: this deployment has no support conversations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/support/conversations/{id}": {
+      "get": {
+        "operationId": "getSupportConversation",
+        "summary": "One conversation with its messages",
+        "description": "Messages oldest first. Staff messages carry from_staff and no author. Read-limited.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The conversation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportConversation"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no such conversation of this user, or Host is not the app host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: the account's read limit. Always with Retry-After (seconds).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "not_implemented: this deployment has no support conversations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/support/conversations/{id}/messages": {
+      "post": {
+        "operationId": "writeSupportMessage",
+        "summary": "Write in a conversation",
+        "description": "Adds the user's message; the conversation waits for a person again (state open). The operator address is emailed when it was not already waiting.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "message"
+                ],
+                "properties": {
+                  "message": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000,
+                    "description": "Plain text; surrounding whitespace is trimmed."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The message.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportMessage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_message (param message): empty, or longer than 4000 characters; malformed_body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "csrf_failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no such conversation of this user, or Host is not the app host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "conversation_closed: start a new conversation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: 20 messages an hour per user. Always with Retry-After (seconds).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "not_implemented: this deployment has no support conversations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dashboard/v1/support/conversations/{id}/close": {
+      "post": {
+        "operationId": "closeSupportConversation",
+        "summary": "Close a conversation",
+        "description": "Ends the user's own conversation; closing a closed one answers the same 200. The next message starts a new conversation.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Closed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportConversation"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "session_required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "csrf_failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no such conversation of this user, or Host is not the app host.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "not_implemented: this deployment has no support conversations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -5160,6 +5819,7 @@
             "type": "string",
             "enum": [
               "topup",
+              "topup_bonus",
               "hold",
               "extend",
               "settle",
@@ -5418,7 +6078,10 @@
           "created_at",
           "paid_at",
           "receipt_url",
-          "refunded_usd"
+          "refunded_usd",
+          "bonus_usd",
+          "refundable_usd",
+          "refund_request"
         ],
         "properties": {
           "id": {
@@ -5444,7 +6107,7 @@
               "disputed",
               "lost"
             ],
-            "description": "open until the webhook says otherwise; refunded, partially_refunded, disputed and lost come with B2."
+            "description": "open until the webhook says otherwise; refunded and partially_refunded follow a refund to the card, disputed and lost a dispute (B2)."
           },
           "created_at": {
             "type": "integer"
@@ -5465,6 +6128,27 @@
           "refunded_usd": {
             "type": "string",
             "pattern": "^[0-9]+\\.[0-9]{2}$"
+          },
+          "bonus_usd": {
+            "type": "string",
+            "pattern": "^[0-9]+\\.[0-9]{2}$",
+            "description": "Bonus credit this top-up earns (ADR-0013 §1: 3% from USD 50, 5% at USD 100), fixed when it was created and credited with the payment. No cash value; a refund or dispute takes back the same share of it."
+          },
+          "refundable_usd": {
+            "type": "string",
+            "pattern": "^[0-9]+\\.[0-9]{2}$",
+            "description": "What can still be asked back to the card: the amount less refunds and disputes; 0.00 unless the top-up is credited or partially_refunded."
+          },
+          "refund_request": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RefundRequest"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The open refund request for this top-up if there is one, otherwise the newest, whatever its status."
           }
         }
       },
@@ -5475,7 +6159,8 @@
           "object",
           "data",
           "has_more",
-          "topups_enabled"
+          "topups_enabled",
+          "bonus_tiers"
         ],
         "properties": {
           "object": {
@@ -5493,6 +6178,28 @@
           "topups_enabled": {
             "type": "boolean",
             "description": "Whether POST /topups can work in this deployment (Stripe keys set and valid for its environment)."
+          },
+          "bonus_tiers": {
+            "type": "array",
+            "description": "ADR-0013 §1's tiers, highest first, so the form can show the credit a payment earns before the customer pays.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "min_usd",
+                "percent"
+              ],
+              "properties": {
+                "min_usd": {
+                  "type": "string",
+                  "pattern": "^[0-9]+\\.[0-9]{2}$"
+                },
+                "percent": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
           }
         }
       },
@@ -5503,7 +6210,8 @@
           "id",
           "object",
           "status",
-          "checkout_url"
+          "checkout_url",
+          "bonus_usd"
         ],
         "properties": {
           "id": {
@@ -5520,6 +6228,65 @@
             "type": "string",
             "format": "uri",
             "description": "Stripe's hosted Checkout page (checkout.stripe.com)."
+          },
+          "bonus_usd": {
+            "type": "string",
+            "pattern": "^[0-9]+\\.[0-9]{2}$",
+            "description": "The bonus credit the payment will add with it; the card is charged amount_usd only."
+          }
+        }
+      },
+      "RefundRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "object",
+          "topup_id",
+          "amount_usd",
+          "status",
+          "resolution",
+          "created_at",
+          "resolved_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^rr_[0-9A-HJKMNP-TV-Z]{26}$"
+          },
+          "object": {
+            "const": "compute.refund_request"
+          },
+          "topup_id": {
+            "type": "string",
+            "pattern": "^tu_[0-9A-HJKMNP-TV-Z]{26}$"
+          },
+          "amount_usd": {
+            "type": "string",
+            "pattern": "^[0-9]+\\.[0-9]{2}$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "refunded",
+              "declined",
+              "cancelled"
+            ],
+            "description": "open until a refund of the top-up is applied (refunded), the operator declines it, or the customer cancels it."
+          },
+          "resolution": {
+            "type": "string",
+            "description": "The operator's message when declined; empty otherwise."
+          },
+          "created_at": {
+            "type": "integer"
+          },
+          "resolved_at": {
+            "type": [
+              "integer",
+              "null"
+            ]
           }
         }
       },
@@ -5844,6 +6611,118 @@
           "created_at",
           "expires_at"
         ]
+      },
+      "SupportMessage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "object",
+          "from_staff",
+          "body",
+          "created_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Increases with time across all conversations."
+          },
+          "object": {
+            "const": "compute.support_message"
+          },
+          "from_staff": {
+            "type": "boolean",
+            "description": "true for the Unify Compute team's reply, false for the user's own message."
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "created_at": {
+            "type": "integer",
+            "description": "Unix seconds."
+          }
+        }
+      },
+      "SupportConversation": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "object",
+          "state",
+          "preview",
+          "created_at",
+          "updated_at",
+          "closed_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^sc_[0-9A-HJKMNP-TV-Z]{26}$"
+          },
+          "object": {
+            "const": "compute.support_conversation"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "open",
+              "answered",
+              "closed"
+            ],
+            "description": "open: the newest message is the user's and waits for a person. answered: the newest message is staff's. closed: ended by either side."
+          },
+          "preview": {
+            "type": "string",
+            "description": "The first 140 characters of the newest message."
+          },
+          "created_at": {
+            "type": "integer",
+            "description": "Unix seconds."
+          },
+          "updated_at": {
+            "type": "integer",
+            "description": "Unix seconds of the newest message or the close."
+          },
+          "closed_at": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SupportMessage"
+            },
+            "description": "Oldest first. Present on a single conversation, absent in the list."
+          }
+        }
+      },
+      "SupportConversationList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "object",
+          "data",
+          "has_more"
+        ],
+        "properties": {
+          "object": {
+            "const": "list"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SupportConversation"
+            }
+          },
+          "has_more": {
+            "const": false
+          }
+        }
       }
     }
   }

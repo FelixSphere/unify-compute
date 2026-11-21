@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <!-- @head -->
+    <title>Support — Unify Compute</title>
+    <link rel="stylesheet" href="/src/app.css" />
+    <script type="module" blocking="render" src="/src/main.ts"></script>
+  </head>
+  <body class="app" data-page="support" data-i18n-title="support.page-title">
+    <!-- @shell:support -->
+    <main class="content" id="main" tabindex="-1">
+      <!-- @form-error -->
+      <div class="page-head">
+        <div>
+          <h1 data-i18n="nav.support">Support</h1>
+          <p class="page-desc" data-i18n="support.lead">Write to the Unify Compute team. A person reads every message and replies here; we email you when there is a reply.</p>
+        </div>
+      </div>
+
+      <section class="card" aria-labelledby="conv-title">
+        <div class="section-head">
+          <h2 id="conv-title" data-i18n="support.conversation">Conversation</h2>
+          <p class="muted" id="conv-state"></p>
+        </div>
+        <p class="status-line" id="conv-status" role="status"></p>
+        <div id="thread" aria-live="polite"><p class="muted" data-i18n="common.loading-conversation">Loading your conversation…</p></div>
+        <form id="write-form" novalidate hidden>
+          <div class="field">
+            <label for="message" data-i18n="support.message-label">Your message</label>
+            <textarea class="chat-input" id="message" name="message" rows="4" maxlength="4000" aria-describedby="message-hint message-error"></textarea>
+            <p class="hint" id="message-hint" data-i18n="support.message-hint">Up to 4,000 characters. Don't include passwords or API keys.</p>
+            <p class="field-error" id="message-error" hidden></p>
+          </div>
+          <div class="actions">
+            <button class="primary" type="submit" data-i18n="support.send">Send</button>
+            <button class="ghost" type="button" id="conv-close" hidden data-i18n="support.close">Close conversation</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="section" id="earlier" aria-labelledby="earlier-title" hidden>
+        <div class="section-head">
+          <h2 id="earlier-title" data-i18n="support.earlier">Earlier conversations</h2>
+        </div>
+        <div id="earlier-list"></div>
+      </section>
+
+      <section class="card" id="past" aria-labelledby="past-title" hidden>
+        <h2 id="past-title" tabindex="-1"></h2>
+        <div id="past-thread"></div>
+      </section>
+    </main>
+  </body>
+</html>

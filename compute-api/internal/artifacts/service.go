@@ -298,6 +298,33 @@ type Listing struct {
 	Files     []Download
 }
 
+// MaxLogBytes is how much of a job's archived log Log returns: the end of it,
+// where a failure is.
+const MaxLogBytes = 4 << 20
+
+// Log returns the job's archived log (LogFile, uploaded by the run step), at
+// most its last MaxLogBytes; nil when the job left none.
+func (s *Service) Log(ctx context.Context, jobID string) ([]byte, error) {
+	if !jobIDPattern.MatchString(jobID) {
+		return nil, ErrBadPath
+	}
+	inst, err := s.cfg.Creds.Credentials(ctx)
+	if err != nil {
+		return nil, err
+	}
+	b, err := s.cfg.Client.Get(ctx, inst, s.cfg.Bucket, prefix(jobID)+strings.TrimPrefix(LogFile, "/"))
+	if awsv4.IsNotFound(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if len(b) > MaxLogBytes {
+		b = append([]byte("[unify-compute: log truncated to its last 4 MiB]\n"), b[len(b)-MaxLogBytes:]...)
+	}
+	return b, nil
+}
+
 // List reads the job's manifest and signs a download URL for every file.
 func (s *Service) List(ctx context.Context, jobID string) (Listing, error) {
 	if !jobIDPattern.MatchString(jobID) {

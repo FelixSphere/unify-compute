@@ -31,6 +31,7 @@ import (
 	"github.com/FelixSphere/unify-compute/compute-api/internal/quota"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/sku"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/store"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/support"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/template"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/upstream"
 )
@@ -225,7 +226,7 @@ func main() {
 			Quota: &quota.Enforcer{Config: quotas, Catalogue: cat, Usage: st, Platform: platform},
 		}
 		if art != nil {
-			cfg.Outputs = art
+			cfg.Outputs, cfg.LogArchive = art, art
 		}
 		var local *billing.Local
 		var notes *notify.Notifier
@@ -247,7 +248,7 @@ func main() {
 		svc = jobs.New(cfg)
 		handler.JobService, handler.Events, handler.Jobs = svc, st, st
 		// A submit for a GPU this deployment cannot launch yet is demand
-		// (ADR-0013): a row, and an email to the operator once a day.
+		// (ADR-0015): a row, and an email to the operator once a day.
 		handler.Demand = &demand.Service{Store: st, Mailer: mail, Notifier: notes, OperatorEmail: os.Getenv("OPERATOR_EMAIL"), Log: log}
 		var acc *accounts.Service
 		if backendName == backendLocal {
@@ -271,7 +272,8 @@ func main() {
 			lst := listings.New(st.Pool(), cat, platform.MaxRuntimeSeconds, templates, os.Getenv("ENVIRONMENT"), nil)
 			handler.Listings = lst
 			dash, err = dashboard.New(dashboard.Config{Accounts: acc, Mailer: mail, AppOrigin: os.Getenv("APP_ORIGIN"), Log: log,
-				Jobs: handler.AccountJobs(), Market: handler.AccountJobs(), Ledger: local, Payments: pay, Listings: lst, Notifier: notes})
+				Jobs: handler.AccountJobs(), Market: handler.AccountJobs(), Ledger: local, Payments: pay, Listings: lst, Notifier: notes,
+				Support: support.New(st.Pool(), supportMailer(mail), os.Getenv("OPERATOR_EMAIL"), nil)})
 			if err != nil {
 				log.Error("dashboard", "err", err)
 				os.Exit(1)
@@ -495,11 +497,18 @@ func runAdmin(args []string) int {
 	// applies it. Keys that the service would refuse are refused here too.
 	if os.Getenv("ACCOUNTS_BACKEND") == backendLocal {
 		set := payments.SettingsFromEnv(os.Getenv)
-		cfg := payments.Config{DB: st.Pool(), Accounts: cli.Accounts, Billing: cli.Biller, Settings: set, Log: quiet}
+		cfg := payments.Config{DB: st.Pool(), Accounts: cli.Accounts, Billing: cli.Biller, Settings: set, Log: quiet,
+			OperatorEmail: os.Getenv("OPERATOR_EMAIL")}
+		// A declined refund request emails the customer from here.
+		if mail != nil {
+			cfg.Mailer = mail
+		}
 		if set.Configured() && set.Check() == nil {
 			cfg.Stripe = &payments.Stripe{Key: set.SecretKey, HTTP: &http.Client{Timeout: 20 * time.Second}}
 		}
 		cli.Payments = payments.New(cfg)
+		// A staff reply emails the customer from here.
+		cli.Support, cli.In = support.New(st.Pool(), supportMailer(mail), os.Getenv("OPERATOR_EMAIL"), nil), os.Stdin
 	}
 	err = cli.Run(ctx, args)
 	switch {
@@ -512,6 +521,14 @@ func runAdmin(args []string) int {
 		fmt.Fprintln(os.Stderr, "compute-api admin:", err)
 		return 1
 	}
+}
+
+// supportMailer keeps a nil *mailer.Mailer from becoming a non-nil interface.
+func supportMailer(m *mailer.Mailer) support.Mailer {
+	if m == nil {
+		return nil
+	}
+	return m
 }
 
 // operator names who ran an admin command for the audit trail: the person

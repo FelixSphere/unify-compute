@@ -77,14 +77,46 @@ type lockedTopup struct {
 	id                         string
 	accountID                  int64
 	amount, refunded, disputed int64
+	bonus, bonusReversed       int64
 	status                     string
 }
 
 func lockTopup(ctx context.Context, tx pgx.Tx, id string) (lockedTopup, error) {
 	t := lockedTopup{id: id}
-	err := tx.QueryRow(ctx, `SELECT account_id, amount_cents, refunded_cents, disputed_cents, status FROM topups WHERE id = $1 FOR UPDATE`, id).
-		Scan(&t.accountID, &t.amount, &t.refunded, &t.disputed, &t.status)
+	err := tx.QueryRow(ctx, `SELECT account_id, amount_cents, refunded_cents, disputed_cents, bonus_cents, bonus_reversed_cents, status
+		FROM topups WHERE id = $1 FOR UPDATE`, id).
+		Scan(&t.accountID, &t.amount, &t.refunded, &t.disputed, &t.bonus, &t.bonusReversed, &t.status)
 	return t, err
+}
+
+// bonusShare is how much of a top-up's bonus goes with refunded plus
+// disputed cents of it (ADR-0013 §3): the same proportion, rounded down,
+// and all of it once nothing of the payment is left. Computed on running
+// totals, so partial refunds never drift by rounding.
+func bonusShare(amount, bonus, gone int64) int64 {
+	if amount <= 0 || bonus == 0 {
+		return 0
+	}
+	if gone >= amount {
+		return bonus
+	}
+	return bonus * gone / amount
+}
+
+// takeBonus debits the bonus that refunded plus disputed cents now carry
+// beyond what was already taken back, and answers how much it took. Like the
+// refund or dispute it goes with, it may take available below zero.
+func (s *Service) takeBonus(ctx context.Context, tx pgx.Tx, t lockedTopup, refunded, disputed int64, key string, detail map[string]any) (int64, error) {
+	take := bonusShare(t.amount, t.bonus, refunded+disputed) - t.bonusReversed
+	if take <= 0 {
+		return 0, nil
+	}
+	if _, err := s.bill.ReverseTx(ctx, tx, billing.Reversal{AccountID: t.accountID, Kind: "topup_bonus", Quota: -take * quotaPerCent,
+		RefType: "topup", RefID: t.id, Idempotency: key, Detail: detail}); err != nil {
+		return 0, err
+	}
+	_, err := tx.Exec(ctx, `UPDATE topups SET bonus_reversed_cents = bonus_reversed_cents + $2 WHERE id = $1`, t.id, take)
+	return take, err
 }
 
 // settledStatus is what a paid top-up is called once no dispute is open on
@@ -151,6 +183,16 @@ func (s *Service) applyRefund(ctx context.Context, tx pgx.Tx, ev event, ref char
 	if err != nil {
 		return "", err
 	}
+	bonus, err := s.takeBonus(ctx, tx, t, ref.AmountRefunded, t.disputed, fmt.Sprintf("topup_bonus_reversal:%s:refund:%d", t.id, ref.AmountRefunded),
+		map[string]any{"event": ev.ID, "refunded_total_cents": ref.AmountRefunded})
+	if err != nil {
+		return "", err
+	}
+	if bonus > 0 {
+		if bal, err = s.bill.Balance(ctx, t.accountID); err != nil {
+			return "", err
+		}
+	}
 	status := t.status
 	if status != StatusDisputed && status != StatusLost {
 		status = settledStatus(t.amount, ref.AmountRefunded)
@@ -159,14 +201,23 @@ func (s *Service) applyRefund(ctx context.Context, tx pgx.Tx, ev event, ref char
 		return "", err
 	}
 	now := s.now()
+	// Any refund of the top-up answers its open request, whatever amount
+	// was asked: the operator decided how much.
+	if _, err := tx.Exec(ctx, `UPDATE refund_requests SET status = 'refunded', refund_event = $2, resolved_at = $3
+		WHERE topup_id = $1 AND status = 'open'`, t.id, ev.ID, now); err != nil {
+		return "", err
+	}
 	if _, err := s.acc.AuditTx(ctx, tx, accounts.AuditEvent{ActorType: accounts.ActorStripe, ActorID: ev.ID, AccountID: t.accountID,
 		Action: accounts.ActionRefund, Detail: map[string]any{"stage": "applied", "topup_id": t.id, "charge": ref.ID,
-			"amount_usd": CentsUSD(int(delta)), "refunded_total_usd": CentsUSD(int(ref.AmountRefunded)),
+			"amount_usd": CentsUSD(int(delta)), "bonus_reversed_usd": CentsUSD(int(bonus)), "refunded_total_usd": CentsUSD(int(ref.AmountRefunded)),
 			"available_after_usd": billing.USD(bal.Available)}}); err != nil {
 		return "", err
 	}
-	if err := s.queueAccount(ctx, tx, ev.ID, mailRefundIssued, t.accountID, mailer.Refund{TopupID: t.id, AmountUSD: CentsUSD(int(delta)),
-		TopupAmountUSD: CentsUSD(int(t.amount)), AvailableUSD: billing.USD(bal.Available), At: now}); err != nil {
+	r := mailer.Refund{TopupID: t.id, AmountUSD: CentsUSD(int(delta)), TopupAmountUSD: CentsUSD(int(t.amount)), AvailableUSD: billing.USD(bal.Available), At: now}
+	if bonus > 0 {
+		r.BonusReversedUSD = CentsUSD(int(bonus))
+	}
+	if err := s.queueAccount(ctx, tx, ev.ID, mailRefundIssued, t.accountID, r); err != nil {
 		return "", err
 	}
 	if bal.Available < 0 {
@@ -216,14 +267,24 @@ func (s *Service) openDispute(ctx context.Context, tx pgx.Tx, ev event, d charge
 		t.id, d.Amount, StatusDisputed); err != nil {
 		return nil, err
 	}
+	bonus, err := s.takeBonus(ctx, tx, t, t.refunded, t.disputed+d.Amount, "topup_bonus_reversal:"+d.ID,
+		map[string]any{"dispute": d.ID, "event": ev.ID})
+	if err != nil {
+		return nil, err
+	}
+	if bonus > 0 {
+		if bal, err = s.bill.Balance(ctx, t.accountID); err != nil {
+			return nil, err
+		}
+	}
 	tag, err := tx.Exec(ctx, `UPDATE accounts SET status = $2, suspended_reason = 'dispute' WHERE id = $1 AND status = $3`,
 		t.accountID, accounts.AccountSuspended, accounts.AccountActive)
 	if err != nil {
 		return nil, err
 	}
 	suspended := tag.RowsAffected() == 1
-	if _, err := tx.Exec(ctx, `INSERT INTO topup_disputes (id, topup_id, account_id, amount_cents, reason, suspended_account, opened_event_id, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, d.ID, t.id, t.accountID, d.Amount, d.Reason, suspended, ev.ID, now); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO topup_disputes (id, topup_id, account_id, amount_cents, bonus_cents, reason, suspended_account, opened_event_id, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, d.ID, t.id, t.accountID, d.Amount, bonus, d.Reason, suspended, ev.ID, now); err != nil {
 		return nil, err
 	}
 	audit := func(action string, detail map[string]any) error {
@@ -282,12 +343,12 @@ func (s *Service) applyDisputeClosed(ctx context.Context, tx pgx.Tx, ev event, d
 		return OutcomeNoChange, nil, nil
 	}
 	var row struct {
-		status    string
-		amount    int64
-		suspended bool
+		status        string
+		amount, bonus int64
+		suspended     bool
 	}
-	err := tx.QueryRow(ctx, `SELECT status, amount_cents, suspended_account FROM topup_disputes WHERE id = $1 FOR UPDATE`, d.ID).
-		Scan(&row.status, &row.amount, &row.suspended)
+	err := tx.QueryRow(ctx, `SELECT status, amount_cents, bonus_cents, suspended_account FROM topup_disputes WHERE id = $1 FOR UPDATE`, d.ID).
+		Scan(&row.status, &row.amount, &row.bonus, &row.suspended)
 	var eff *chargeEffects
 	switch {
 	case errors.Is(err, pgx.ErrNoRows) && won:
@@ -300,6 +361,9 @@ func (s *Service) applyDisputeClosed(ctx context.Context, tx pgx.Tx, ev event, d
 			return "", nil, err
 		}
 		row.status, row.amount = disputeOpen, d.Amount
+		if err := tx.QueryRow(ctx, `SELECT bonus_cents FROM topup_disputes WHERE id = $1`, d.ID).Scan(&row.bonus); err != nil {
+			return "", nil, err
+		}
 	case err != nil:
 		return "", nil, err
 	}
@@ -319,6 +383,18 @@ func (s *Service) applyDisputeClosed(ctx context.Context, tx pgx.Tx, ev event, d
 			RefType: "dispute", RefID: d.ID, Idempotency: "dispute_reversal:" + d.ID,
 			Detail: map[string]any{"topup_id": t.id, "event": ev.ID}}); err != nil {
 			return "", nil, err
+		}
+		// The bonus this dispute took back comes back with the money.
+		if row.bonus > 0 {
+			if bal, err = s.bill.ReverseTx(ctx, tx, billing.Reversal{AccountID: t.accountID, Kind: "topup_bonus", Quota: row.bonus * quotaPerCent,
+				RefType: "dispute", RefID: d.ID, Idempotency: "topup_bonus_restore:" + d.ID,
+				Detail: map[string]any{"topup_id": t.id, "event": ev.ID}}); err != nil {
+				return "", nil, err
+			}
+			if _, err := tx.Exec(ctx, `UPDATE topups SET bonus_reversed_cents = GREATEST(bonus_reversed_cents - $2, 0) WHERE id = $1`,
+				t.id, row.bonus); err != nil {
+				return "", nil, err
+			}
 		}
 		var stillOpen bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM topup_disputes WHERE topup_id = $1 AND status = 'open')`, t.id).Scan(&stillOpen); err != nil {

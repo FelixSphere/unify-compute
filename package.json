@@ -7,8 +7,9 @@
   },
   "scripts": {
     "dev": "vinext dev",
-    "build": "vinext build && npm run build:app",
+    "build": "vinext build && node scripts/site-sitemap.mjs && npm run build:app",
     "lint": "oxlint",
+    "check:i18n": "node scripts/check-site-i18n.mjs",
     "format": "oxfmt",
     "build:app": "vite build --config dashboard/vite.config.ts"
   },

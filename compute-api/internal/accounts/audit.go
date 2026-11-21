@@ -40,6 +40,9 @@ const (
 	ActionTopupCreated      = "topup_created"
 	ActionTopupCredited     = "topup_credited"
 	ActionRefund            = "refund"
+	ActionRefundRequested   = "refund_requested"
+	ActionRefundCancelled   = "refund_request_cancelled"
+	ActionRefundDeclined    = "refund_request_declined"
 	ActionDisputeOpened     = "dispute_opened"
 	ActionDisputeClosed     = "dispute_closed"
 	ActionAccountSuspended  = "account_suspended"
@@ -50,6 +53,8 @@ const (
 	ActionAdminDebit        = "admin_debit"
 	ActionExport            = "export"
 	ActionAccountClosed     = "account_closed"
+	ActionSupportReplied    = "support_replied"
+	ActionSupportClosed     = "support_closed"
 )
 
 // ErrReasonRequired: every admin action carries a reason. The table refuses

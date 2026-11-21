@@ -164,7 +164,7 @@ func TestShippedCatalogueHasPlacementForAvailableSKUs(t *testing.T) {
 	if _, ok := c.Clouds()["aws"]; !ok {
 		t.Fatal("first upstream is AWS (ADR-0006); the shipped catalogue must reference it")
 	}
-	// ADR-0013: every listed SKU may be chosen; which of them launch is the
+	// ADR-0015: every listed SKU may be chosen; which of them launch is the
 	// deployment's UPSTREAMS. Each must still say where it could run.
 	for _, s := range c.SKUs {
 		if s.Available && (s.Tier == "" || len(s.Providers) == 0) {

@@ -19,7 +19,7 @@ func (d *demandSpy) Record(_ context.Context, owner, skuID string) {
 }
 
 // A listed SKU none of whose providers this deployment has enabled is
-// demand (ADR-0013): refused as gpu_not_provisioned and recorded, while a
+// demand (ADR-0015): refused as gpu_not_provisioned and recorded, while a
 // customer who names a disabled provider still gets upstream_unavailable
 // (server_test.go, "provider offered but disabled").
 func TestUnprovisionedSKUIsRecordedAsDemand(t *testing.T) {

@@ -102,6 +102,12 @@ this list does not repeat image digests, because they go stale here first.
   monthly budget (`deploy/aws/shared/gpu-budget`, action
   `b4302f8f-c1df-40b6-8157-d71a203ae18a`) that denies new launches at 100%
   by itself (dry run proven 2026-10-03).
+- Support conversations (ADR-0014): merged, **not released**. A signed-in
+  user writes on `/support`, the operator answers with `compute-api admin
+  support list|show|reply|close` on the host, and the user is emailed that
+  there is an answer. No AI responder, no web inbox. The Slack bridge that
+  will carry it to `#unifyai-support-handoff` lives in
+  `FelixSphere/unifyai-workspace` and is not built yet.
 - Marketplace: M2 is released on both hosts (2026-10-14); on production
   account listings are closed (`ENVIRONMENT=production`, ADR-0012 §4). M3
   (the dashboard Marketplace and My listings pages) is merged, not released.
@@ -165,6 +171,17 @@ make smoke BASE_URL=https://staging.compute.unifyai.us
 - Don't add abstractions, flags, or error handling for cases that cannot happen.
 - Site copy must not promise pricing, availability, or capabilities that do not
   exist yet. "In development" stays until the CI/CD agent says otherwise.
+- The marketing site is in the UnifyAI standard's eleven languages
+  (`~/unifyai-brand-kit/UI-STANDARD.md`, "Languages"): English at `/`, the
+  others under `/zh`, `/zh-hant`, `/ja`, `/ko`, `/es`, `/fr`, `/de`, `/pt-br`,
+  `/vi` and `/ar` (right-to-left). Pages live in `app/_pages/` and are routed twice,
+  by `app/(en)/` and `app/[locale]/`, each with its own root layout so the
+  exported HTML carries the right `<html lang dir>`. Copy goes through `t()`
+  (`lib/i18n/translate.ts`); translations are keyed by the exact English text
+  in `lib/i18n/messages/<locale>.json`, and a missing one shows English.
+  Changing or adding English copy means translating it in all ten files;
+  `npm run check:i18n` (run by CI) fails until you do. Never translate
+  product names, model IDs, code, paths, domains, emails or the © line.
 - `components/ui/` and `hooks/` are generated shadcn output. Leave them
   alone; lint is scoped to `app/ lib/` for that reason.
 
@@ -173,6 +190,65 @@ make smoke BASE_URL=https://staging.compute.unifyai.us
 Two agents must never edit the same checkout. Use `git worktree add` per task,
 pick a port per agent for `npm run dev` and for `compute-api`, and say which
 one you used when you hand off.
+
+## Existing tests: change them carefully, approve them yourself
+
+**Operator rule, revised 2026-11-18** (verbatim: "告诉所有智能体，以后不需要我的LGTM了，除非是非常非常没有把握，高风险的PR，所有都是这样"):
+a PR **no longer needs the operator's `LGTM`**, and that includes changing an
+existing test. You decide and approve it yourself. You still ask the operator
+and wait only when you are **genuinely unsure, or the change is high-risk**.
+That applies in every UnifyAI repository. It replaces the 2026-09-22 rule that
+every test change needed the operator's personal approval.
+
+What has not changed:
+
+- **Say it in the PR.** Name every existing test you changed and give the three
+  answers: (1) why it must change, as distinct from why it is inconvenient;
+  (2) what it asserts afterwards that it does not today; (3) what regression it
+  could let through, i.e. the defect class the old assertion catches and
+  whether the new one still catches it. Keep test edits in their own commit.
+- **A failing test is evidence, not an obstacle.** Find out why it fails before
+  touching it. Updating an expected value to a behaviour the operator decided
+  (a new price, a renamed vendor) is routine. Loosening an assertion until a
+  red build turns green is not: that is how a pricing sweep once passed with
+  `gpt-4o` mutated from $2.50 to $0.25.
+
+**Still ask the operator first** in either of these cases:
+
+- **You cannot say with confidence that the change is right.**
+- **It deletes a test, or loosens an assertion, guarding something expensive:**
+  billing, prices or money movement; auth, permissions, credentials or other
+  security boundaries; irreversible data deletion; production data; or the
+  licence attribution.
+
+Updating an expected value to a behaviour the operator has already decided is
+not high-risk, even in a billing test.
+
+When you do ask, post the three answers and wait for the operator's `LGTM`, an
+approving review, or their `APPROVED-TEST-CHANGE` comment.
+
+**How to approve your own test change.** The CI gate (`.github/workflows/test-guard.yml`)
+still runs and still blocks until a test change is approved; it is now the
+record of which test changed and who decided. Approve it yourself with a PR
+comment, posted after the head commit:
+
+    APPROVED-TEST-CHANGE <head sha> -- agent self-approval (operator rule 2026-11-18): <one line on why this is safe>
+
+Read the SHA from `gh pr view <n> --json headRefOid`; an invented one is
+rejected. A comment does not re-trigger the check by itself everywhere, so if
+it stays red, re-run it with `gh run rerun --failed <run id>`.
+
+**Never post a bare `LGTM` yourself.** Agents and the operator share one GitHub
+account, so that word stays the operator's. The record has to show who
+decided.
+
+## Configuration before code
+
+**Operator rule (2026-11-08): if a behaviour can be achieved by changing a setting — in an admin UI or by writing the database row that UI writes — that is the first and preferred fix. A code change is not recommended.** In this product that means each host's environment settings (`ACCOUNTS_BACKEND`, `APP_ORIGIN`, the SES and Stripe settings, `SKYPILOT_API_SERVER_URL`), the operator's per-account compute enablement and credit, and the `deploy/aws` Terraform variables and SSM parameters.
+
+Write code only when configuration genuinely cannot express the behaviour, or the same fix would have to be repeated by hand across many places. The PR must then say which settings were checked and why each cannot do it; if unsure, ask the operator before coding. A config change is still a production change: back up the prior value, exercise it against the exact image on staging (or a throwaway stack), verify live, and record what changed and where in AGENTS.md, because a setting has no git history.
+
+The full rule and the case that set it (console #280, `gpt-5.6-luna`, replaced by one conditional channel `param_override`) are in the workspace `AGENTS.md` (FelixSphere/unifyai-workspace).
 
 ## Releases go to staging first
 

@@ -139,7 +139,13 @@ func (s *Service) send(ctx context.Context, kind, to string, detail []byte) erro
 			return err
 		}
 		return s.mail.AccountSuspended(ctx, to, v)
-	case mailOpsDisputeOpened, mailOpsDisputeClosed, mailOpsRefundNegative:
+	case mailRefundDeclined:
+		var d mailer.RefundDecline
+		if err := json.Unmarshal(detail, &d); err != nil {
+			return err
+		}
+		return s.mail.RefundDeclined(ctx, to, d)
+	case mailOpsDisputeOpened, mailOpsDisputeClosed, mailOpsRefundNegative, mailOpsRefundRequested:
 		var n mailer.OperatorNotice
 		if err := json.Unmarshal(detail, &n); err != nil {
 			return err

@@ -1,5 +1,5 @@
 {
-  "note": "Every listed SKU may be chosen (operator decision 2026-10-14: customers choose first, capacity is provisioned on demand; ADR-0013). A SKU none of whose providers is enabled in this deployment is accepted as demand, not launched: 503 gpu_not_provisioned, recorded in gpu_demand, the operator emailed. Prices are the catalogue the dashboard shows; a change to this file is a release with money in it. Provider order is preference order and tier is a trust promise (ADR-0006): changing either is reviewed like a price change.",
+  "note": "Every listed SKU may be chosen (operator decision 2026-10-14: customers choose first, capacity is provisioned on demand; ADR-0015). A SKU none of whose providers is enabled in this deployment is accepted as demand, not launched: 503 gpu_not_provisioned, recorded in gpu_demand, the operator emailed. Prices are the catalogue the dashboard shows; a change to this file is a release with money in it. Provider order is preference order and tier is a trust promise (ADR-0006): changing either is reviewed like a price change.",
   "skus": [
     {
       "id": "a10g-24gb-x1",

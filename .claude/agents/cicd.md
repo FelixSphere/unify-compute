@@ -95,6 +95,80 @@ account. Two consequences:
   Production's `PREVIOUS_RELEASE` is m3, which cannot read 0011–0014:
   restore the backup's dump before rolling back. The G/VT quota is 4 vCPU,
   so a staging job can launch a real GPU.
+- **2026-10-15, both hosts on gpu-catalogue-wrap:** compute-api
+  `05ba021c…` (`494f43d`, unchanged) and site `c2899e5f…` (`0e2b694`,
+  #115 GPU catalogue + #118 subtitle wrap). Staging was first rolled back
+  to production's pair for parity (run 38723497442), then released
+  (38723813378); production followed (38725660008). Records:
+  `deploy/releases/2026-10-15-{staging-rollback-parity,staging-gpu-catalogue-wrap,production-gpu-catalogue-wrap}.md`.
+  Both hosts' PREVIOUS_RELEASE is banner-rtl-fix (`05ba021c…` /
+  `b3871cfc…`), same schema, so `mode=rollback` is a site-only step.
+  Known, not from this release: `/members` scrolls sideways at 375 px
+  (its table has no `.table-wrap`).
+- **2026-10-17, both hosts on smooth-shell:** compute-api `fd586e94…`
+  (`e7fe722`, #121 job-log-archive, released earlier that day: staging
+  39022313260, production 39023191841) and site `bd9edfdb…` (`5838ce5`,
+  #131 view transitions, collapsible sidebar; staging 39032471498,
+  production 39033815759). No migration since banner-rtl-fix. Both hosts'
+  PREVIOUS_RELEASE is `fd586e94…` / `c2899e5f…`, so `mode=rollback` is a
+  site-only step. Records: `deploy/releases/2026-10-17-*`. Throwaway
+  accounts 25 and 26 remain on staging (compute off, keys revoked).
+- **2026-10-26, both hosts on smooth-load-fix:** compute-api `fd586e94…`
+  (`e7fe722`, unchanged) and site `26d2e66c…` (`2c7669f`, #136 early reads,
+  skeletons, ease-in, sidebar prefetch + #138 filled loading lines drop
+  their skeleton). Staging run 40267687668, production 40268860104. No
+  migration. Both hosts' PREVIOUS_RELEASE is `fd586e94…` / `bd9edfdb…`, so
+  `mode=rollback` is a site-only step on both (staging no longer points at
+  the broken `c4d87233…`). The first attempt (`1d5c16e`, site `c4d87233…`)
+  was held on staging and rolled back the same day. Throwaway accounts 25–28
+  remain on staging (compute off, keys revoked). Records:
+  `deploy/releases/2026-10-26-*`. Known, not blocking: on an empty month,
+  Usage keeps a "Loading usage…" placeholder inside the hidden
+  `#usage-detail`. It is invisible and not animating, but a
+  computed-style `uc-shimmer` selector counts it.
+- **2026-11-08, both hosts on site-i18n-std:** compute-api `fd586e94…`
+  (`e7fe722`, unchanged) and site `5925c7c1…` (`fc0edb0`, #110 the
+  marketing site in the standard's 11 languages). Staging run 42491696406,
+  production 42491954565; `check-i18n.sh` PASS on `/` and `/privacy` on
+  both. No migration. Both hosts' PREVIOUS_RELEASE is `fd586e94…` /
+  `26d2e66c…`, so `mode=rollback` is a site-only step. The staging site
+  host is `site.staging.compute.unifyai.us`; `staging.compute.unifyai.us`
+  is compute-api and answers 404 for site paths. Records:
+  `deploy/releases/2026-11-08-*`.
+- **2026-11-09, both hosts on sglang-templates:** compute-api
+  `b7474c94…` and site `ed5de01a…` (both `322f705`, #145 three SGLang batch
+  templates, no migration). Staging run 42584482012, production
+  42585299399. The operator waived staging check 3 (`400 missing_input` for
+  `batch-extract-sglang`): no valid `uck_` key, and the agent's AWS
+  credentials were rejected. Both hosts' PREVIOUS_RELEASE is `fd586e94…` /
+  `5925c7c1…`, so `mode=rollback` is a plain step back. Records:
+  `deploy/releases/2026-11-09-*sglang-templates.md`.
+- **2026-11-09, both hosts on bonus-refund-requests (#134, ADR-0013):**
+  compute-api `15cf14fb…` and site `a8281c78…` (both `792b4ea`). Schema
+  **0015** on both (additive). Staging run 42678010483, production
+  42679416679. Live Checkout now grants bonus credit (3% at USD 50, 5% at
+  USD 100). Customers can file refund requests; `admin refund-request
+  list|decline` handles them. **Never run against Stripe in any mode**, and
+  the wording has had no legal review (O5). Production had 0 top-ups at
+  release. PREVIOUS_RELEASE is `b7474c94…` / `ed5de01a…` on both:
+  `mode=rollback` needs no dump restore while
+  `SELECT count(*) FROM topups WHERE bonus_cents > 0` is 0. Throwaway account
+  29 remains on staging (compute off, no keys). Records:
+  `deploy/releases/2026-11-09-*bonus-refund-requests.md`.
+- **2026-11-11, both hosts on compute-descriptor (#155):** site
+  `b31260da…` (`47f54d8`; the header descriptor reads "Compute", no
+  "& Flatkey"), compute-api `15cf14fb…` unchanged (`792b4ea`), schema 0015.
+  Staging run 43059641149, production 43060309921. PREVIOUS_RELEASE is
+  `15cf14fb…` / `a8281c78…` on both, so `mode=rollback` is a site-only
+  step. Records: `deploy/releases/2026-11-11-*compute-descriptor.md`.
+- **Your AWS credentials in a cloud session:** as of 2026-11-09 there are
+  none. `AWS_ACCESS_KEY_ID` is a proxy placeholder (`prox…`), and AWS answers
+  `InvalidClientTokenId`; a substituted placeholder cannot work for SigV4.
+  `deploy/aws/shared/cicd-agent` defines your identity (IAM user
+  `unify-compute-cicd-agent`: SSM RunCommand on the staging instance only, no
+  Terraform state, no IAM). It is **not applied** until a record or this line
+  says so; until then, a check that needs a shell on a host is reported as not
+  exercised, never worked around.
 - **IMDS lockdown:** applied to both hosts on 2026-10-03 (staging, then
   production): firewall unit, credentials timer, `docker-compose.imds.yml`,
   hop limit 1 by Terraform. `check-imds.sh` gave `CHECK_IMDS_OK` before and after

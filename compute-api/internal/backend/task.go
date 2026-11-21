@@ -202,10 +202,12 @@ func TaskFor(j Job, opt TaskOptions) (Task, error) {
 	if len(fetch) > 0 {
 		run = strings.Join(append(fetch, run), " && ")
 	}
-	if len(s.Outputs) > 0 {
-		if opt.Outputs == nil {
-			return Task{}, ErrOutputsUnsupported
-		}
+	if len(s.Outputs) > 0 && opt.Outputs == nil {
+		return Task{}, ErrOutputsUnsupported
+	}
+	// With an uploader, every job runs through its step, outputs or not: it
+	// also archives the job's log, which must outlive the cluster.
+	if opt.Outputs != nil {
 		extra, script, err := opt.Outputs.OutputStep(j, run)
 		if err != nil {
 			return Task{}, err
