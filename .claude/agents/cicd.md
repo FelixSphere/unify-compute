@@ -161,6 +161,15 @@ account. Two consequences:
   Staging run 43059641149, production 43060309921. PREVIOUS_RELEASE is
   `15cf14fb…` / `a8281c78…` on both, so `mode=rollback` is a site-only
   step. Records: `deploy/releases/2026-11-11-*compute-descriptor.md`.
+- **2026-11-21, staging only on support-conversations (#159, ADR-0014):**
+  compute-api `577de6b8…` and site `297a7974…` (both `72a4d30`). Schema
+  **0016** on staging (additive: `support_conversations`,
+  `support_messages`). Staging run 44957025547. Production is still on
+  compute-api `15cf14fb…` / site `b31260da…` (compute-descriptor,
+  2026-11-11) and schema 0015 until the operator has exercised staging.
+  Staging's PREVIOUS_RELEASE is `15cf14fb…` / `b31260da…`: `mode=rollback`
+  needs no dump restore. Record:
+  `deploy/releases/2026-11-21-staging-support-conversations.md`.
 - **Your AWS credentials in a cloud session:** as of 2026-11-09 there are
   none. `AWS_ACCESS_KEY_ID` is a proxy placeholder (`prox…`), and AWS answers
   `InvalidClientTokenId`; a substituted placeholder cannot work for SigV4.
