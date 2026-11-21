@@ -242,6 +242,7 @@ app_pages=(
   "/billing|Billing — Unify Compute"
   "/account|Account — Unify Compute"
   "/members|Members — Unify Compute"
+  "/support|Support — Unify Compute"
   "/signup|Sign up — Unify Compute"
   "/login|Log in — Unify Compute"
   "/verify|Check your email — Unify Compute"

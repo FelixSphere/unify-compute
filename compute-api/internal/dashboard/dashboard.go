@@ -44,6 +44,7 @@ import (
 	"github.com/FelixSphere/unify-compute/compute-api/internal/notify"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/payments"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/ratelimit"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/support"
 )
 
 const (
@@ -92,6 +93,9 @@ type Config struct {
 	// Notifier sends the member emails once per invitation or removal
 	// (internal/notify); nil sends them directly.
 	Notifier *notify.Notifier
+	// Support is the customer support conversation (ADR-0014); nil answers
+	// its routes 501 not_implemented.
+	Support *support.Service
 }
 
 type Handler struct {
@@ -107,6 +111,7 @@ type Handler struct {
 	listings *listings.Store
 	pay      *payments.Service
 	notes    *notify.Notifier
+	support  *support.Service
 	reads    *ratelimit.Limiter
 
 	mux      *http.ServeMux
@@ -126,7 +131,7 @@ func New(cfg Config) (*Handler, error) {
 		return nil, fmt.Errorf("APP_ORIGIN %q: the dashboard needs the app's origin, e.g. https://app.compute.unifyai.us (http only for localhost)", cfg.AppOrigin)
 	}
 	h := &Handler{acc: cfg.Accounts, mail: cfg.Mailer, origin: strings.ToLower(origin), host: strings.ToLower(u.Host),
-		log: cfg.Log, now: cfg.Now, jobs: cfg.Jobs, mkt: cfg.Market, ledger: cfg.Ledger, listings: cfg.Listings, pay: cfg.Payments, notes: cfg.Notifier, reads: ratelimit.New(readBurst, readWindow), mux: http.NewServeMux()}
+		log: cfg.Log, now: cfg.Now, jobs: cfg.Jobs, mkt: cfg.Market, ledger: cfg.Ledger, listings: cfg.Listings, pay: cfg.Payments, notes: cfg.Notifier, support: cfg.Support, reads: ratelimit.New(readBurst, readWindow), mux: http.NewServeMux()}
 	if h.now == nil {
 		h.now = time.Now
 	}
@@ -171,6 +176,11 @@ func New(cfg Config) (*Handler, error) {
 	h.handle("GET /topups/{id}", h.session(h.read(h.getTopup)))
 	h.handle("POST /topups/{id}/refund-request", h.session(h.requestRefund))
 	h.handle("DELETE /refund-requests/{id}", h.session(h.cancelRefundRequest))
+	h.handle("GET /support/conversations", h.session(h.read(h.listSupport)))
+	h.handle("POST /support/conversations", h.session(h.startSupport))
+	h.handle("GET /support/conversations/{id}", h.session(h.read(h.getSupport)))
+	h.handle("POST /support/conversations/{id}/messages", h.session(h.writeSupport))
+	h.handle("POST /support/conversations/{id}/close", h.session(h.closeSupport))
 	h.handle("POST "+webhookPath, h.stripeWebhook)
 	h.registerMembers()
 	h.mux.HandleFunc(Prefix+"/", func(w http.ResponseWriter, _ *http.Request) { notFound(w) })

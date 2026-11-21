@@ -2344,3 +2344,55 @@ body.app .stat-card [data-i18n^='common.loading']:not([data-loaded]) {
     animation: none;
   }
 }
+
+/* Support (/support): the conversation, oldest message first. */
+.chat {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-msg {
+  max-width: min(72ch, 88%);
+  padding: 10px 14px;
+  background: var(--u-bg);
+  border: var(--u-rule);
+  border-radius: var(--u-radius);
+}
+
+.chat-msg.from-me {
+  align-self: flex-end;
+}
+
+.chat-msg.from-staff {
+  align-self: flex-start;
+  background: var(--u-surface);
+  border-inline-start: 3px solid var(--u-ink);
+}
+
+#thread + form {
+  margin-top: 20px;
+}
+
+.chat-meta {
+  margin: 0 0 4px;
+  font-size: var(--u-text-xs);
+  color: var(--u-text-2);
+}
+
+.chat-body {
+  margin: 0;
+  font-size: var(--u-text-sm);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+textarea.chat-input {
+  min-height: 112px;
+  font-family: var(--u-font-body);
+  font-size: var(--u-text-md);
+}

@@ -47,8 +47,8 @@ const CLOSE = `<svg class="icon-close" ${ICON_ATTRS}><path d="M18 6 6 18"/><path
 const HELP = `<svg ${ICON_ATTRS}><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>`;
 
 // The signed-in pages, in sidebar order. `path` is what the browser shows;
-// /keys and /members are also where the mailer's "Review keys" and "View
-// members" links point (compute-api/internal/mailer/).
+// /keys, /members and /support are also where the mailer's "Review keys",
+// "View members" and "Read the reply" links point (compute-api/internal/mailer/).
 // lucide icons (ISC), as SVG markup: the sidebar shows them alone when it is collapsed.
 const ICONS: Record<string, string> = {
   "layout-dashboard": "<rect width=\"7\" height=\"9\" x=\"3\" y=\"3\" rx=\"1\"/><rect width=\"7\" height=\"5\" x=\"14\" y=\"3\" rx=\"1\"/><rect width=\"7\" height=\"9\" x=\"14\" y=\"12\" rx=\"1\"/><rect width=\"7\" height=\"5\" x=\"3\" y=\"16\" rx=\"1\"/>",
@@ -60,6 +60,7 @@ const ICONS: Record<string, string> = {
   "credit-card": "<rect width=\"20\" height=\"14\" x=\"2\" y=\"5\" rx=\"2\"/><line x1=\"2\" x2=\"22\" y1=\"10\" y2=\"10\"/>",
   "users": "<path d=\"M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2\"/><path d=\"M16 3.128a4 4 0 0 1 0 7.744\"/><path d=\"M22 21v-2a4 4 0 0 0-3-3.87\"/><circle cx=\"9\" cy=\"7\" r=\"4\"/>",
   "circle-user-round": "<path d=\"M17.925 20.056a6 6 0 0 0-11.851.001\"/><circle cx=\"12\" cy=\"11\" r=\"4\"/><circle cx=\"12\" cy=\"12\" r=\"10\"/>",
+  "message-circle": "<path d=\"M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719\"/>",
   "panel-left-close": "<rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\"/><path d=\"M9 3v18\"/><path d=\"m16 15-3-3 3-3\"/>",
   "panel-left-open": "<rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\"/><path d=\"M9 3v18\"/><path d=\"m14 9 3 3-3 3\"/>"
 };
@@ -75,6 +76,7 @@ const NAV: { id: string; path: string; label: string; key: string; icon: string 
   { id: 'billing', path: '/billing', label: 'Billing', key: 'nav.billing', icon: 'credit-card' },
   { id: 'members', path: '/members', label: 'Members', key: 'nav.members', icon: 'users' },
   { id: 'account', path: '/account', label: 'Account', key: 'nav.account', icon: 'circle-user-round' },
+  { id: 'support', path: '/support', label: 'Support', key: 'nav.support', icon: 'message-circle' },
 ];
 // lucide LogOut (ISC), beside the "Log out" label in the header.
 const LOGOUT = `<svg ${ICON_ATTRS}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>`;
@@ -125,6 +127,7 @@ const partials: Record<string, (arg: string) => string> = {
           <div class="account-panel" id="help-panel" hidden>
             <a href="${QUICK_START_URL}" target="_blank" rel="noopener" data-i18n="common.quick-start">Quick start</a>
             <a href="${COMPUTE_API}/openapi.json" target="_blank" rel="noopener" data-i18n="common.api-reference">API reference</a>
+            <a href="/support" data-i18n="nav.support">Support</a>
             <a href="${HELP_MAILTO}" data-i18n="common.contact-us">Contact us</a>
           </div>
         </div>
