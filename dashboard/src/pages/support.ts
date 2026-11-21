@@ -98,7 +98,7 @@ export async function support() {
       setFieldError('message', t('support.write-a-message'));
       return area.focus();
     }
-    if ([...message].length > MAX) {
+    if (Array.from(message).length > MAX) {
       setFieldError('message', t('support.too-long'));
       return area.focus();
     }
