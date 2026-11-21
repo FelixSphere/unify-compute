@@ -120,6 +120,9 @@ func (c *CLI) support(ctx context.Context, args []string) error {
 			if err != nil {
 				return err
 			}
+			if len(raw) == maxStdin {
+				return describeSupport(support.ErrTooBig)
+			}
 			message = string(raw)
 		}
 		m, mailed, err := c.Support.Reply(ctx, id, c.Actor, message, c.supportAudit)

@@ -81,7 +81,7 @@ func TestConversationGoesBackAndForth(t *testing.T) {
 			t.Fatalf("Start(%d chars): %v", len(bad), err)
 		}
 	}
-	c, err := e.svc.Start(ctx, ada, "  My job is stuck.\r\nSecond line.  ")
+	c, err := e.svc.Start(ctx, ada, "  My job is \x00stuck.\r\nSecond line.  ")
 	if err != nil {
 		t.Fatal(err)
 	}

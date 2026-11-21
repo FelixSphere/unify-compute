@@ -117,6 +117,9 @@ func TestSupportListShowReplyClose(t *testing.T) {
 		t.Fatalf("show: %v %q", err, e.out.String())
 	}
 
+	if err := e.support(strings.Repeat("é", 2*support.MaxBody+1), "reply", c.ID, "--stdin"); !errors.Is(err, admin.ErrUsage) || !strings.Contains(err.Error(), "longer than") {
+		t.Fatalf("oversized stdin: %v", err)
+	}
 	// The message arrives on stdin, so no shell ever quotes it.
 	text := "Looking at it now.\nIt's the \"quota\" $HOME `x`."
 	if err := e.support(text+"\n", "reply", c.ID, "--stdin"); err != nil || !strings.Contains(e.out.String(), "replied "+c.ID+" message ") {

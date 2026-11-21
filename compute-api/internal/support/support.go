@@ -101,7 +101,8 @@ func New(db *pgxpool.Pool, mail Mailer, operatorEmail string, now func() time.Ti
 }
 
 func clean(body string) (string, error) {
-	body = strings.TrimSpace(strings.ReplaceAll(body, "\r\n", "\n"))
+	// Postgres text cannot hold a NUL; a pasted one is dropped, not a 500.
+	body = strings.TrimSpace(strings.NewReplacer("\r\n", "\n", "\x00", "").Replace(body))
 	if body == "" || !utf8.ValidString(body) {
 		return "", ErrEmpty
 	}
