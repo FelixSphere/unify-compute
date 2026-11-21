@@ -102,7 +102,9 @@ this list does not repeat image digests, because they go stale here first.
   monthly budget (`deploy/aws/shared/gpu-budget`, action
   `b4302f8f-c1df-40b6-8157-d71a203ae18a`) that denies new launches at 100%
   by itself (dry run proven 2026-10-03).
-- Support conversations (ADR-0014): merged, **not released**. A signed-in
+- Support conversations (ADR-0014): released on staging and production
+  (2026-11-21, records `deploy/releases/2026-11-21-*support-conversations.md`;
+  production has no `OPERATOR_EMAIL`, so a new message notifies no one). A signed-in
   user writes on `/support`, the operator answers with `compute-api admin
   support list|show|reply|close` on the host, and the user is emailed that
   there is an answer. No AI responder, no web inbox. The Slack bridge that
