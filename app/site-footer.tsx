@@ -6,6 +6,7 @@ import { AccountLink } from './account-link';
 import { languageLinks } from './i18n-links';
 import { LanguageList } from './language-switcher';
 import { LOG_IN_URL, SIGN_UP_URL, TERMS_URL } from './links';
+import { FooterProducts } from './product-links';
 
 export function SiteFooter({
   locale,
@@ -41,6 +42,7 @@ export function SiteFooter({
         </Link>
         <a href={TERMS_URL}>{t('Terms')}</a>
       </nav>
+      <FooterProducts locale={locale} />
       <LanguageList links={languageLinks(path, locale)} label={t('Language')} className="footer-languages" />
       <CompanyLine legal={current === '/privacy'} />
     </footer>

@@ -208,5 +208,16 @@
   "Held at submit": "提交時圈存",
   "Metered while it runs": "執行時計量",
   "Settled to what it used": "依實際用量結算",
-  "When you submit a job, a hold is placed on your balance. GPU time is metered while the job runs; when it ends you pay for what it used and the rest of the hold is released.": "提交作業時，會在你的餘額上圈存一筆金額。作業執行期間依 GPU 時間計量；結束時你只為實際用量付費，其餘圈存金額隨即釋放。"
+  "When you submit a job, a hold is placed on your balance. GPU time is metered while the job runs; when it ends you pay for what it used and the rest of the hold is released.": "提交作業時，會在你的餘額上圈存一筆金額。作業執行期間依 GPU 時間計量；結束時你只為實際用量付費，其餘圈存金額隨即釋放。",
+  "UnifyAI products": "UnifyAI 產品",
+  "This site": "目前網站",
+  "06 / ALL PRODUCTS": "06 / 全部產品",
+  "Six products.\n[One UnifyAI.]": "六款產品。\n[同一個 UnifyAI。]",
+  "Unify Compute is one of six UnifyAI products. Each one has its own site.": "Unify Compute 是 UnifyAI 六款產品之一。每款產品都有自己的網站。",
+  "One API key for 300+ AI models": "一組 API 金鑰，串接 300 多個 AI 模型",
+  "See and control how your company uses AI": "看清並管控公司的 AI 使用情況",
+  "Run AI jobs on GPUs on demand": "隨需在 GPU 上執行 AI 作業",
+  "Expert training and evaluation data": "專家級訓練與評測資料",
+  "Lock GPU capacity ahead of time": "提前鎖定 GPU 算力",
+  "AI that improves from your team's corrections": "從團隊的修正中持續進步的 AI"
 }

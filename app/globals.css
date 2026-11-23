@@ -213,6 +213,27 @@ footer > span { font-size: var(--u-text-sm); color: var(--u-text-muted); }
 footer .footer-links { display: flex; flex-wrap: wrap; gap: 8px 24px; margin-inline-start: auto; font-size: var(--u-text-sm); }
 footer .footer-links a[aria-current] { color: var(--u-text-muted); }
 footer > .copyright { width: 100%; font-size: var(--u-text-xs); padding-bottom: 28px; }
+/* Cross-product links (UI-STANDARD "Cross-product links"): the six UnifyAI
+   products in every footer, and as cards in the homepage's last section. */
+.footer-products { width: 100%; margin-top: 8px; padding-top: 20px; border-top: var(--u-rule); }
+.footer-products h2 { font: var(--u-text-xs) var(--u-font-mono); letter-spacing: 1.6px; text-transform: uppercase; color: var(--u-text-muted); margin: 0 0 16px; }
+/* Letter-spacing pulls joined Arabic letters apart. */
+[dir="rtl"] .footer-products h2 { letter-spacing: 0; }
+.footer-products ul { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px 32px; margin: 0; padding: 0; list-style: none; }
+.footer-products .product-entry { display: block; font-size: var(--u-text-sm); }
+.footer-products strong { font-weight: 600; color: var(--u-text); }
+.footer-products em { font: var(--u-text-xs) var(--u-font-mono); color: var(--u-text-muted); margin-inline-start: 6px; }
+.footer-products .product-entry > span { display: block; margin-top: 2px; font-size: var(--u-text-xs); line-height: 1.6; color: var(--u-text-muted); }
+.footer-products a:hover strong { text-decoration: underline; text-underline-offset: 4px; }
+.product-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 0; padding: 0; list-style: none; }
+.product-card { display: block; height: 100%; padding: 22px 24px; background: var(--u-bg); border: var(--u-rule); border-radius: var(--u-radius); transition: border-color .2s; }
+a.product-card:hover { border-color: var(--u-text-muted); }
+.product-card-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 24px; }
+.product-card h3 { margin: 0; }
+.product-card svg { color: var(--u-text-muted); flex: none; }
+.product-card p { color: var(--u-text-2); font-size: var(--u-text-sm); line-height: 1.7; margin: 12px 0 0; }
+@media (max-width: 800px) { .footer-products ul, .product-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 520px) { .footer-products ul, .product-grid { grid-template-columns: 1fr; } }
 
 .legal { max-width: 760px; padding-block: 72px 96px; line-height: 1.75; color: var(--u-text-2); }
 .legal h1 { margin-bottom: 12px; color: var(--u-text); font-size: var(--u-h1); }

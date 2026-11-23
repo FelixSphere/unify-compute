@@ -208,5 +208,16 @@
   "Held at submit": "حجز عند الإرسال",
   "Metered while it runs": "قياس أثناء التشغيل",
   "Settled to what it used": "تسوية حسب الاستخدام",
-  "When you submit a job, a hold is placed on your balance. GPU time is metered while the job runs; when it ends you pay for what it used and the rest of the hold is released.": "عند إرسال مهمة، يُحجَز مبلغ من رصيدك. يُقاس وقت GPU أثناء تشغيل المهمة، وعند انتهائها تدفع مقابل ما استخدمته ويُحرَّر باقي المبلغ المحجوز."
+  "When you submit a job, a hold is placed on your balance. GPU time is metered while the job runs; when it ends you pay for what it used and the rest of the hold is released.": "عند إرسال مهمة، يُحجَز مبلغ من رصيدك. يُقاس وقت GPU أثناء تشغيل المهمة، وعند انتهائها تدفع مقابل ما استخدمته ويُحرَّر باقي المبلغ المحجوز.",
+  "UnifyAI products": "منتجات UnifyAI",
+  "This site": "هذا الموقع",
+  "06 / ALL PRODUCTS": "06 / جميع المنتجات",
+  "Six products.\n[One UnifyAI.]": "ستة منتجات.\n[UnifyAI واحدة.]",
+  "Unify Compute is one of six UnifyAI products. Each one has its own site.": "Unify Compute هو أحد منتجات UnifyAI الستة. لكل منتج موقعه الخاص.",
+  "One API key for 300+ AI models": "مفتاح API واحد لأكثر من 300 نموذج ذكاء اصطناعي",
+  "See and control how your company uses AI": "اطّلع على استخدام شركتك للذكاء الاصطناعي وتحكّم فيه",
+  "Run AI jobs on GPUs on demand": "شغّل مهام الذكاء الاصطناعي على وحدات GPU عند الطلب",
+  "Expert training and evaluation data": "بيانات تدريب وتقييم يعدّها خبراء",
+  "Lock GPU capacity ahead of time": "احجز سعة GPU مسبقًا",
+  "AI that improves from your team's corrections": "ذكاء اصطناعي يتحسّن من تصحيحات فريقك"
 }
