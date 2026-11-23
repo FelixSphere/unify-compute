@@ -493,6 +493,7 @@ const c: Record<string, string> = {
   'marketplace.coming': '近日提供',
   'marketplace.no-gpus': 'まだ提供している GPU はありません。',
   'marketplace.gpus-will-appear': 'ダッシュボードでマーケットプレイスが有効になると、GPU カタログがここに表示されます。',
+  'marketplace.gpu-sku': 'GPU（SKU）',
   'common.collapse': '折りたたむ',
   'common.expand': '展開',
   'common.collapse-nav': 'サイドバーを折りたたむ',

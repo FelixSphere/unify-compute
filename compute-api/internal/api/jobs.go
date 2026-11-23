@@ -63,7 +63,7 @@ func (s *Server) submitWired(w http.ResponseWriter, r *http.Request, sub submiss
 	if !s.checkSpec(w, backend.Job{Spec: sub.spec, SKU: sub.item, Candidates: sub.item.Providers, Owner: owner}) {
 		return
 	}
-	candidates, ok := s.place(w, sub)
+	candidates, ok := s.place(w, r, sub, owner)
 	if !ok {
 		return
 	}

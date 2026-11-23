@@ -22,6 +22,7 @@ import (
 	"github.com/FelixSphere/unify-compute/compute-api/internal/billing"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/console"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/dashboard"
+	"github.com/FelixSphere/unify-compute/compute-api/internal/demand"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/jobs"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/listings"
 	"github.com/FelixSphere/unify-compute/compute-api/internal/mailer"
@@ -246,6 +247,9 @@ func main() {
 		}
 		svc = jobs.New(cfg)
 		handler.JobService, handler.Events, handler.Jobs = svc, st, st
+		// A submit for a GPU this deployment cannot launch yet is demand
+		// (ADR-0015): a row, and an email to the operator once a day.
+		handler.Demand = &demand.Service{Store: st, Mailer: mail, Notifier: notes, OperatorEmail: os.Getenv("OPERATOR_EMAIL"), Log: log}
 		var acc *accounts.Service
 		if backendName == backendLocal {
 			// Only uck_ keys, looked up on every request; sk- keys are
