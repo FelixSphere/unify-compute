@@ -208,5 +208,16 @@
   "Held at submit": "Bloqué à la soumission",
   "Metered while it runs": "Mesuré pendant l’exécution",
   "Settled to what it used": "Réglé selon l’usage réel",
-  "When you submit a job, a hold is placed on your balance. GPU time is metered while the job runs; when it ends you pay for what it used and the rest of the hold is released.": "Lorsque vous soumettez une tâche, un montant est bloqué sur votre solde. Le temps GPU est mesuré pendant l’exécution ; à la fin, vous payez ce qui a été utilisé et le reste du blocage est libéré."
+  "When you submit a job, a hold is placed on your balance. GPU time is metered while the job runs; when it ends you pay for what it used and the rest of the hold is released.": "Lorsque vous soumettez une tâche, un montant est bloqué sur votre solde. Le temps GPU est mesuré pendant l’exécution ; à la fin, vous payez ce qui a été utilisé et le reste du blocage est libéré.",
+  "UnifyAI products": "Produits UnifyAI",
+  "This site": "Ce site",
+  "06 / ALL PRODUCTS": "06 / TOUS LES PRODUITS",
+  "Six products.\n[One UnifyAI.]": "Six produits.\n[Un seul UnifyAI.]",
+  "Unify Compute is one of six UnifyAI products. Each one has its own site.": "Unify Compute est l'un des six produits UnifyAI. Chacun a son propre site.",
+  "One API key for 300+ AI models": "Une seule clé API pour plus de 300 modèles d'IA",
+  "See and control how your company uses AI": "Voyez et maîtrisez l'usage de l'IA dans votre entreprise",
+  "Run AI jobs on GPUs on demand": "Exécutez des tâches d'IA sur GPU à la demande",
+  "Expert training and evaluation data": "Données d'entraînement et d'évaluation produites par des experts",
+  "Lock GPU capacity ahead of time": "Réservez de la capacité GPU à l'avance",
+  "AI that improves from your team's corrections": "Une IA qui progresse grâce aux corrections de votre équipe"
 }

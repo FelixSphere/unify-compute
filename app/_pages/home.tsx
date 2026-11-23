@@ -6,6 +6,7 @@ import { getT } from '@/lib/i18n/translate';
 import { BrandLockup } from '../brand';
 import { AccountLink } from '../account-link';
 import { SIGN_UP_URL } from '../links';
+import { ProductsSection } from '../product-links';
 import { SiteFooter } from '../site-footer';
 import { SiteHeader } from '../site-header';
 import { pageMetadata } from '../shell';
@@ -86,6 +87,8 @@ export function HomePage({ locale }: { locale: Locale }) {
       <section className="process-section" id="marketplace"><div className="wrap section"><div className="section-heading"><div><p className="eyebrow">{t('04 / MARKETPLACE')}</p><h2>{rich(t('Templates, reviewed\n[before anyone runs them.]'))}</h2></div><p>{t('A template is an image, a command and a GPU under one name. Each one is reviewed before it is listed. Pick one, point it at your data and submit it with your key.')}</p></div><MarketplaceFlow ids={shelf} labels={{ image: t('Image'), command: t('Command'), gpu: 'GPU', reviewed: t('Reviewed'), listed: t('Listed'), job: t('Your job') }} summary={t('An image, a command and a GPU become one template, the template is reviewed before it is listed, and a listed template runs as your job.')}/><p className="section-link"><Link className="text-link" href={localizeHref('/marketplace', locale)}>{t('Browse the marketplace')} <ArrowRight size={17} className="dir-icon"/></Link></p></div></section>
 
       <section className="wrap section" id="consumption"><div className="consumption"><div><p className="eyebrow">{t('05 / CONSUMPTION, NOT COMMITMENT')}</p><h2>{rich(t('Your work has a runtime.\n[Your bill should, too.]'))}</h2><p>{t('Our billing model is built around consumption, so you can match compute spend to actual workloads instead of reserving capacity ahead of time.')}</p><div className="pricing-note">{t('Rates and availability will be announced at launch.')}</div></div><div className="billing-card"><div className="billing-title"><Zap size={18}/> {t('THE PRINCIPLE')}</div><p>{rich(t('Run the job.\nUse the compute.\n[Pay for the usage.]'))}</p><div className="billing-bottom"><span>{t('Consumption-based')}</span><ArrowUpRight size={22} className="dir-icon"/></div></div></div><Metering labels={{ held: t('Held at submit'), metered: t('Metered while it runs'), settled: t('Settled to what it used') }} summary={t('When you submit a job, a hold is placed on your balance. GPU time is metered while the job runs; when it ends you pay for what it used and the rest of the hold is released.')}/></section>
+      <ProductsSection locale={locale} />
+
       <SiteFooter locale={locale} path="/" homeHref="#top"/>
       <ScrollReveal/>
     </main>

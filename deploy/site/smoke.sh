@@ -121,6 +121,26 @@ for page in / /start /privacy /marketplace; do
     echo "FAIL $page: footer names the legal entity; only legal pages do"; fail=1; links_ok=0
   fi
 done
+# Cross-product links (UI-STANDARD "Cross-product links"; app/products.ts):
+# every public page's footer links the five other UnifyAI products in the
+# visitor's language and lists Unify Compute itself as the current site, not
+# as a link. The homepage repeats them as cards, so its count is double.
+for page in / /start /privacy /marketplace /zh /ar/start; do
+  curl -s "$base$page" > "$tmp/products"
+  case "$page" in /zh*) prefix=zh ;; /ar*) prefix=ar ;; *) prefix= ;; esac
+  for site in https://www.unifyapi.ai https://www.gateway.unifyai.us https://data.unifyai.us https://grid.unifyai.us https://unifyai.us; do
+    grep -qF "<a class=\"product-entry\" href=\"$site/$prefix\">" "$tmp/products" \
+      || { echo "FAIL $page: footer has no product link to $site/$prefix"; fail=1; }
+  done
+  grep -qF '<span class="product-entry" aria-current="page"><strong>Unify Compute</strong>' "$tmp/products" \
+    || { echo "FAIL $page: footer does not list Unify Compute as the current site"; fail=1; }
+  if grep -qE 'class="product-(entry|card)" href="[^"]*(compute\.unifyai\.us|[?])' "$tmp/products"; then
+    echo "FAIL $page: a product link points at this site or carries a query string"; fail=1
+  fi
+done
+[ "$(curl -s "$base/" | grep -o '<a class="product-card" href=' | wc -l | tr -d ' ')" = 5 ] \
+  || { echo "FAIL /: the homepage products section does not link five products"; fail=1; }
+
 curl -s "$base/start" > "$tmp/links"
 for href in 'mailto:contactus@felixsphere.com?subject=Unify%20Compute%20early%20access' 'https://api.compute.unifyai.us/compute/v1/openapi.json'; do
   grep -qF "href=\"$href\"" "$tmp/links" \

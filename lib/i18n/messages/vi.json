@@ -208,5 +208,16 @@
   "Held at submit": "Tạm giữ khi gửi",
   "Metered while it runs": "Đo khi đang chạy",
   "Settled to what it used": "Quyết toán theo mức đã dùng",
-  "When you submit a job, a hold is placed on your balance. GPU time is metered while the job runs; when it ends you pay for what it used and the rest of the hold is released.": "Khi bạn gửi một tác vụ, một khoản được tạm giữ trên số dư của bạn. Thời gian GPU được đo trong khi tác vụ chạy; khi kết thúc, bạn trả cho phần đã dùng và phần tạm giữ còn lại được giải phóng."
+  "When you submit a job, a hold is placed on your balance. GPU time is metered while the job runs; when it ends you pay for what it used and the rest of the hold is released.": "Khi bạn gửi một tác vụ, một khoản được tạm giữ trên số dư của bạn. Thời gian GPU được đo trong khi tác vụ chạy; khi kết thúc, bạn trả cho phần đã dùng và phần tạm giữ còn lại được giải phóng.",
+  "UnifyAI products": "Sản phẩm UnifyAI",
+  "This site": "Trang này",
+  "06 / ALL PRODUCTS": "06 / TẤT CẢ SẢN PHẨM",
+  "Six products.\n[One UnifyAI.]": "Sáu sản phẩm.\n[Một UnifyAI.]",
+  "Unify Compute is one of six UnifyAI products. Each one has its own site.": "Unify Compute là một trong sáu sản phẩm của UnifyAI. Mỗi sản phẩm có trang web riêng.",
+  "One API key for 300+ AI models": "Một khóa API cho hơn 300 mô hình AI",
+  "See and control how your company uses AI": "Nắm rõ và kiểm soát cách công ty bạn dùng AI",
+  "Run AI jobs on GPUs on demand": "Chạy tác vụ AI trên GPU theo nhu cầu",
+  "Expert training and evaluation data": "Dữ liệu huấn luyện và đánh giá do chuyên gia thực hiện",
+  "Lock GPU capacity ahead of time": "Giữ trước dung lượng GPU",
+  "AI that improves from your team's corrections": "AI tiến bộ nhờ các chỉnh sửa của đội ngũ bạn"
 }

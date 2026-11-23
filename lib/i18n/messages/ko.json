@@ -208,5 +208,16 @@
   "Held at submit": "제출 시 보류",
   "Metered while it runs": "실행 중 계량",
   "Settled to what it used": "사용량대로 정산",
-  "When you submit a job, a hold is placed on your balance. GPU time is metered while the job runs; when it ends you pay for what it used and the rest of the hold is released.": "작업을 제출하면 잔액에 일정 금액이 보류됩니다. 작업이 실행되는 동안 GPU 시간이 계량되고, 끝나면 사용한 만큼만 지불하며 나머지 보류 금액은 해제됩니다."
+  "When you submit a job, a hold is placed on your balance. GPU time is metered while the job runs; when it ends you pay for what it used and the rest of the hold is released.": "작업을 제출하면 잔액에 일정 금액이 보류됩니다. 작업이 실행되는 동안 GPU 시간이 계량되고, 끝나면 사용한 만큼만 지불하며 나머지 보류 금액은 해제됩니다.",
+  "UnifyAI products": "UnifyAI 제품",
+  "This site": "현재 사이트",
+  "06 / ALL PRODUCTS": "06 / 전체 제품",
+  "Six products.\n[One UnifyAI.]": "여섯 가지 제품.\n[하나의 UnifyAI.]",
+  "Unify Compute is one of six UnifyAI products. Each one has its own site.": "Unify Compute는 UnifyAI의 여섯 가지 제품 중 하나입니다. 제품마다 자체 사이트가 있습니다.",
+  "One API key for 300+ AI models": "API 키 하나로 300개 이상의 AI 모델",
+  "See and control how your company uses AI": "회사의 AI 사용 현황을 파악하고 관리",
+  "Run AI jobs on GPUs on demand": "필요할 때 GPU에서 AI 작업 실행",
+  "Expert training and evaluation data": "전문가가 만든 학습 및 평가 데이터",
+  "Lock GPU capacity ahead of time": "GPU 용량을 미리 확보",
+  "AI that improves from your team's corrections": "팀의 수정 사항으로 개선되는 AI"
 }

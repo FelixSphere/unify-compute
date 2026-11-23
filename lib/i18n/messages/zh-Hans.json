@@ -208,5 +208,16 @@
   "Held at submit": "提交时冻结",
   "Metered while it runs": "运行时计量",
   "Settled to what it used": "按实际用量结算",
-  "When you submit a job, a hold is placed on your balance. GPU time is metered while the job runs; when it ends you pay for what it used and the rest of the hold is released.": "提交作业时，会在你的余额上冻结一笔金额。作业运行期间按 GPU 时间计量；结束时你只为实际用量付费，其余冻结金额随即释放。"
+  "When you submit a job, a hold is placed on your balance. GPU time is metered while the job runs; when it ends you pay for what it used and the rest of the hold is released.": "提交作业时，会在你的余额上冻结一笔金额。作业运行期间按 GPU 时间计量；结束时你只为实际用量付费，其余冻结金额随即释放。",
+  "UnifyAI products": "UnifyAI 产品",
+  "This site": "当前站点",
+  "06 / ALL PRODUCTS": "06 / 全部产品",
+  "Six products.\n[One UnifyAI.]": "六款产品。\n[同一个 UnifyAI。]",
+  "Unify Compute is one of six UnifyAI products. Each one has its own site.": "Unify Compute 是 UnifyAI 六款产品之一。每款产品都有自己的网站。",
+  "One API key for 300+ AI models": "一个 API 密钥，接入 300 多个 AI 模型",
+  "See and control how your company uses AI": "看清并管控公司的 AI 使用情况",
+  "Run AI jobs on GPUs on demand": "按需在 GPU 上运行 AI 作业",
+  "Expert training and evaluation data": "专家级训练与评测数据",
+  "Lock GPU capacity ahead of time": "提前锁定 GPU 算力",
+  "AI that improves from your team's corrections": "从团队的纠正中不断改进的 AI"
 }

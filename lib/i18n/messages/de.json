@@ -208,5 +208,16 @@
   "Held at submit": "Beim Einreichen reserviert",
   "Metered while it runs": "Während der Laufzeit gemessen",
   "Settled to what it used": "Nach Verbrauch abgerechnet",
-  "When you submit a job, a hold is placed on your balance. GPU time is metered while the job runs; when it ends you pay for what it used and the rest of the hold is released.": "Wenn Sie einen Job einreichen, wird ein Betrag auf Ihrem Guthaben reserviert. Die GPU-Zeit wird während der Laufzeit gemessen; am Ende zahlen Sie, was verbraucht wurde, und der Rest der Reservierung wird freigegeben."
+  "When you submit a job, a hold is placed on your balance. GPU time is metered while the job runs; when it ends you pay for what it used and the rest of the hold is released.": "Wenn Sie einen Job einreichen, wird ein Betrag auf Ihrem Guthaben reserviert. Die GPU-Zeit wird während der Laufzeit gemessen; am Ende zahlen Sie, was verbraucht wurde, und der Rest der Reservierung wird freigegeben.",
+  "UnifyAI products": "UnifyAI-Produkte",
+  "This site": "Diese Website",
+  "06 / ALL PRODUCTS": "06 / ALLE PRODUKTE",
+  "Six products.\n[One UnifyAI.]": "Sechs Produkte.\n[Ein UnifyAI.]",
+  "Unify Compute is one of six UnifyAI products. Each one has its own site.": "Unify Compute ist eines von sechs UnifyAI-Produkten. Jedes hat seine eigene Website.",
+  "One API key for 300+ AI models": "Ein API-Schlüssel für über 300 KI-Modelle",
+  "See and control how your company uses AI": "Sehen und steuern, wie Ihr Unternehmen KI nutzt",
+  "Run AI jobs on GPUs on demand": "KI-Jobs nach Bedarf auf GPUs ausführen",
+  "Expert training and evaluation data": "Trainings- und Evaluierungsdaten von Experten",
+  "Lock GPU capacity ahead of time": "GPU-Kapazität im Voraus sichern",
+  "AI that improves from your team's corrections": "KI, die aus den Korrekturen Ihres Teams lernt"
 }

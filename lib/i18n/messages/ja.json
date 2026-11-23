@@ -208,5 +208,16 @@
   "Held at submit": "送信時に確保",
   "Metered while it runs": "実行中に計測",
   "Settled to what it used": "使用分で精算",
-  "When you submit a job, a hold is placed on your balance. GPU time is metered while the job runs; when it ends you pay for what it used and the rest of the hold is released.": "ジョブを送信すると、残高に一定額の確保（ホールド）がかかります。実行中は GPU 時間が計測され、終了時には使用した分だけを支払い、残りの確保分は解放されます。"
+  "When you submit a job, a hold is placed on your balance. GPU time is metered while the job runs; when it ends you pay for what it used and the rest of the hold is released.": "ジョブを送信すると、残高に一定額の確保（ホールド）がかかります。実行中は GPU 時間が計測され、終了時には使用した分だけを支払い、残りの確保分は解放されます。",
+  "UnifyAI products": "UnifyAI の製品",
+  "This site": "このサイト",
+  "06 / ALL PRODUCTS": "06 / すべての製品",
+  "Six products.\n[One UnifyAI.]": "6 つの製品。\n[ひとつの UnifyAI。]",
+  "Unify Compute is one of six UnifyAI products. Each one has its own site.": "Unify Compute は UnifyAI の 6 つの製品のひとつです。製品ごとにサイトがあります。",
+  "One API key for 300+ AI models": "1 つの API キーで 300 以上の AI モデル",
+  "See and control how your company uses AI": "社内の AI 利用を可視化して管理",
+  "Run AI jobs on GPUs on demand": "AI ジョブを GPU でオンデマンド実行",
+  "Expert training and evaluation data": "専門家による学習・評価データ",
+  "Lock GPU capacity ahead of time": "GPU キャパシティを事前に確保",
+  "AI that improves from your team's corrections": "チームの修正から学んで改善する AI"
 }
