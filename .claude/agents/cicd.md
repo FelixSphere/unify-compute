@@ -174,6 +174,15 @@ account. Two consequences:
   site-only step. Known, cosmetic: at 375 px the placement row ellipsises
   `us-east-1`, and `/ar` panel captions are letter-spaced Arabic. Records:
   `deploy/releases/2026-11-21-*site-motion-redesign.md`.
+- **2026-11-23, both hosts on cross-product-links (#164):** compute-api
+  `577de6b8…` (unchanged) and site `b0347e7d…` (`8061013`, footer "UnifyAI
+  products" block on every public page + homepage section 06). Staging run
+  45118606281, production 45119402513. No migration. Both hosts'
+  PREVIOUS_RELEASE is `577de6b8…` / `196535d2…`, so `mode=rollback` is a
+  site-only step. `deploy/site/smoke.sh` targets the container (it also
+  answers the app host); against a public site host its app-host checks
+  fail on every build, so compare only the blocks a release changes.
+  Records: `deploy/releases/2026-11-23-*cross-product-links.md`.
 - **Your AWS credentials in a cloud session:** as of 2026-11-09 there are
   none. `AWS_ACCESS_KEY_ID` is a proxy placeholder (`prox…`), and AWS answers
   `InvalidClientTokenId`; a substituted placeholder cannot work for SigV4.
