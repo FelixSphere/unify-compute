@@ -127,7 +127,7 @@ done
 # as a link. The homepage repeats them as cards, so its count is double.
 for page in / /start /privacy /marketplace /zh /ar/start; do
   curl -s "$base$page" > "$tmp/products"
-  case "$page" in /zh*) prefix=zh ;; /ar*) prefix=ar ;; *) prefix= ;; esac
+  case "$page" in /zh*) prefix='zh' ;; /ar*) prefix='ar' ;; *) prefix='' ;; esac
   for site in https://www.unifyapi.ai https://www.gateway.unifyai.us https://data.unifyai.us https://grid.unifyai.us https://unifyai.us; do
     grep -qF "<a class=\"product-entry\" href=\"$site/$prefix\">" "$tmp/products" \
       || { echo "FAIL $page: footer has no product link to $site/$prefix"; fail=1; }
